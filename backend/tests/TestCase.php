@@ -3,6 +3,7 @@
 namespace Tests;
 
 use App\Models\Axe;
+use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Spatie\Permission\PermissionRegistrar;
 use Spatie\Permission\Models\Permission;
@@ -12,6 +13,14 @@ abstract class TestCase extends BaseTestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Les modèles vivent dans App\Modules\<Module>\Models mais les factories
+        // sont à plat dans Database\Factories (ex: HabilitationFactory).
+        Factory::guessFactoryNamesUsing(function (string $modelName): string {
+            $short = substr($modelName, (int) strrpos($modelName, '\\') + 1);
+
+            return 'Database\\Factories\\' . $short . 'Factory';
+        });
 
         // Désactiver MFA pour tous les tests
         config(['mfa.step_up_enabled' => false]);

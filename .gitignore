@@ -26,3 +26,7 @@ CONVENTIONS.md
 # agents-library [end]
 
 CLAUDE.md
+node_modules
+
+.dev-*.log
+.tanstack/
