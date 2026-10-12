@@ -4,6 +4,8 @@ namespace App\Modules\Hse\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Modules\Enterprise\Models\Enterprise;
+use App\Modules\Enterprise\Models\Site;
 
 class EpiStock extends Model
 {

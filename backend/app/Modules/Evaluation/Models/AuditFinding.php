@@ -10,6 +10,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Activitylog\LogOptions;
+use App\Modules\Enterprise\Models\User;
+use App\Modules\Improvement\Models\NonConformity;
+use App\Modules\Processes\Models\Process;
 
 class AuditFinding extends Model
 {

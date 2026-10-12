@@ -8,6 +8,7 @@ use App\Traits\HasReference;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Modules\Processes\Models\Process;
 
 
 class AuditChecklistItem extends Model

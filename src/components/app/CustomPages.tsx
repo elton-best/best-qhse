@@ -4,11 +4,16 @@ import { Building2, Check, Plus, CreditCard, Download, ExternalLink, Minus, Rota
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { updateMyProfile } from "@/lib/profile.functions";
+import { backendApi } from "@/integrations/backend/client";
+import {
+  downloadTaskReport, fetchTaskHistory, useMyTasks, useTaskTracking,
+  type MyTask, type MyTaskStatus, type TaskHistoryEntry,
+} from "@/integrations/backend/planning";
 import { historyOf, RECORDS_KEY, useRecords, useSaveRecord, useTransition, type QRecord } from "@/hooks/use-records";
 import { useEnterpriseNorms, useNorm, fetchNormChapters, flattenNormSections, type NormSection } from "@/integrations/backend/norms";
-import { useDocumentWorkflow, usePendingDocuments } from "@/integrations/backend/documents";
-import { downloadCsv, useCurrentSite, useWorkspace, type Task } from "@/hooks/use-workspace";
-import { KINDS, sectionForKind } from "./sections";
+import { useDocumentWorkflow, usePendingDocuments, useWorkflowHistory, previewDocumentBlob, downloadDocumentBlob, type PendingDocument } from "@/integrations/backend/documents";
+import { downloadCsv, useCurrentSite, useWorkspace } from "@/hooks/use-workspace";
+import { sectionForKind } from "./sections";
 import { RecordActions, StatusBadge } from "./SectionView";
 import { ListLoading } from "./LoadingState";
 
@@ -47,98 +52,416 @@ function OpenLink({ r }: { r: QRecord }) {
   );
 }
 
-// ---------- Mes tâches ----------
-const TASK_FILTERS: { id: Task["type"] | ""; label: string }[] = [
-  { id: "", label: "Toutes" }, { id: "retard", label: "En retard" }, { id: "action", label: "Actions" },
-  { id: "verification", label: "À vérifier" }, { id: "approbation", label: "À approuver" }, { id: "audit", label: "Audits" },
-  { id: "indicateur", label: "Indicateurs" }, { id: "formation", label: "Formations & habilitations" }, { id: "autre", label: "Autres" },
+// ---------- Mes tâches (backend Laravel GET /my-tasks, parité Vue) ----------
+const MY_TASK_STATUS_OPTIONS = [
+  { value: "all", label: "Tous les statuts" },
+  { value: "non_demarre", label: "Non démarré" },
+  { value: "en_cours", label: "En cours" },
+  { value: "termine", label: "Terminé" },
+] as const;
+
+const MY_TASK_TYPE_OPTIONS = [
+  { value: "", label: "Tous les types" },
+  { value: "action", label: "Action" },
+  { value: "audit", label: "Audit" },
+  { value: "formation", label: "Formation" },
+  { value: "communication", label: "Communication" },
+  { value: "non_conformity", label: "Non-conformité" },
+  { value: "objective", label: "Objectif" },
+  { value: "risk", label: "Risque" },
+  { value: "plan_action", label: "Plan d'action" },
+  { value: "maintenance_plan", label: "Maintenance" },
+  { value: "calibration_plan", label: "Calibration" },
+  { value: "operational_project_activity", label: "Activité projet" },
+  { value: "operational_project_task", label: "Tâche projet" },
 ];
 
+const MY_TASK_STATUS_TONE: Record<string, string> = {
+  non_demarre: "bg-secondary text-muted-foreground",
+  en_cours: "bg-info/15 text-info",
+  termine: "bg-success/15 text-success",
+};
+
+function myTaskStatusLabel(status: string): string {
+  return ({ non_demarre: "Non démarré", en_cours: "En cours", termine: "Terminé" } as Record<string, string>)[status] ?? status;
+}
+
+function myTaskTypeLabel(type: string): string {
+  return MY_TASK_TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type;
+}
+
+const fmtDay = (value?: string | null) => {
+  if (!value) return "—";
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("fr-FR");
+};
+
+const monthLabel = (month: string) => {
+  const date = new Date(`${month}-01T00:00:00`);
+  return Number.isNaN(date.getTime())
+    ? month
+    : date.toLocaleDateString("fr-FR", { year: "numeric", month: "long" });
+};
+
+const shiftMonth = (month: string, delta: number) => {
+  const [y, m] = month.split("-").map(Number);
+  const date = new Date(y || 2026, (m || 1) - 1 + delta, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+};
+
 export function TasksPage() {
-  const { ws, isLoading } = useWs();
-  const [filter, setFilter] = useState<Task["type"] | "">("");
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [status, setStatus] = useState<string>("all");
+  const [type, setType] = useState<string>("");
+  const [processId, setProcessId] = useState<string>("");
   const [q, setQ] = useState("");
-  const list = ws.tasks.filter((t) => (!filter || t.type === filter) && (!q || `${t.record.reference} ${t.record.title}`.toLowerCase().includes(q.toLowerCase())));
+  const [processes, setProcesses] = useState<{ id: string | number; name: string }[]>([]);
+  const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
+  const [history, setHistory] = useState<TaskHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [trackingTask, setTrackingTask] = useState<MyTask | null>(null);
+  const [trackingForm, setTrackingForm] = useState<{ status: MyTaskStatus; progress_rate: number; notes: string }>({
+    status: "non_demarre", progress_rate: 0, notes: "",
+  });
+  const [reportBusy, setReportBusy] = useState<string | null>(null);
+
+  const { data: tasks = [], isLoading, isError, refetch } = useMyTasks({
+    month,
+    status: status === "all" ? undefined : status,
+    type: type || undefined,
+    process_id: processId || undefined,
+  });
+  const tracking = useTaskTracking();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const payload = await backendApi.request<unknown>("processes?per_page=200");
+        const root = (payload ?? {}) as Record<string, unknown>;
+        const raw = root["data"] ?? payload;
+        const items = Array.isArray(raw) ? raw : [];
+        if (!cancelled) {
+          setProcesses(
+            (items as Record<string, unknown>[]).map((item) => {
+              const source = (item ?? {}) as Record<string, unknown>;
+              const attrs = (source["attributes"] ?? source) as Record<string, unknown>;
+              return {
+                id: (source["id"] ?? attrs["id"] ?? "") as string | number,
+                name: String(attrs["title"] ?? attrs["name"] ?? attrs["code"] ?? `Processus ${String(source["id"] ?? "")}`),
+              };
+            }),
+          );
+        }
+      } catch {
+        if (!cancelled) setProcesses([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const filtered = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return [...tasks]
+      .filter((t) => !query || `${t.title} ${t.responsible ?? ""} ${t.process_name ?? ""}`.toLowerCase().includes(query))
+      .sort((a, b) => (a.deadline ?? "9999").localeCompare(b.deadline ?? "9999"));
+  }, [tasks, q]);
+
+  const openTracking = (task: MyTask) => {
+    setTrackingTask(task);
+    setTrackingForm({ status: (task.status as MyTaskStatus) || "non_demarre", progress_rate: task.progress_rate ?? 0, notes: "" });
+  };
+
+  const progressBounds = trackingForm.status === "non_demarre"
+    ? { min: 0, max: 0, disabled: true }
+    : trackingForm.status === "termine"
+      ? { min: 100, max: 100, disabled: true }
+      : { min: 1, max: 99, disabled: false };
+
+  const submitTracking = async () => {
+    if (!trackingTask) return;
+    const rate = progressBounds.disabled ? progressBounds.min : trackingForm.progress_rate;
+    try {
+      await tracking.mutateAsync({ type: trackingTask.type, id: trackingTask.id, form: { status: trackingForm.status, progress_rate: rate, notes: trackingForm.notes || undefined } });
+      toast.success("Suivi mis à jour");
+      setTrackingTask(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Mise à jour impossible.");
+    }
+  };
+
+  const toggleHistory = async (task: MyTask) => {
+    const key = `${task.type}-${task.id}`;
+    if (expandedHistory === key) {
+      setExpandedHistory(null);
+      return;
+    }
+    setExpandedHistory(key);
+    setHistory([]);
+    setHistoryLoading(true);
+    try {
+      setHistory(await fetchTaskHistory(task.type, task.id));
+    } catch {
+      toast.error("Historique indisponible.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const downloadReport = async (task: MyTask) => {
+    const key = `${task.type}-${task.id}`;
+    setReportBusy(key);
+    try {
+      await downloadTaskReport(task.type, task.id);
+      toast.success("Rapport téléchargé");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Téléchargement impossible.");
+    } finally {
+      setReportBusy(null);
+    }
+  };
+
+  const exportCsv = () => {
+    downloadCsv("mes-taches.csv", [
+      ["Activité", "Type", "Début", "Fin", "Échéance", "Responsable", "Statut", "Taux (%)"],
+      ...filtered.map((t) => [t.title, myTaskTypeLabel(t.type), fmtDay(t.start_date), fmtDay(t.end_date), fmtDay(t.deadline), t.responsible ?? "—", myTaskStatusLabel(t.status), t.progress_rate ?? 0]),
+    ]);
+    toast.success("Export téléchargé");
+  };
+
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-8">
-      <Header title="Mes tâches" desc="Tout ce qui attend une action de votre part : actions, validations, audits, indicateurs, formations et échéances.">
+      <Header title="Mes tâches" desc="Suivi mensuel de tout ce qui vous est confié : actions, audits, formations, objectifs, risques et projets.">
+        <button onClick={() => void refetch()} className={ghostBtn}><RotateCcw className="h-4 w-4" /> Actualiser</button>
+        <button onClick={exportCsv} disabled={filtered.length === 0} className={`${ghostBtn} disabled:opacity-50`}><Download className="h-4 w-4" /> Exporter</button>
         <Link to="/app/$section" params={{ section: "actions" }} search={{ new: 1 }} className={primaryBtn}><Plus className="h-4 w-4" /> Créer une tâche</Link>
       </Header>
-      <select
-        aria-label="Filtrer les tâches"
-        value={filter}
-        onChange={(e) => setFilter(e.target.value as Task["type"] | "")}
-        className="h-11 w-full rounded-xl border border-input bg-card px-4 text-sm font-semibold outline-none focus:border-primary sm:w-72"
-      >
-        {TASK_FILTERS.map((f) => (
-          <option key={f.id} value={f.id}>{f.label} ({f.id ? ws.tasks.filter((t) => t.type === f.id).length : ws.tasks.length})</option>
-        ))}
-      </select>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4">
+        <button onClick={() => setMonth(shiftMonth(month, -1))} className={ghostBtn} aria-label="Mois précédent">←</button>
+        <p className="min-w-[150px] text-center font-display font-bold capitalize text-foreground">{monthLabel(month)}</p>
+        <button onClick={() => setMonth(shiftMonth(month, 1))} className={ghostBtn} aria-label="Mois suivant">→</button>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <select aria-label="Filtrer par statut" value={status} onChange={(e) => setStatus(e.target.value)} className="h-11 rounded-xl border border-input bg-card px-4 text-sm font-semibold outline-none focus:border-primary">
+          {MY_TASK_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <select aria-label="Filtrer par type" value={type} onChange={(e) => setType(e.target.value)} className="h-11 rounded-xl border border-input bg-card px-4 text-sm font-semibold outline-none focus:border-primary">
+          {MY_TASK_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        {processes.length > 0 && (
+          <select aria-label="Filtrer par processus" value={processId} onChange={(e) => setProcessId(e.target.value)} className="h-11 rounded-xl border border-input bg-card px-4 text-sm font-semibold outline-none focus:border-primary">
+            <option value="">Tous les processus</option>
+            {processes.map((p) => <option key={String(p.id)} value={String(p.id)}>{p.name}</option>)}
+          </select>
+        )}
+        {(status !== "all" || type || processId) && (
+          <button onClick={() => { setStatus("all"); setType(""); setProcessId(""); }} className={ghostBtn}>Réinitialiser</button>
+        )}
+      </div>
       <div className="relative">
         <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-primary" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher une tâche par titre ou référence…" className="h-11 w-full rounded-xl border border-input bg-card pl-11 pr-4 text-sm outline-none focus:border-primary" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher une tâche par titre, responsable ou processus…" className="h-11 w-full rounded-xl border border-input bg-card pl-11 pr-4 text-sm outline-none focus:border-primary" />
       </div>
-      {isLoading ? <ListLoading rows={5} /> : list.length === 0 ? (
+
+      {isError && <p className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">Impossible de charger vos tâches depuis le backend Laravel.</p>}
+      {isLoading ? <ListLoading rows={5} /> : filtered.length === 0 ? (
         <div className="rounded-2xl border border-border bg-card p-10 text-center">
-          <p className="font-display font-bold text-foreground">Rien à traiter</p>
-          <p className="mt-1 text-sm text-muted-foreground">Aucune tâche ne correspond. Les éléments attribués, à valider ou en retard apparaîtront ici.</p>
+          <p className="font-display font-bold text-foreground">Aucune tâche pour cette période</p>
+          <p className="mt-1 text-sm text-muted-foreground">Les éléments qui vous sont attribués apparaîtront ici.</p>
         </div>
       ) : (
-        <ul className="space-y-3">
-          {list.map((t) => (
-            <li key={t.record.id} className="rounded-2xl border border-border bg-card p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-primary">{t.record.reference} · {KINDS[t.record.kind]?.singular}</p>
-                  <p className="mt-0.5 font-semibold text-foreground">{t.record.title}</p>
-                  <p className={`mt-0.5 text-xs font-semibold ${t.type === "retard" ? "text-destructive" : "text-muted-foreground"}`}>{t.reason}</p>
+        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[980px] text-sm">
+              <thead className="border-b border-border bg-background text-left text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                <tr><th className="px-4 py-3">Activité</th><th className="px-4 py-3">Type</th><th className="px-4 py-3">Début</th><th className="px-4 py-3">Fin</th><th className="px-4 py-3">Échéance</th><th className="px-4 py-3">Responsable</th><th className="px-4 py-3">Statut</th><th className="px-4 py-3">Taux</th><th className="px-4 py-3 text-right">Suivi</th></tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filtered.map((t) => {
+                  const key = `${t.type}-${t.id}`;
+                  return (
+                    <>
+                      <tr key={key} className="align-top hover:bg-primary-soft/30">
+                        <td className="max-w-[240px] px-4 py-3 font-semibold text-foreground">{t.title}{t.process_name && <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{t.process_name}</span>}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{myTaskTypeLabel(t.type)}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{fmtDay(t.start_date)}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{fmtDay(t.end_date)}</td>
+                        <td className="whitespace-nowrap px-4 py-3 font-semibold text-foreground">{fmtDay(t.deadline)}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{t.responsible ?? "—"}</td>
+                        <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${MY_TASK_STATUS_TONE[t.status] ?? "bg-secondary text-muted-foreground"}`}>{myTaskStatusLabel(t.status)}</span></td>
+                        <td className="min-w-[130px] px-4 py-3"><div className="flex items-center gap-2"><div className="h-2 flex-1 rounded-full bg-secondary"><div className="h-2 rounded-full bg-primary" style={{ width: `${t.progress_rate ?? 0}%` }} /></div><span className="text-xs font-bold">{t.progress_rate ?? 0}%</span></div></td>
+                        <td className="px-4 py-3"><div className="flex justify-end gap-2">
+                          <button disabled={!t.tracking_available} title={t.tracking_available ? "Mettre à jour le suivi" : "Hors fenêtre d'activation"} onClick={() => openTracking(t)} className="h-8 rounded-xl border border-border px-3 text-xs font-semibold hover:border-primary disabled:opacity-40">Suivi</button>
+                          {t.has_tracking && <button onClick={() => void toggleHistory(t)} className="h-8 rounded-xl border border-border px-3 text-xs font-semibold hover:border-primary">{expandedHistory === key ? "Masquer" : "Historique"}</button>}
+                          {t.status === "termine" && <button disabled={reportBusy === key} onClick={() => void downloadReport(t)} className="h-8 rounded-xl border border-border px-3 text-xs font-semibold hover:border-primary disabled:opacity-40"><Download className="h-3.5 w-3.5" /></button>}
+                        </div></td>
+                      </tr>
+                      {expandedHistory === key && (
+                        <tr key={`${key}-history`}><td colSpan={9} className="bg-background/60 px-4 py-3">
+                          {historyLoading ? <p className="text-xs text-muted-foreground">Chargement de l'historique…</p> : history.length === 0 ? <p className="text-xs text-muted-foreground">Aucun historique.</p> : (
+                            <ul className="space-y-1 border-l-2 border-primary/20 pl-3 text-xs">
+                              {history.map((h, i) => <li key={i}><span className="text-muted-foreground">{new Date(h.changed_at).toLocaleString("fr-FR")}</span> — {h.status_old ?? "—"} → <strong>{h.status_new ?? "—"}</strong> ({h.rate_old ?? 0}% → {h.rate_new ?? 0}%) {h.changed_by ? `par ${h.changed_by}` : ""}{h.notes ? ` — ${h.notes}` : ""}</li>)}
+                            </ul>
+                          )}
+                        </td></tr>
+                      )}
+                    </>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <ul className="divide-y divide-border md:hidden">
+            {filtered.map((t) => (
+              <li key={`${t.type}-${t.id}`} className="p-4">
+                <p className="font-semibold text-foreground">{t.title}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{myTaskTypeLabel(t.type)} · Échéance {fmtDay(t.deadline)} · {t.progress_rate ?? 0}%</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button disabled={!t.tracking_available} onClick={() => openTracking(t)} className="h-9 rounded-xl border border-border px-3 text-xs font-semibold disabled:opacity-40">Suivi</button>
+                  {t.status === "termine" && <button disabled={reportBusy === `${t.type}-${t.id}`} onClick={() => void downloadReport(t)} className="h-9 rounded-xl border border-border px-3 text-xs font-semibold disabled:opacity-40">Rapport</button>}
                 </div>
-                <div className="flex items-center gap-2"><StatusBadge kind={t.record.kind} status={t.record.status} /><OpenLink r={t.record} /></div>
-              </div>
-              <div className="mt-3"><RecordActions record={t.record} compact /></div>
-            </li>
-          ))}
-        </ul>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {trackingTask && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-xl">
+            <h2 className="font-display text-lg font-bold text-foreground">Mise à jour du suivi</h2>
+            <p className="mt-1 text-sm text-muted-foreground"><strong className="text-foreground">{trackingTask.title}</strong> · {myTaskTypeLabel(trackingTask.type)}</p>
+            <div className="mt-4 space-y-1">
+              {(["non_demarre", "en_cours", "termine"] as MyTaskStatus[]).map((s) => (
+                <label key={s} className="flex cursor-pointer items-center gap-2 py-1 text-sm font-semibold">
+                  <input type="radio" name="task-status" checked={trackingForm.status === s} onChange={() => setTrackingForm((f) => ({ ...f, status: s, progress_rate: s === "non_demarre" ? 0 : s === "termine" ? 100 : f.progress_rate === 0 || f.progress_rate === 100 ? 50 : f.progress_rate }))} className="h-4 w-4 accent-primary" /> {myTaskStatusLabel(s)}
+                </label>
+              ))}
+            </div>
+            <div className="mt-4">
+              <label className="mb-1 block text-sm font-bold">Taux de progression : {progressBounds.disabled ? progressBounds.min : trackingForm.progress_rate}%</label>
+              <input type="range" min={progressBounds.min} max={progressBounds.max} step={1} disabled={progressBounds.disabled} value={progressBounds.disabled ? progressBounds.min : trackingForm.progress_rate} onChange={(e) => setTrackingForm((f) => ({ ...f, progress_rate: Number(e.target.value) }))} className="w-full accent-primary disabled:opacity-40" />
+            </div>
+            <textarea value={trackingForm.notes} onChange={(e) => setTrackingForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Remarques (facultatif)" className="mt-4 h-24 w-full rounded-xl border border-input bg-background p-3 text-sm outline-none focus:border-primary" />
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setTrackingTask(null)} className="h-10 rounded-xl border border-border px-4 text-sm font-semibold">Annuler</button>
+              <button disabled={tracking.isPending} onClick={() => void submitTracking()} className="h-10 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:opacity-50">{tracking.isPending ? "Enregistrement…" : "Enregistrer"}</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
 }
 
 // ---------- Vérification / Approbation ----------
+function formatDocVersion(version: string | null | undefined): string {
+  const value = String(version ?? "1").trim() || "1";
+  return value.replace(/\.0+$/, "");
+}
+
+function businessStatusLabel(document: PendingDocument): string {
+  const status = document.workflow_status || document.status || "draft";
+  const version = formatDocVersion(document.version);
+  if (status === "approved") return `Validé - version ${version}`;
+  if (status === "pending_approval") return `Version ${version} - en attente de validation`;
+  if (status === "pending_verification") return `Version ${version} - en cours de vérification`;
+  if (status === "awaiting_submitter_confirmation") return "Rejeté - décision soumissionnaire requise";
+  if (status === "rejected") return "Rejeté";
+  if (status === "obsolete") return "Obsolète";
+  if (status === "draft") return "Brouillon en attente de vérification";
+  return status;
+}
+
+function errorStatus(error: unknown): number | null {
+  if (error && typeof error === "object" && "status" in error) {
+    const status = (error as { status?: unknown }).status;
+    return typeof status === "number" ? status : null;
+  }
+  return null;
+}
+
 export function QueuePage({ mode }: { mode: "verification" | "approbation" }) {
   const workflowStatus = mode === "verification" ? "pending_verification" : "pending_approval";
-  const { data: documents = [], isLoading, isError } = usePendingDocuments(workflowStatus);
+  const { data: documents = [], isLoading, isError, error, refetch } = usePendingDocuments(workflowStatus);
   const workflow = useDocumentWorkflow();
   const [open, setOpen] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const { data: history = [], isLoading: historyLoading } = useWorkflowHistory(open);
   const busy = workflow.verify.isPending || workflow.approve.isPending || workflow.reject.isPending;
+  const forbidden = isError && errorStatus(error) === 403;
+
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
   const verify = async (id: string) => {
     try {
       await workflow.verify.mutateAsync(id);
-      toast.success("Document vérifié et transmis à l'approbation");
+      toast.success("Vérification validée avec succès");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "La vérification a échoué.");
+      toast.error(error instanceof Error ? error.message : "Erreur lors de la vérification.");
     }
   };
   const approve = async (id: string) => {
     try {
       await workflow.approve.mutateAsync({ id });
-      toast.success("Document approuvé");
+      toast.success("Document validé avec succès");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "L'approbation a échoué.");
+      toast.error(error instanceof Error ? error.message : "Erreur lors de la validation.");
     }
   };
   const reject = async () => {
     if (!rejecting || !rejectionReason.trim()) return;
     try {
       await workflow.reject.mutateAsync({ id: rejecting, rejection_reason: rejectionReason.trim() });
-      toast.success("Document rejeté avec un motif");
+      toast.success("Rejet enregistré. En attente de la confirmation du soumissionnaire.");
       setRejecting(null);
       setRejectionReason("");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Le rejet a échoué.");
+      toast.error(error instanceof Error ? error.message : "Erreur lors du rejet.");
+    }
+  };
+
+  const openPreview = async (id: string) => {
+    setPreviewId(id);
+    setPreviewLoading(true);
+    setPreviewError(null);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    try {
+      const blob = await previewDocumentBlob(id);
+      setPreviewUrl(URL.createObjectURL(blob));
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : "Aperçu indisponible.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+  const closePreview = () => {
+    setPreviewId(null);
+    setPreviewError(null);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+  };
+  const downloadPreview = async () => {
+    if (!previewId) return;
+    const document = documents.find((item) => item.id === previewId);
+    try {
+      const blob = await downloadDocumentBlob(previewId);
+      const url = URL.createObjectURL(blob);
+      const anchor = window.document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${document?.code ?? "document"}.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erreur lors du téléchargement.");
     }
   };
 
@@ -148,7 +471,13 @@ export function QueuePage({ mode }: { mode: "verification" | "approbation" }) {
         title={mode === "verification" ? "Vérification" : "Approbation"}
         desc={mode === "verification" ? "File Laravel des documents soumis au contrôle. Vérifiez, rejetez avec un motif ou transmettez à l'approbation." : "File Laravel des documents vérifiés prêts à décision. Approuvez ou rejetez avec traçabilité."}
       />
-      {isError && <p className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">Impossible de charger la file documentaire. Votre permission et la connexion au backend sont nécessaires.</p>}
+      {forbidden && <p className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm text-warning-foreground">Action non autorisée. Vous n'avez pas les permissions nécessaires.</p>}
+      {isError && !forbidden && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+          <span>Impossible de charger la file documentaire. Votre permission et la connexion au backend sont nécessaires.</span>
+          <button onClick={() => void refetch()} className="h-9 rounded-xl border border-destructive/30 px-3 text-xs font-semibold">Réessayer</button>
+        </div>
+      )}
       {isLoading ? <ListLoading rows={5} /> : documents.length === 0 ? (
         <div className="rounded-2xl border border-border bg-card p-10 text-center">
           <p className="font-display font-bold text-foreground">File vide</p>
@@ -159,7 +488,7 @@ export function QueuePage({ mode }: { mode: "verification" | "approbation" }) {
           <div className="hidden overflow-x-auto md:block">
             <table className="w-full min-w-[980px] text-sm">
               <thead className="border-b border-border bg-background text-left text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                <tr><th className="px-4 py-3">Code</th><th className="px-4 py-3">Titre</th><th className="px-4 py-3">Processus</th><th className="px-4 py-3">Source</th><th className="px-4 py-3">Auteur</th><th className="px-4 py-3">Statut</th><th className="px-4 py-3 text-right">Actions</th></tr>
+                <tr><th className="px-4 py-3">Code</th><th className="px-4 py-3">Titre</th><th className="px-4 py-3">Processus</th><th className="px-4 py-3">Source</th><th className="px-4 py-3">Auteur</th><th className="px-4 py-3">{mode === "verification" ? "Approbateur" : "Vérificateur"}</th><th className="px-4 py-3">Statut</th><th className="px-4 py-3 text-right">Actions</th></tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {documents.map((document) => (
@@ -169,10 +498,12 @@ export function QueuePage({ mode }: { mode: "verification" | "approbation" }) {
                     <td className="px-4 py-3 text-muted-foreground">{document.process_label}</td>
                     <td className="px-4 py-3 text-muted-foreground">{document.source_label}</td>
                     <td className="px-4 py-3 text-muted-foreground">{document.author_name}</td>
-                    <td className="px-4 py-3"><span className="rounded-full bg-primary-soft px-2.5 py-1 text-xs font-bold text-primary">{mode === "verification" ? "À vérifier" : "À approuver"}</span></td>
+                    <td className="px-4 py-3 text-muted-foreground">{mode === "verification" ? document.approver_name : document.verifier_name}</td>
+                    <td className="px-4 py-3"><span className="rounded-full bg-primary-soft px-2.5 py-1 text-xs font-bold text-primary">{businessStatusLabel(document)}</span></td>
                     <td className="px-4 py-3"><div className="flex justify-end gap-2">
-                      <button disabled={busy} onClick={() => mode === "verification" ? void verify(document.id) : void approve(document.id)} className="h-8 rounded-xl bg-success px-3 text-xs font-semibold text-success-foreground disabled:opacity-50">{mode === "verification" ? "Valider" : "Approuver"}</button>
-                      <button disabled={busy} onClick={() => { setRejecting(document.id); setRejectionReason(""); }} className="h-8 rounded-xl border border-destructive/30 px-3 text-xs font-semibold text-destructive disabled:opacity-50">Rejeter</button>
+                      <button disabled={busy || forbidden} onClick={() => mode === "verification" ? void verify(document.id) : void approve(document.id)} className="h-8 rounded-xl bg-success px-3 text-xs font-semibold text-success-foreground disabled:opacity-50">{mode === "verification" ? "Valider" : "Approuver"}</button>
+                      <button disabled={busy || forbidden} onClick={() => void openPreview(document.id)} className="h-8 rounded-xl border border-border px-3 text-xs font-semibold hover:border-primary disabled:opacity-50">Visualiser</button>
+                      <button disabled={busy || forbidden} onClick={() => { setRejecting(document.id); setRejectionReason(""); }} className="h-8 rounded-xl border border-destructive/30 px-3 text-xs font-semibold text-destructive disabled:opacity-50">Rejeter</button>
                       <button onClick={() => setOpen(open === document.id ? null : document.id)} className="h-8 rounded-xl border border-border px-3 text-xs font-semibold hover:border-primary">{open === document.id ? "Masquer" : "Détails"}</button>
                     </div></td>
                   </tr>
@@ -187,8 +518,9 @@ export function QueuePage({ mode }: { mode: "verification" | "approbation" }) {
                 <p className="mt-1 font-semibold text-foreground">{document.title}</p>
                 <p className="mt-1 text-xs text-muted-foreground">{document.process_label} · {document.source_label} · {document.author_name}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button disabled={busy} onClick={() => mode === "verification" ? void verify(document.id) : void approve(document.id)} className="h-9 rounded-xl bg-success px-3 text-xs font-semibold text-success-foreground disabled:opacity-50">{mode === "verification" ? "Valider" : "Approuver"}</button>
-                  <button disabled={busy} onClick={() => { setRejecting(document.id); setRejectionReason(""); }} className="h-9 rounded-xl border border-destructive/30 px-3 text-xs font-semibold text-destructive disabled:opacity-50">Rejeter</button>
+                  <button disabled={busy || forbidden} onClick={() => mode === "verification" ? void verify(document.id) : void approve(document.id)} className="h-9 rounded-xl bg-success px-3 text-xs font-semibold text-success-foreground disabled:opacity-50">{mode === "verification" ? "Valider" : "Approuver"}</button>
+                  <button disabled={busy || forbidden} onClick={() => void openPreview(document.id)} className="h-9 rounded-xl border border-border px-3 text-xs font-semibold disabled:opacity-50">Visualiser</button>
+                  <button disabled={busy || forbidden} onClick={() => { setRejecting(document.id); setRejectionReason(""); }} className="h-9 rounded-xl border border-destructive/30 px-3 text-xs font-semibold text-destructive disabled:opacity-50">Rejeter</button>
                 </div>
               </li>
             ))}
@@ -198,14 +530,30 @@ export function QueuePage({ mode }: { mode: "verification" | "approbation" }) {
 
       {open && (() => {
         const document = documents.find((item) => item.id === open);
-        return document ? <div className="rounded-2xl border border-border bg-card p-5"><div className="flex items-start justify-between gap-3"><div><p className="font-mono text-xs font-bold text-primary">{document.code}</p><h2 className="mt-1 font-display text-lg font-bold text-foreground">{document.title}</h2></div><button onClick={() => setOpen(null)} className="text-sm font-semibold text-primary">Fermer</button></div><dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-muted-foreground">Auteur</dt><dd className="font-semibold">{document.author_name}</dd></div><div><dt className="text-muted-foreground">Approbateur</dt><dd className="font-semibold">{document.approver_name}</dd></div><div><dt className="text-muted-foreground">Processus</dt><dd className="font-semibold">{document.process_label}</dd></div><div><dt className="text-muted-foreground">Source</dt><dd className="font-semibold">{document.source_label}</dd></div></dl></div> : null;
+        return document ? <div className="rounded-2xl border border-border bg-card p-5"><div className="flex items-start justify-between gap-3"><div><p className="font-mono text-xs font-bold text-primary">{document.code} · v{formatDocVersion(document.version)}</p><h2 className="mt-1 font-display text-lg font-bold text-foreground">{document.title}</h2><p className="mt-1 text-xs font-semibold text-primary">{businessStatusLabel(document)}</p></div><button onClick={() => setOpen(null)} className="text-sm font-semibold text-primary">Fermer</button></div><dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-muted-foreground">Auteur</dt><dd className="font-semibold">{document.author_name}</dd></div><div><dt className="text-muted-foreground">Approbateur</dt><dd className="font-semibold">{document.approver_name}</dd></div><div><dt className="text-muted-foreground">Vérificateur</dt><dd className="font-semibold">{document.verifier_name}</dd></div><div><dt className="text-muted-foreground">Processus</dt><dd className="font-semibold">{document.process_label}</dd></div><div><dt className="text-muted-foreground">Source</dt><dd className="font-semibold">{document.source_label}</dd></div></dl><div className="mt-4 flex flex-wrap gap-2"><button onClick={() => void openPreview(document.id)} className="h-9 rounded-xl border border-border px-3 text-xs font-semibold hover:border-primary">Visualiser le fichier</button></div><div className="mt-5 border-t border-border pt-4"><p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Historique du workflow</p>{historyLoading ? <p className="mt-2 text-sm text-muted-foreground">Chargement de l'historique…</p> : history.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">Aucun événement enregistré pour ce document.</p> : (<ol className="mt-3 space-y-3">{history.map((event) => (<li key={event.id} className="border-l-2 border-primary/40 pl-3"><p className="text-sm font-semibold text-foreground">{event.action_label}</p><p className="text-xs text-muted-foreground">{event.from_status && event.to_status ? `${event.from_status} → ${event.to_status} · ` : ""}{event.actor_name}{event.created_at ? ` · ${new Date(event.created_at).toLocaleString("fr-FR")}` : ""}</p>{event.comment && <p className="mt-1 text-sm text-muted-foreground">{event.comment}</p>}</li>))}</ol>)}</div></div> : null;
       })()}
+
+      {previewId && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-foreground/60 p-4" role="dialog" aria-modal="true" aria-label="Aperçu du document">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-background">{documents.find((item) => item.id === previewId)?.code ?? "Aperçu du document"}</p>
+            <div className="flex gap-2">
+              <button onClick={() => void downloadPreview()} className="h-9 rounded-xl bg-card px-3 text-xs font-semibold">Télécharger</button>
+              <button onClick={closePreview} className="h-9 rounded-xl bg-card px-3 text-xs font-semibold" aria-label="Fermer">Fermer</button>
+            </div>
+          </div>
+          {previewLoading ? <p className="mx-auto rounded-2xl bg-card p-8 text-sm text-muted-foreground">Chargement de l'aperçu…</p>
+            : previewError ? <div className="mx-auto w-full max-w-md rounded-2xl bg-card p-6 text-center"><p className="text-sm text-destructive">{previewError}</p><button onClick={() => void openPreview(previewId)} className="mt-3 h-9 rounded-xl border border-border px-3 text-xs font-semibold">Réessayer</button></div>
+            : previewUrl ? <iframe title="Aperçu du document" src={previewUrl} className="mx-auto h-full w-full max-w-5xl rounded-2xl bg-white" />
+            : null}
+        </div>
+      )}
 
       {rejecting && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 p-4" role="dialog" aria-modal="true">
           <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-xl">
             <h2 className="font-display text-lg font-bold text-foreground">Motif du rejet</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Le motif est enregistré dans l'historique du workflow Laravel.</p>
+            <p className="mt-1 text-sm text-muted-foreground">Le soumissionnaire recevra le motif et devra choisir : libérer le code ou garder le code pour correction.</p>
             <textarea value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} className="mt-4 h-28 w-full rounded-xl border border-input bg-background p-3 text-sm outline-none focus:border-primary" placeholder="Expliquez la correction attendue…" autoFocus />
             <div className="mt-4 flex justify-end gap-2"><button onClick={() => setRejecting(null)} className="h-10 rounded-xl border border-border px-4 text-sm font-semibold">Annuler</button><button disabled={!rejectionReason.trim() || busy} onClick={() => void reject()} className="h-10 rounded-xl bg-destructive px-4 text-sm font-semibold text-destructive-foreground disabled:opacity-50">Confirmer le rejet</button></div>
           </div>
@@ -299,6 +647,40 @@ export function NormsPage() {
     });
   };
 
+  const expandAll = () => {
+    const ids = new Set<string>();
+    const collect = (items: NormSection[]) => {
+      for (const section of items) {
+        ids.add(String(section.id));
+        const children = Array.isArray(section.children) ? section.children : [];
+        if (children.length > 0) collect(children);
+      }
+    };
+    collect(sections);
+    setExpanded(ids);
+  };
+
+  const collapseAll = () => setExpanded(new Set());
+
+  const versionLabel =
+    selectedNorm?.currentVersion?.version_code ??
+    selectedNorm?.current_version?.version_code ??
+    selectedNorm?.versions?.[0]?.version_code ??
+    "";
+  const isPdf = Boolean(selectedNorm?.has_pdf_document && selectedNorm?.pdf_file_url);
+  const siteName = catalog?.meta?.siteName ?? null;
+  const emptyHint = useMemo(() => {
+    const activeSubs = catalog?.meta?.activeSubscriptionsCount ?? 0;
+    const linkedNorms = catalog?.meta?.linkedNormsCount ?? 0;
+    if (activeSubs <= 0) {
+      return "Ce site ne dispose d’aucun abonnement actif. Souscrivez une offre pour activer la bibliothèque.";
+    }
+    if (linkedNorms <= 0) {
+      return "Aucune norme n’est liée à l’offre active de ce site.";
+    }
+    return "Les normes liées existent mais ne sont pas encore visibles pour ce site. Vérifiez le rattachement offre/norme et le contexte de site actif.";
+  }, [catalog]);
+
   const exportCsv = () => {
     const rows = [
       ["Code", "Nom", "Domaine", "Statut"],
@@ -330,7 +712,7 @@ export function NormsPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-8">
-      <Header title="Bibliothèque des normes" desc="Consultez les référentiels accessibles au site courant et leur structure issue du backend Laravel.">
+      <Header title="Bibliothèque des normes" desc={`Lecture seule${siteName ? ` • Site courant : ${siteName}` : ""} — référentiels accessibles et structure issue du backend Laravel.`}>
         <button onClick={exportCsv} disabled={norms.length === 0} className={`${ghostBtn} disabled:opacity-50`}><Download className="h-4 w-4" /> Exporter</button>
       </Header>
 
@@ -342,13 +724,14 @@ export function NormsPage() {
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary" />
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Rechercher une norme par code ou nom…" className="h-11 w-full rounded-xl border border-input bg-card pl-10 pr-4 text-sm outline-none focus:border-primary" />
         </div>
-        <input value={sectionSearch} onChange={(event) => setSectionSearch(event.target.value)} placeholder="Rechercher dans les chapitres…" className="h-11 min-w-[240px] flex-1 rounded-xl border border-input bg-card px-4 text-sm outline-none focus:border-primary" />
+        <input value={sectionSearch} onChange={(event) => setSectionSearch(event.target.value)} placeholder="Rechercher dans la structure…" className="h-11 min-w-[240px] flex-1 rounded-xl border border-input bg-card px-4 text-sm outline-none focus:border-primary" />
       </div>
 
       {isLoading ? <ListLoading rows={6} /> : norms.length === 0 ? (
         <div className="rounded-2xl border border-border bg-card p-10 text-center">
-          <p className="font-display font-bold text-foreground">Aucune norme accessible</p>
-          <p className="mt-1 text-sm text-muted-foreground">Le backend ne retourne aucune norme liée à votre entreprise ou à votre site courant. Vérifiez l’offre et les abonnements.</p>
+          <p className="font-display font-bold text-foreground">Aucune norme accessible pour le site courant.</p>
+          <p className="mx-auto mt-1 max-w-xl text-sm text-muted-foreground">{emptyHint}</p>
+          <Link to="/app/$section" params={{ section: "abonnement" }} className={`${primaryBtn} mt-4`}><CreditCard className="h-4 w-4" /> Gérer l’abonnement</Link>
         </div>
       ) : (
         <div className="grid gap-6 lg:grid-cols-[minmax(260px,360px)_1fr]">
@@ -372,13 +755,33 @@ export function NormsPage() {
               <>
                 <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
                   <div><p className="font-display text-xl font-extrabold text-foreground">{selectedNorm.code}</p><h2 className="mt-1 text-lg font-bold text-foreground">{selectedNorm.name}</h2><p className="mt-1 text-sm text-muted-foreground">{selectedNorm.domain ?? "Référentiel QHSE"}</p></div>
-                  <div className="text-right text-xs text-muted-foreground"><p>{selectedNorm.status ?? "Accessible"}</p><p className="mt-1">Version {selectedNorm.currentVersion?.version_code ?? selectedNorm.current_version?.version_code ?? selectedNorm.versions?.[0]?.version_code ?? "—"}</p></div>
+                  <div className="text-right text-xs text-muted-foreground"><p>{selectedNorm.status ?? "Accessible"}</p>{versionLabel && <p className="mt-1 inline-block rounded-full bg-primary-soft px-2.5 py-1 font-bold text-primary">Version {versionLabel}</p>}</div>
                 </div>
-                {sectionsError && <p className="mt-4 rounded-xl bg-warning/15 p-3 text-sm text-warning-foreground">{sectionsError}</p>}
-                {!sectionsError && filteredSections.length === 0 && <p className="mt-5 text-sm text-muted-foreground">Aucun chapitre disponible pour cette norme.</p>}
-                {filteredSections.length > 0 && <ul className="mt-4 space-y-1">{renderSections(filteredSections)}</ul>}
+                {isPdf ? (
+                  <>
+                    <p className="mt-4 rounded-xl border border-primary/30 bg-primary-soft/40 p-4 text-sm text-foreground">Cette norme est disponible sous forme de fichier PDF importé par le super-admin{selectedNorm.pdf_original_name ? ` (${selectedNorm.pdf_original_name})` : ""}.</p>
+                    <div className="mt-3 flex justify-end">
+                      <a href={String(selectedNorm.pdf_file_url)} target="_blank" rel="noopener" className={ghostBtn}><ExternalLink className="h-4 w-4" /> Ouvrir le PDF</a>
+                    </div>
+                    <iframe src={String(selectedNorm.pdf_file_url)} title={`Norme ${selectedNorm.code} (PDF)`} className="mt-3 min-h-[70vh] w-full rounded-xl border border-border bg-white" />
+                  </>
+                ) : (
+                  <>
+                    {sectionsError && <p className="mt-4 rounded-xl bg-warning/15 p-3 text-sm text-warning-foreground">{sectionsError}</p>}
+                    {!sectionsError && filteredSections.length === 0 && <p className="mt-5 text-sm text-muted-foreground">Aucune section à afficher pour cette norme.</p>}
+                    {filteredSections.length > 0 && (
+                      <>
+                        <div className="mt-4 flex justify-end gap-2">
+                          <button onClick={expandAll} className={ghostBtn}><Plus className="h-4 w-4" /> Tout ouvrir</button>
+                          <button onClick={collapseAll} className={ghostBtn}><Minus className="h-4 w-4" /> Tout fermer</button>
+                        </div>
+                        <ul className="mt-3 space-y-1">{renderSections(filteredSections)}</ul>
+                      </>
+                    )}
+                  </>
+                )}
               </>
-            ) : <p className="text-sm text-muted-foreground">Sélectionnez une norme.</p>}
+            ) : <p className="text-sm text-muted-foreground">Sélectionnez une norme dans la colonne de gauche.</p>}
           </section>
         </div>
       )}

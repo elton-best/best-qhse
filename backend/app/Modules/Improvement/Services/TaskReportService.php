@@ -126,10 +126,21 @@ class TaskReportService
         $filename = "rapport-{$type}-{$task->id}-" . now()->format('YmdHis') . '.docx';
         $path = "task-reports/{$filename}";
 
-        // Save to storage
+        // Save to storage (le dossier n'existe pas sur une installation fraîche)
+        \Illuminate\Support\Facades\Storage::makeDirectory('task-reports');
         $phpWord->save(storage_path("app/{$path}"));
 
         return $path;
+    }
+
+    /**
+     * PhpWord Table n'expose pas getLastRow() : on prend la dernière ligne créée.
+     */
+    private function lastRow($table)
+    {
+        $rows = $table->getRows();
+
+        return $rows[count($rows) - 1];
     }
 
     /**
@@ -138,7 +149,7 @@ class TaskReportService
     private function addTableHeader($table, array $headers): void
     {
         foreach ($headers as $header) {
-            $cell = $table->getLastRow()->addCell();
+            $cell = $this->lastRow($table)->addCell();
             $cell->addText($header, ['bold' => true], ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER]);
         }
     }
@@ -148,7 +159,7 @@ class TaskReportService
      */
     private function addTableCell($table, string $label, ?string $value = null): void
     {
-        $row = $table->getLastRow();
+        $row = $this->lastRow($table);
         $cell1 = $row->addCell();
         $cell1->addText($label, ['bold' => true]);
 

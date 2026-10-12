@@ -15,6 +15,7 @@ use App\Models\Objective;
 use App\Models\OperationalProjectActivity;
 use App\Models\OperationalProjectTask;
 use App\Models\PlanAction;
+use App\Models\Process;
 use App\Models\ProcessRiskOpportunity;
 use App\Models\Reclamation;
 use App\Models\Risk;
@@ -76,9 +77,10 @@ class MyTasksController extends Controller
         [$startDate, $endDate] = $this->parseMonthRange($month);
 
         // 1. ACTIONS
+        // (pas de `with('process')` : la relation `process` du modèle Action
+        // est inutilisable en l'état — hydratation manuelle dans normalizeTask)
         if (empty($types) || in_array('action', $types)) {
             $actionsQuery = Action::query()
-                ->with('process:id,title,name')
                 ->where(function ($q) use ($user) {
                     $q->where('responsible_id', $user->id);
 
@@ -172,7 +174,6 @@ class MyTasksController extends Controller
         // 6. OBJECTIVES
         if (empty($types) || in_array('objective', $types)) {
             $objectivesQuery = Objective::query()
-                ->with('process:id,title,name')
                 ->where('responsible_id', $user->id);
             $this->applyDateRangeFilter($objectivesQuery, 'objectives', ['deadline', 'due_date', 'end_date', 'date_fin', 'target_date'], $startDate, $endDate);
             $this->applyEnterpriseFilter($objectivesQuery, 'objectives', $user->enterprise_id);
@@ -186,7 +187,6 @@ class MyTasksController extends Controller
         // 7. RISKS
         if (empty($types) || in_array('risk', $types)) {
             $risksQuery = Risk::query()
-                ->with('process:id,title,name')
                 ->where(function ($q) use ($user) {
                 $q->where('responsible_id', $user->id)
                     ->orWhere('mitigation_responsible_id', $user->id);
@@ -203,7 +203,6 @@ class MyTasksController extends Controller
         // 8. PLAN ACTIONS
         if (empty($types) || in_array('plan_action', $types)) {
             $planActionsQuery = PlanAction::query()
-                ->with('process:id,title,name')
                 ->where('responsible_id', $user->id);
             $this->applyDateRangeFilter($planActionsQuery, 'plan_actions', ['end_date', 'deadline', 'due_date', 'date_fin', 'target_date', 'start_date'], $startDate, $endDate);
             $this->applyEnterpriseFilter($planActionsQuery, 'plan_actions', $user->enterprise_id);
@@ -501,6 +500,48 @@ class MyTasksController extends Controller
     /**
      * Normalize task from any source to uniform format
      */
+    private function formatTaskDate(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        try {
+            if ($value instanceof \DateTimeInterface) {
+                return $value->format('Y-m-d');
+            }
+
+            return \Carbon\Carbon::parse((string) $value)->format('Y-m-d');
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private array $processNameCache = [];
+
+    private function resolveProcessName(object $task): ?string
+    {
+        if (isset($task->process_name) && $task->process_name) {
+            return (string) $task->process_name;
+        }
+        $processId = $task->process_id ?? null;
+        if (!$processId) {
+            return null;
+        }
+        $key = (int) $processId;
+        if (!array_key_exists($key, $this->processNameCache)) {
+            try {
+                $process = Process::query()->find($key, ['id', 'title', 'code']);
+                $this->processNameCache[$key] = $process
+                    ? ($process->title ?? $process->code)
+                    : null;
+            } catch (\Throwable) {
+                $this->processNameCache[$key] = null;
+            }
+        }
+
+        return $this->processNameCache[$key] ? (string) $this->processNameCache[$key] : null;
+    }
+
     private function normalizeTask(object $task, string $type, User $user): array
     {
         $tracking = TaskTracking::where([
@@ -515,7 +556,7 @@ class MyTasksController extends Controller
         $responsibleId = $this->getResponsibleUserId($task, $type);
         $responsible = $responsibleId ? User::find($responsibleId)?->name : null;
 
-        // Extract dates
+        // Extract dates (les attributs peuvent être des chaînes selon les casts)
         $startDate = $task->start_date ?? $task->date_debut ?? $task->scheduled_date ?? null;
         $endDate = $task->end_date ?? $task->date_fin ?? $task->completion_date ?? null;
         $deadline = $task->deadline ?? $startDate;
@@ -523,18 +564,15 @@ class MyTasksController extends Controller
         // Determine status
         $status = $tracking?->status ?? 'non_demarre';
         $progressRate = $tracking?->progress_rate ?? 0;
-        $processName = $task->process?->name
-            ?? $task->process?->title
-            ?? $task->process_name
-            ?? null;
+        $processName = $this->resolveProcessName($task);
 
         return [
             'id' => $task->id,
             'type' => $type,
             'title' => $task->title ?? $task->name ?? $task->description ?? 'Untitled',
-            'start_date' => $startDate?->format('Y-m-d'),
-            'end_date' => $endDate?->format('Y-m-d'),
-            'deadline' => $deadline?->format('Y-m-d'),
+            'start_date' => $this->formatTaskDate($startDate),
+            'end_date' => $this->formatTaskDate($endDate),
+            'deadline' => $this->formatTaskDate($deadline),
             'status' => $status,
             'progress_rate' => $progressRate,
             'responsible_id' => $responsibleId,

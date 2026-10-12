@@ -13,6 +13,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Activitylog\Traits\LogsActivity;
+use App\Modules\Enterprise\Models\Enterprise;
+use App\Modules\Enterprise\Models\Site;
+use App\Modules\Enterprise\Models\User;
+use App\Modules\Planning\Models\Objective;
+use App\Modules\Planning\Models\Risk;
+use App\Modules\Processes\Models\Process;
+use App\Modules\Support\Models\Document;
+use App\Modules\Evaluation\Models\Audit;
 
 class Action extends Model
 {

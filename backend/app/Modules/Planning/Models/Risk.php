@@ -15,6 +15,11 @@ use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Laravel\Scout\Searchable;
 use Spatie\Activitylog\Traits\LogsActivity;
+use App\Modules\Enterprise\Models\Enterprise;
+use App\Modules\Enterprise\Models\Site;
+use App\Modules\Enterprise\Models\User;
+use App\Modules\Processes\Models\Process;
+use App\Modules\Support\Models\Document;
 
 class Risk extends Model
 {

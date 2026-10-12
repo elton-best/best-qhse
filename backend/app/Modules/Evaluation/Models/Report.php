@@ -4,6 +4,8 @@ namespace App\Modules\Evaluation\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use App\Modules\Enterprise\Models\Enterprise;
+use App\Modules\Enterprise\Models\User;
 
 class Report extends Model
 {

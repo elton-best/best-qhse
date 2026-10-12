@@ -6,6 +6,11 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Spatie\Activitylog\LogsActivity;
+use App\Modules\Evaluation\Models\Audit;
+use App\Modules\Improvement\Models\NonConformity;
+use App\Modules\Improvement\Models\Reclamation;
+use App\Modules\Planning\Models\Objective;
+use App\Modules\Planning\Models\Risk;
 use Spatie\Activitylog\Traits\LogsActivity as LogsActivityTrait;
 
 class Axe extends Model

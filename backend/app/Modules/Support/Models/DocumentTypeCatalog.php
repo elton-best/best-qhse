@@ -4,6 +4,9 @@ namespace App\Modules\Support\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Modules\Enterprise\Models\Enterprise;
+use App\Modules\Enterprise\Models\Site;
+use App\Modules\Processes\Models\Process;
 
 class DocumentTypeCatalog extends Model
 {

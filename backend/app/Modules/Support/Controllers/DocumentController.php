@@ -45,7 +45,11 @@ class DocumentController extends Controller
 
     public function index(Request $request)
     {
-        $query = Document::query()->with(['site', 'process', 'author', 'approver', 'verifier', 'typeConfiguration', 'currentVersion']);
+        // Relations chargées en eager : uniquement celles résolues dans le même
+        // namespace (les relations site/process/author/approver/verifier du modèle
+        // pointent vers des classes d'autres modules et sont rattachées
+        // manuellement via attachSafeRelations()).
+        $query = Document::query()->with(['typeConfiguration', 'category', 'workflow', 'currentVersion']);
         $this->scopeDocumentQuery($query, $request->user());
 
         if ($request->filled('site_id')) {
@@ -93,6 +97,10 @@ class DocumentController extends Controller
 
         $documents = $query->latest('id')->get();
         $user = $request->user();
+
+        foreach ($documents as $document) {
+            $this->attachSafeRelations($document);
+        }
 
         if ($user && $user->user_type !== 'super_admin') {
             $documents = $documents
@@ -162,14 +170,20 @@ class DocumentController extends Controller
         }
 
         // ── Validation du processus ───────────────────────────────────────────
+        // La table processes ne porte que site_id : l'appartenance à
+        // l'entreprise est vérifiée via le site du processus.
         if (!empty($validated['process_id'])) {
-            $processExists = Process::query()
-                ->where('id', (int) $validated['process_id'])
-                ->where(function ($q) use ($siteId, $site) {
-                    $q->where('site_id', $siteId)
-                      ->orWhere('enterprise_id', $site->enterprise_id);
-                })
-                ->exists();
+            $process = Process::query()->find((int) $validated['process_id']);
+            $processExists = false;
+            if ($process) {
+                if ((int) $process->site_id === $siteId) {
+                    $processExists = true;
+                } else {
+                    $processSite = $process->site_id ? Site::query()->find((int) $process->site_id) : null;
+                    $processExists = $processSite
+                        && (int) $processSite->enterprise_id === (int) $site->enterprise_id;
+                }
+            }
 
             if (!$processExists) {
                 return response()->json([
@@ -312,9 +326,11 @@ class DocumentController extends Controller
         $this->submitToWorkflow($document, $request->user());
 
         $document->refresh();
+        $document->load($this->safeDocumentWith());
+        $this->attachSafeRelations($document);
 
         return response()->json(
-            $document->load(['site', 'process', 'author', 'typeConfiguration', 'versions']),
+            $document,
             201
         );
     }
@@ -514,7 +530,11 @@ class DocumentController extends Controller
 
         $this->submitToWorkflow($document, $request->user());
 
-        return (new DocumentResource($document->fresh()->load(['site', 'process', 'author', 'typeConfiguration'])))->response()->setStatusCode(201);
+        $fresh = $document->fresh();
+        $fresh->load($this->safeDocumentWith());
+        $this->attachSafeRelations($fresh);
+
+        return (new DocumentResource($fresh))->response()->setStatusCode(201);
     }
 
     private function isLegacyDocumentInventoryRequest(Request $request): bool
@@ -600,9 +620,11 @@ class DocumentController extends Controller
     public function show(Request $request, string $document)
     {
         $modernDocument = Document::query()
-            ->with(['site', 'process', 'author', 'approver', 'verifier', 'typeConfiguration', 'category', 'workflow', 'currentVersion', 'versions', 'workflowEvents.actor'])
+            ->with($this->safeDocumentWith())
             ->findOrFail($document);
-        $this->assertSiteAccess($modernDocument->site, $request->user());
+        $this->attachSafeRelations($modernDocument);
+        $site = $modernDocument->getRelation('site') ?? Site::query()->find($modernDocument->site_id);
+        $this->assertSiteAccess($site, $request->user());
         $this->assertGeneratedDraftAccess($modernDocument, $request->user());
 
         return (new DocumentResource($modernDocument))->response();
@@ -694,7 +716,11 @@ class DocumentController extends Controller
             }
 
             $modernDocument->update($validated);
-            $modernDocument->load(['site', 'process', 'author', 'approver', 'verifier', 'category', 'workflow', 'currentVersion', 'versions', 'workflowEvents.actor']);
+            // Note : 'workflowEvents' n'est pas chargé ici car DocumentResource
+            // sérialise event->actor (relation inter-modules). L'historique
+            // s'obtient via GET documents/{id}/workflow-history.
+            $modernDocument->load($this->safeDocumentWith());
+            $this->attachSafeRelations($modernDocument);
 
             return (new DocumentResource($modernDocument))->response();
     }
@@ -785,12 +811,18 @@ class DocumentController extends Controller
 
         $document->update($documentUpdates);
 
-        return response()->json(['data' => $version->load('creator')], 201);
+        // 'creator' pointe vers une classe d'un autre module : rattachement manuel.
+        if ($version->created_by) {
+            $version->setRelation('creator', User::query()->find((int) $version->created_by));
+        }
+
+        return response()->json(['data' => $version], 201);
     }
 
     public function download(Request $request, Document $document, ?int $versionId = null)
     {
-        $this->assertSiteAccess($document->site, $request->user());
+        $this->attachSafeRelations($document);
+        $this->assertSiteAccess(Site::query()->find($document->site_id), $request->user());
         $this->assertGeneratedDraftAccess($document, $request->user());
         $version = null;
         if ($versionId) {
@@ -843,7 +875,8 @@ class DocumentController extends Controller
 
     public function preview(Request $request, Document $document)
     {
-        $this->assertSiteAccess($document->site, $request->user());
+        $this->attachSafeRelations($document);
+        $this->assertSiteAccess(Site::query()->find($document->site_id), $request->user());
         $this->assertGeneratedDraftAccess($document, $request->user());
 
         $versionId = $request->integer('version_id');
@@ -911,7 +944,8 @@ class DocumentController extends Controller
 
     public function submitForApproval(Document $document)
     {
-        $this->assertSiteAccess($document->site, request()->user());
+        $this->attachSafeRelations($document);
+        $this->assertSiteAccess(Site::query()->find($document->site_id), request()->user());
 
         $fromState = (string) ($document->workflow_status ?: 'draft');
         $targetState = (bool) $document->needs_verification ? 'pending_verification' : 'pending_approval';
@@ -936,9 +970,13 @@ class DocumentController extends Controller
         ]);
 
         if ($document->approver_id) {
+            $currentVersionId = DocumentVersion::query()
+                ->where('document_id', $document->id)
+                ->where('is_current', true)
+                ->value('id');
             DB::table('document_approvals')->insert([
                 'document_id' => $document->id,
-                'document_version_id' => $document->currentVersion?->id,
+                'document_version_id' => $currentVersionId,
                 'user_id' => $document->approver_id,
                 'step_order' => 1,
                 'role' => 'approver',
@@ -986,12 +1024,16 @@ class DocumentController extends Controller
             ],
         );
 
-        return (new DocumentResource($document->fresh()->load(['site', 'process', 'author', 'approver', 'verifier', 'category', 'workflowEvents.actor'])))->response();
+        $fresh = $document->fresh();
+        $fresh->load($this->safeDocumentWith());
+        $this->attachSafeRelations($fresh);
+
+        return (new DocumentResource($fresh))->response();
     }
 
     public function workflowIntegrity(Request $request, Document $document)
     {
-        $this->assertSiteAccess($document->site, $request->user());
+        $this->assertSiteAccess(Site::query()->find($document->site_id), $request->user());
 
         $result = app(DocumentWorkflowAuditTrailService::class)->verifyDocumentChain($document);
 
@@ -1109,7 +1151,11 @@ class DocumentController extends Controller
             'is_active' => false,
         ]);
 
-        return (new DocumentResource($document->fresh()->load(['site', 'process', 'author', 'approver', 'category'])))->response();
+        $freshArchive = $document->fresh();
+        $freshArchive->load($this->safeDocumentWith());
+        $this->attachSafeRelations($freshArchive);
+
+        return (new DocumentResource($freshArchive))->response();
     }
 
     public function approve(Request $request, int $approval)
@@ -1549,6 +1595,47 @@ class DocumentController extends Controller
         abort(403, 'Accès non autorisé.');
     }
 
+    /**
+     * Relations sûres pour l'eager-loading.
+     * Les relations site/process/author/approver/verifier du modèle Document
+     * référencent des classes d'autres modules : elles sont rattachées
+     * manuellement via attachSafeRelations() avec les FQCN corrects.
+     *
+     * @return string[]
+     */
+    private function safeDocumentWith(): array
+    {
+        return ['typeConfiguration', 'category', 'workflow', 'currentVersion', 'versions'];
+    }
+
+    /**
+     * Rattache les relations inter-modules (site, processus, utilisateurs)
+     * sans appeler les méthodes de relation du modèle.
+     */
+    private function attachSafeRelations(Document $document): void
+    {
+        try {
+            if ($document->site_id && !$document->relationLoaded('site')) {
+                $document->setRelation('site', Site::query()->find((int) $document->site_id));
+            }
+        } catch (\Throwable) {
+        }
+        try {
+            if ($document->process_id && !$document->relationLoaded('process')) {
+                $document->setRelation('process', Process::query()->find((int) $document->process_id));
+            }
+        } catch (\Throwable) {
+        }
+        foreach (['author' => 'author_id', 'approver' => 'approver_id', 'verifier' => 'verifier_id'] as $relation => $key) {
+            try {
+                if (!empty($document->{$key}) && !$document->relationLoaded($relation)) {
+                    $document->setRelation($relation, User::query()->find((int) $document->{$key}));
+                }
+            } catch (\Throwable) {
+            }
+        }
+    }
+
     private function findWorkflowUsersByPermission(string $permission, Document $document, ?int $excludeUserId = null)
     {
         $query = User::query()
@@ -1557,8 +1644,13 @@ class DocumentController extends Controller
 
         if ($document->site_id) {
             $query->where('site_id', $document->site_id);
-        } elseif ($document->site?->enterprise_id) {
-            $query->where('enterprise_id', $document->site->enterprise_id);
+        } else {
+            $fallbackSite = $document->relationLoaded('site')
+                ? $document->getRelation('site')
+                : Site::query()->find($document->site_id);
+            if ($fallbackSite?->enterprise_id) {
+                $query->where('enterprise_id', $fallbackSite->enterprise_id);
+            }
         }
 
         if ($excludeUserId) {

@@ -109,6 +109,12 @@ class NormController extends Controller
                         ->orderBy('order_index')
                         ->with('children.children.children.children.children.children');
                 },
+                'versions.sections' => function ($query) {
+                    $query
+                        ->whereNull('parent_id')
+                        ->orderBy('order_index')
+                        ->with('children.children.children.children.children.children');
+                },
             ])
             ->find($id);
 
@@ -131,6 +137,7 @@ class NormController extends Controller
         ]);
         
         return response()->json([
+            'success' => true,
             'data' => $norm
         ]);
     }
@@ -177,7 +184,10 @@ class NormController extends Controller
         $version = $norm->currentVersion;
 
         if (!$version) {
-            return response()->json(['data' => []]);
+            return response()->json([
+                'success' => true,
+                'data' => [],
+            ]);
         }
 
         /** @var Collection<int, \App\Models\NormSection> $sections */
@@ -188,6 +198,65 @@ class NormController extends Controller
             ])
             ->values();
 
+        // Index sections by parent for a nested tree (parent_id based, with
+        // number-prefix fallback for legacy flat imports).
+        $byParent = [];
+        foreach ($sections as $section) {
+            $key = $section->parent_id === null ? 'root' : (string) (int) $section->parent_id;
+            $byParent[$key][] = $section;
+        }
+
+        $serialize = function ($section) use (&$serialize, $sections, $byParent) {
+            $children = $byParent[(string) (int) $section->id] ?? [];
+
+            // Legacy fallback: attach by number prefix (e.g. "4.1" under "4")
+            // when parent_id linkage is missing.
+            if (empty($children) && !empty($section->number)) {
+                $prefix = (string) $section->number . '.';
+                foreach ($sections as $candidate) {
+                    if ((int) $candidate->id === (int) $section->id) {
+                        continue;
+                    }
+                    if ($candidate->parent_id !== null) {
+                        continue;
+                    }
+                    if (!empty($candidate->number)
+                        && str_starts_with((string) $candidate->number, $prefix)) {
+                        $children[] = $candidate;
+                    }
+                }
+            }
+
+            usort($children, function ($a, $b) {
+                $order = ((int) ($a->order_index ?? 0)) <=> ((int) ($b->order_index ?? 0));
+                return $order !== 0 ? $order : ((int) $a->id <=> (int) $b->id);
+            });
+
+            // Avoid re-attaching a node already nested elsewhere: only attach
+            // root-level or directly-linked children at this level.
+            $mapped = [];
+            foreach ($children as $child) {
+                $mapped[] = $serialize($child);
+            }
+
+            $row = [
+                'id' => $section->id,
+                'number' => $section->number,
+                'code' => $section->number,
+                'title' => $section->title,
+                'name' => $section->title,
+                'content' => $section->content,
+                'type' => $section->type,
+                'level' => $section->level,
+                'order_index' => $section->order_index,
+                'children' => $mapped,
+            ];
+            // Backward compatibility: historical clients read `subchapters`.
+            $row['subchapters'] = $mapped;
+
+            return $row;
+        };
+
         $chapters = $sections
             ->filter(function ($section) {
                 return $section->parent_id === null
@@ -195,50 +264,8 @@ class NormController extends Controller
                     || $section->type === 'chapter';
             })
             ->values()
-            ->map(function ($chapter) use ($sections) {
-                $subchapters = $sections
-                    ->filter(function ($section) use ($chapter) {
-                        if ((int) $section->parent_id === (int) $chapter->id) {
-                            return true;
-                        }
-
-                        if (
-                            $section->parent_id === null
-                            || empty($chapter->number)
-                            || empty($section->number)
-                        ) {
-                            return false;
-                        }
-
-                        return str_starts_with((string) $section->number, (string) $chapter->number . '.');
-                    })
-                    ->filter(function ($section) use ($chapter) {
-                        return (int) $section->id !== (int) $chapter->id;
-                    })
-                    ->filter(function ($section) {
-                        return $section->type === 'subchapter'
-                            || (int) $section->level === 2
-                            || str_contains((string) $section->number, '.');
-                    })
-                    ->values()
-                    ->map(function ($subchapter) {
-                        return [
-                            'id' => $subchapter->id,
-                            'number' => $subchapter->number,
-                            'code' => $subchapter->number,
-                            'title' => $subchapter->title,
-                            'name' => $subchapter->title,
-                        ];
-                    });
-
-                return [
-                    'id' => $chapter->id,
-                    'number' => $chapter->number,
-                    'code' => $chapter->number,
-                    'title' => $chapter->title,
-                    'name' => $chapter->title,
-                    'subchapters' => $subchapters->values(),
-                ];
+            ->map(function ($chapter) use ($serialize) {
+                return $serialize($chapter);
             })
             ->values();
 

@@ -2,12 +2,17 @@
 
 namespace App\Modules\Enterprise\Models;
 
+use App\Models\Action;
 use App\Models\Audit;
 use App\Models\Complaint;
 use App\Models\Context;
 use App\Models\Document;
+use App\Models\NonConformity;
 use App\Models\Plan;
+use App\Models\Plainte;
 use App\Models\Process;
+use App\Models\Reclamation;
+use App\Models\SatisfactionSurvey;
 use App\Models\Stakeholder;
 use App\Models\StrategicAxis;
 use App\Models\TeamMember;
@@ -82,6 +87,31 @@ class Site extends Model
     public function complaints()
     {
         return $this->hasMany(Complaint::class);
+    }
+
+    public function reclamations()
+    {
+        return $this->hasMany(Reclamation::class);
+    }
+
+    public function plaintes()
+    {
+        return $this->hasMany(Plainte::class);
+    }
+
+    public function satisfactionSurveys()
+    {
+        return $this->hasMany(SatisfactionSurvey::class);
+    }
+
+    public function actions()
+    {
+        return $this->hasMany(Action::class);
+    }
+
+    public function nonConformities()
+    {
+        return $this->hasMany(NonConformity::class);
     }
 
     public function documents()

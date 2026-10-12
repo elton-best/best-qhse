@@ -336,13 +336,14 @@ class SiteController extends Controller
     {
         $user = $request->user();
 
-        // Verify user has access to this site
+        // Verify user has access to this site (périmètre entreprise)
         if ($user->user_type !== 'super_admin' && $site->enterprise_id !== $user->enterprise_id) {
             return response()->json([
                 'success' => false,
                 'message' => 'Access denied'
             ], 403);
         }
+        $this->authorize('view', $site);
 
         return response()->json([
             'success' => true,
@@ -483,13 +484,15 @@ class SiteController extends Controller
     {
         $user = $request->user();
 
-        // Verify user has access to this site
+        // Verify user has access to this site (périmètre entreprise)
         if ($user->user_type !== 'super_admin' && $site->enterprise_id !== $user->enterprise_id) {
             return response()->json([
                 'success' => false,
                 'message' => 'Access denied'
             ], 403);
         }
+        // Seul admin_entreprise (policy) peut supprimer — aligne Vue (canDeleteSite).
+        $this->authorize('delete', $site);
 
         $site->delete();
 
@@ -500,7 +503,7 @@ class SiteController extends Controller
     }
 
     /**
-     * Toggle site active status
+     * Toggle site active status (Suspendre/Réactiver — aligne Vue + React "Suspendu/Actif").
      */
     public function toggleActive(Request $request, $id)
     {
@@ -515,6 +518,7 @@ class SiteController extends Controller
                     'message' => 'Access denied'
                 ], 403);
             }
+            $this->authorize('update', $site);
 
             $site->is_active = !$site->is_active;
             $site->save();

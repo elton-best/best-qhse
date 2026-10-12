@@ -24,7 +24,10 @@ class ReclamationController extends Controller
     {
         $this->authorize('viewAny', Reclamation::class);
 
-        $query = Reclamation::with(['site', 'customer', 'responsible', 'axes', 'workflowState', 'nonConformities']);
+        // Relations valides du modèle : site, user, assignedUser, respondedByUser,
+        // axes (HasAxes), workflowState (HasWorkflowStates), actions, documents, processes.
+        // 'customer'/'responsible'/'nonConformities' n'existent pas et provoquaient un 500.
+        $query = Reclamation::with(['site', 'user', 'assignedUser', 'axes', 'workflowState', 'actions']);
 
         if ($request->has('site_id')) {
             $query->where('site_id', $request->site_id);
@@ -36,6 +39,15 @@ class ReclamationController extends Controller
 
         if ($request->has('status')) {
             $query->inState($request->status);
+        }
+
+        // Périmètre entreprise : un company ne voit que ses sites (défense en profondeur,
+        // la policy fait déjà le gros du travail).
+        $user = $request->user();
+        if ($user && $user->user_type === 'company' && $user->enterprise_id) {
+            $query->whereHas('site', function ($q) use ($user) {
+                $q->where('enterprise_id', $user->enterprise_id);
+            });
         }
 
         $reclamations = $query->latest()->paginate($request->get('per_page', 15));
@@ -55,7 +67,7 @@ class ReclamationController extends Controller
     public function show(int $id): JsonResponse
     {
         $reclamation = Reclamation::with([
-            'site', 'customer', 'responsible', 'axes', 'workflowState', 'nonConformities', 'actions'
+            'site', 'user', 'assignedUser', 'respondedByUser', 'axes', 'workflowState', 'actions', 'documents', 'processes'
         ])->findOrFail($id);
 
         $this->authorize('view', $reclamation);
@@ -169,6 +181,24 @@ class ReclamationController extends Controller
         }
 
         $normalized = strtolower(trim($value));
+        $frMap = [
+            'qualité produit' => 'product_quality',
+            'qualite produit' => 'product_quality',
+            'délai de livraison' => 'delivery_delay',
+            'delai de livraison' => 'delivery_delay',
+            'livraison' => 'delivery_delay',
+            'service client' => 'service_quality',
+            'facturation' => 'billing',
+            'sécurité' => 'other',
+            'securite' => 'other',
+            'produit' => 'product_quality',
+            'qualité' => 'product_quality',
+            'service' => 'service_quality',
+            'autre' => 'other',
+        ];
+        if (isset($frMap[$normalized])) {
+            return $frMap[$normalized];
+        }
         $map = [
             'product' => 'product_quality',
             'quality' => 'product_quality',

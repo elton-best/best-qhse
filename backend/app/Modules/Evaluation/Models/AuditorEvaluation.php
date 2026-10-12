@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use App\Traits\HasAuditFields;
 use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Activitylog\LogOptions;
+use App\Modules\Enterprise\Models\User;
 
 class AuditorEvaluation extends Model
 {

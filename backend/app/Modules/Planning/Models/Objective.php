@@ -14,6 +14,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Activitylog\Traits\LogsActivity;
+use App\Modules\Enterprise\Models\User;
+use App\Modules\Evaluation\Models\Indicateur;
+use App\Modules\Leadership\Models\StrategicAxis;
+use App\Modules\Processes\Models\Process;
+use App\Modules\Support\Models\Document;
 
 class Objective extends Model
 {

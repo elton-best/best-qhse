@@ -5,6 +5,7 @@ namespace App\Modules\Support\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Support\Facades\DB;
+use App\Modules\Enterprise\Models\User;
 
 class QRCodeScan extends Model
 {

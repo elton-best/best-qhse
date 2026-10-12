@@ -3,6 +3,7 @@
 namespace App\Modules\Leadership\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use App\Modules\Enterprise\Models\User;
 
 class NormVersion extends Model
 {

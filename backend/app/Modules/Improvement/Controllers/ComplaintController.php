@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\ComplaintResource;
 use App\Models\Complaint;
 use App\Models\Site;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\JsonResponse;
@@ -23,15 +24,19 @@ class ComplaintController extends Controller
     public function index(Request $request)
     {
         $user = Auth::user();
-        $query = Complaint::with(['user', 'site', 'assignedUser', 'actions.responsible']);
+        // NOTE: pas de with(['user','site',...]) ici : les relations user/site du modèle
+        // Complaint sont résolues dans le mauvais namespace (voir rapport) et provoquent
+        // un 500 dès qu'il y a des lignes. On charge sans eager-load puis on attache
+        // manuellement via les modèles aliasés App\Models\*.
+        $query = Complaint::query();
 
         // Filter based on user type
         if ($user->isClientB()) {
             // Client B: only their own complaints
             $query->where('user_id', $user->id);
         } elseif ($user->user_type === 'company') {
-            // Client A: complaints from their enterprise's sites
-            $siteIds = $user->enterprise->sites->pluck('id');
+            // Client A: complaints from their enterprise's sites (sans passer par $user->enterprise->sites)
+            $siteIds = Site::where('enterprise_id', $user->enterprise_id)->pluck('id');
             $query->whereIn('site_id', $siteIds);
         }
 
@@ -58,43 +63,7 @@ class ComplaintController extends Controller
         // For Client B, return simple JSON format with normalized field names
         if ($user->isClientB()) {
             $items = collect($complaints->items())->map(function ($complaint) {
-                return [
-                    'id' => $complaint->id,
-                    'reference' => $complaint->ref,
-                    'ref' => $complaint->ref,
-                    'title' => $complaint->title,
-                    'description' => $complaint->description,
-                    'status' => $complaint->status,
-                    'priority' => $complaint->priority,
-                    'category' => $complaint->category,
-                    'site_id' => $complaint->site_id,
-                    'user_id' => $complaint->user_id,
-                    'assigned_to' => $complaint->assigned_to,
-                    'wants_email_response' => $complaint->wants_email_response,
-                    'wants_mail' => $complaint->wants_mail,
-                    'recommandations' => $complaint->recommandations,
-                    'analysis' => $complaint->analysis,
-                    'immediate_response' => $complaint->immediate_response,
-                    'expected_solution' => $complaint->expected_solution,
-                    'customer_name' => $complaint->customer_name,
-                    'customer_email' => $complaint->customer_email,
-                    'customer_phone' => $complaint->customer_phone,
-                    'customer_address' => $complaint->customer_address,
-                    'client_name' => $complaint->client_name,
-                    'client_email' => $complaint->client_email,
-                    'client_phone' => $complaint->client_phone,
-                    'client_company' => $complaint->client_company,
-                    'received_date' => $complaint->received_date?->toISOString(),
-                    'due_date' => $complaint->due_date?->toISOString(),
-                    'response_date' => $complaint->response_date?->toISOString(),
-                    'closed_date' => $complaint->closed_date?->toISOString(),
-                    'created_at' => $complaint->created_at?->toISOString(),
-                    'updated_at' => $complaint->updated_at?->toISOString(),
-                    'site' => $complaint->site,
-                    'user' => $complaint->user,
-                    'assignedUser' => $complaint->assignedUser,
-                    'actions' => $complaint->actions,
-                ];
+                return $this->toSimplePayload($complaint);
             });
 
             return response()->json([
@@ -178,8 +147,20 @@ class ComplaintController extends Controller
         $actions = $validated['actions'] ?? null;
         unset($validated['actions']);
 
+        // Périmètre : un company ne peut déclarer que sur ses propres sites.
+        if ($user->user_type === 'company' && $user->enterprise_id) {
+            $ownsSite = Site::where('id', $validated['site_id'])
+                ->where('enterprise_id', $user->enterprise_id)
+                ->exists();
+            if (!$ownsSite) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Site hors périmètre de votre entreprise.',
+                ], 422);
+            }
+        }
+
         $complaint = Complaint::create($validated);
-        $complaint->load(['user', 'site']);
 
         if (is_array($actions)) {
             foreach ($actions as $actionData) {
@@ -199,31 +180,12 @@ class ComplaintController extends Controller
         if ($user->isClientB()) {
             return response()->json([
                 'success' => true,
-                'data' => [
-                    'id' => $complaint->id,
-                    'reference' => $complaint->ref,
-                    'ref' => $complaint->ref,
-                    'title' => $complaint->title,
-                    'description' => $complaint->description,
-                    'status' => $complaint->status,
-                    'priority' => $complaint->priority,
-                    'category' => $complaint->category,
-                    'site_id' => $complaint->site_id,
-                    'user_id' => $complaint->user_id,
-                    'assigned_to' => $complaint->assigned_to,
-                    'wants_email_response' => $complaint->wants_email_response,
-                    'recommandations' => $complaint->recommandations,
-                    'created_at' => $complaint->created_at?->toISOString(),
-                    'updated_at' => $complaint->updated_at?->toISOString(),
-                    'site' => $complaint->site,
-                    'user' => $complaint->user,
-                    'actions' => $complaint->actions,
-                ],
+                'data' => $this->toSimplePayload($complaint->fresh()),
                 'message' => 'Réclamation créée avec succès'
             ], 201);
         }
 
-        return new ComplaintResource($complaint->load(['actions.responsible', 'user', 'site', 'assignedUser']));
+        return new ComplaintResource($complaint->fresh());
     }
 
     /**
@@ -244,8 +206,10 @@ class ComplaintController extends Controller
         }
 
         if ($user->user_type === 'company') {
-            $siteIds = $user->enterprise->sites->pluck('id');
-            if (!$siteIds->contains($complaint->site_id)) {
+            $ownsSite = Site::where('id', $complaint->site_id)
+                ->where('enterprise_id', $user->enterprise_id)
+                ->exists();
+            if (!$ownsSite) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Non autorisé'
@@ -253,49 +217,11 @@ class ComplaintController extends Controller
             }
         }
 
-        $complaint->load(['user', 'site', 'assignedUser', 'actions.responsible']);
-
         // For Client B, return simple JSON format with normalized field names
         if ($user->isClientB()) {
             return response()->json([
                 'success' => true,
-                'data' => [
-                    'id' => $complaint->id,
-                    'reference' => $complaint->ref,
-                    'ref' => $complaint->ref,
-                    'title' => $complaint->title,
-                    'description' => $complaint->description,
-                    'status' => $complaint->status,
-                    'priority' => $complaint->priority,
-                    'category' => $complaint->category,
-                    'site_id' => $complaint->site_id,
-                    'user_id' => $complaint->user_id,
-                    'assigned_to' => $complaint->assigned_to,
-                    'wants_email_response' => $complaint->wants_email_response,
-                    'wants_mail' => $complaint->wants_mail,
-                    'recommandations' => $complaint->recommandations,
-                    'analysis' => $complaint->analysis,
-                    'immediate_response' => $complaint->immediate_response,
-                    'expected_solution' => $complaint->expected_solution,
-                    'customer_name' => $complaint->customer_name,
-                    'customer_email' => $complaint->customer_email,
-                    'customer_phone' => $complaint->customer_phone,
-                    'customer_address' => $complaint->customer_address,
-                    'client_name' => $complaint->client_name,
-                    'client_email' => $complaint->client_email,
-                    'client_phone' => $complaint->client_phone,
-                    'client_company' => $complaint->client_company,
-                    'received_date' => $complaint->received_date?->toISOString(),
-                    'due_date' => $complaint->due_date?->toISOString(),
-                    'response_date' => $complaint->response_date?->toISOString(),
-                    'closed_date' => $complaint->closed_date?->toISOString(),
-                    'created_at' => $complaint->created_at?->toISOString(),
-                    'updated_at' => $complaint->updated_at?->toISOString(),
-                    'site' => $complaint->site,
-                    'user' => $complaint->user,
-                    'assignedUser' => $complaint->assignedUser,
-                    'actions' => $complaint->actions,
-                ]
+                'data' => $this->toSimplePayload($complaint)
             ]);
         }
 
@@ -338,12 +264,28 @@ class ComplaintController extends Controller
                 'recommandations' => 'nullable|string',
                 'expected_solution' => 'nullable|string',
                 'customer_address' => 'nullable|string|max:500',
+                'satisfaction_rating' => 'nullable|integer|min:1|max:5',
+                'satisfaction_comment' => 'nullable|string|max:1000',
             ]);
         } else {
             // Client A can update more fields
+            // Company : périmètre vérifié + transition de statut tracée (response/closed dates).
+            if ($user->enterprise_id) {
+                $ownsSite = Site::where('id', $complaint->site_id)
+                    ->where('enterprise_id', $user->enterprise_id)
+                    ->exists();
+                if (!$ownsSite) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Non autorisé',
+                    ], 403);
+                }
+            }
             $validated = $request->validate([
                 'title' => 'sometimes|string|max:255',
                 'description' => 'sometimes|string',
+                'category' => 'sometimes|string|max:255',
+                'priority' => 'sometimes|in:low,medium,high,urgent',
                 'wants_mail' => 'boolean',
                 'wants_email_response' => 'nullable|boolean',
                 'recommandations' => 'nullable|string',
@@ -360,6 +302,10 @@ class ComplaintController extends Controller
                 'client_company' => 'nullable|string|max:255',
                 'received_date' => 'nullable|date',
                 'due_date' => 'nullable|date',
+                'response_date' => 'nullable|date',
+                'closed_date' => 'nullable|date',
+                'satisfaction_rating' => 'nullable|integer|min:1|max:5',
+                'satisfaction_comment' => 'nullable|string|max:1000',
                 'status' => 'sometimes|in:pending,in_progress,resolved,closed',
                 'assigned_to' => 'nullable|exists:users,id',
                 'actions' => 'nullable|array',
@@ -407,7 +353,14 @@ class ComplaintController extends Controller
             }
         }
 
-        return new ComplaintResource($complaint->load(['user', 'site', 'assignedUser', 'actions.responsible']));
+        if ($user->isClientB()) {
+            return response()->json([
+                'success' => true,
+                'data' => $this->toSimplePayload($complaint->fresh()),
+            ]);
+        }
+
+        return new ComplaintResource($complaint->fresh());
     }
 
     /**
@@ -434,6 +387,16 @@ class ComplaintController extends Controller
                     'success' => false,
                     'message' => 'Impossible de supprimer une réclamation en cours de traitement'
                 ], 422);
+            }
+        } elseif ($user->user_type === 'company' && $user->enterprise_id) {
+            $ownsSite = Site::where('id', $complaint->site_id)
+                ->where('enterprise_id', $user->enterprise_id)
+                ->exists();
+            if (!$ownsSite) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Non autorisé',
+                ], 403);
             }
         }
 
@@ -464,19 +427,43 @@ class ComplaintController extends Controller
             'status' => 'sometimes|in:pending,in_progress,resolved,closed',
         ]);
 
-        // Update complaint with response
-        $complaint->update([
+        if ($user->enterprise_id) {
+            $ownsSite = Site::where('id', $complaint->site_id)
+                ->where('enterprise_id', $user->enterprise_id)
+                ->exists();
+            if (!$ownsSite) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Non autorisé',
+                ], 403);
+            }
+        }
+
+        // Cycle de vie : pending -> in_progress -> resolved -> closed.
+        // On trace response_date à la première réponse et closed_date à la clôture.
+        $newStatus = $validated['status'] ?? $complaint->status;
+        $patch = [
             'recommandations' => $complaint->recommandations
                 ? $complaint->recommandations . "\n\n---\n" . $validated['response']
                 : $validated['response'],
-            'status' => $validated['status'] ?? $complaint->status,
+            'status' => $newStatus,
             'assigned_to' => $complaint->assigned_to ?? $user->id,
-        ]);
+        ];
+        if (!$complaint->response_date) {
+            $patch['response_date'] = now()->toDateString();
+        }
+        if ($newStatus === 'closed' && !$complaint->closed_date) {
+            $patch['closed_date'] = now()->toDateString();
+        }
+        if (in_array($newStatus, ['resolved', 'closed'], true) && !$complaint->response_date) {
+            $patch['response_date'] = now()->toDateString();
+        }
+        $complaint->update($patch);
 
         return response()->json([
             'success' => true,
             'message' => 'Réponse ajoutée avec succès',
-            'data' => new ComplaintResource($complaint->load(['user', 'site', 'assignedUser']))
+            'data' => new ComplaintResource($complaint->fresh())
         ]);
     }
 
@@ -507,7 +494,28 @@ class ComplaintController extends Controller
             return null;
         }
 
-        $normalized = strtolower(trim($value));
+        $raw = trim($value);
+        $normalized = strtolower($raw);
+        // Libellés FR du formulaire React/Vue (avec accents) -> catégories backend.
+        $frMap = [
+            'qualité produit' => 'product_quality',
+            'qualite produit' => 'product_quality',
+            'délai de livraison' => 'delivery_delay',
+            'delai de livraison' => 'delivery_delay',
+            'livraison' => 'delivery_delay',
+            'service client' => 'service_quality',
+            'facturation' => 'billing',
+            'sécurité' => 'other',
+            'securite' => 'other',
+            'support client' => 'other',
+            'produit' => 'product_quality',
+            'qualité' => 'product_quality',
+            'service' => 'service_quality',
+            'autre' => 'other',
+        ];
+        if (isset($frMap[$normalized])) {
+            return $frMap[$normalized];
+        }
         $map = [
             'product' => 'product_quality',
             'quality' => 'product_quality',
@@ -539,14 +547,22 @@ class ComplaintController extends Controller
 
     /**
      * Search sites for autocomplete
+     * - ClientB / super_admin : tous les sites actifs (formulaire Vue).
+     * - Company : uniquement les sites de sa propre entreprise (périmètre).
      */
     public function searchSites(Request $request): JsonResponse
     {
+        $user = Auth::user();
         $query = $request->input('q', '');
-        
-        // Si la requête est vide, retourner tous les sites actifs
+
+        $base = Site::where('is_active', true);
+        if ($user && $user->user_type === 'company' && $user->enterprise_id) {
+            $base->where('enterprise_id', $user->enterprise_id);
+        }
+
+        // Si la requête est vide, retourner tous les sites actifs du périmètre
         if (strlen($query) < 2) {
-            $sites = Site::where('is_active', true)
+            $sites = (clone $base)
                 ->with('enterprise:id,name')
                 ->limit(100)
                 ->get()
@@ -569,11 +585,13 @@ class ComplaintController extends Controller
             ]);
         }
 
-        $sites = Site::where('is_active', true)
-            ->where(function ($q) use ($query) {
-                $q->where('name', 'ILIKE', "%{$query}%")
-                  ->orWhere('location', 'ILIKE', "%{$query}%")
-                  ->orWhere('ref', 'ILIKE', "%{$query}%");
+        $driver = \Illuminate\Support\Facades\DB::getDriverName();
+        $like = $driver === 'pgsql' ? 'ILIKE' : 'LIKE';
+        $sites = (clone $base)
+            ->where(function ($q) use ($query, $like) {
+                $q->where('name', $like, "%{$query}%")
+                  ->orWhere('location', $like, "%{$query}%")
+                  ->orWhere('ref', $like, "%{$query}%");
             })
             ->with('enterprise:id,name')
             ->limit(10)
@@ -595,5 +613,75 @@ class ComplaintController extends Controller
             'success' => true,
             'data' => $sites
         ]);
+    }
+
+    /**
+     * Payload simple ClientB sans toucher aux relations cassées du modèle
+     * (user/site/assignedUser résolus dans le mauvais namespace).
+     * Le vrai correctif modèle est décrit dans le rapport final.
+     */
+    private function toSimplePayload($complaint): array
+    {
+        $site = null;
+        $user = null;
+        $assignedUser = null;
+        try {
+            $site = Site::select('id', 'ref', 'name', 'location', 'city')->find($complaint->site_id);
+        } catch (\Throwable $e) {
+            $site = null;
+        }
+        try {
+            $user = $complaint->user_id ? User::select('id', 'name', 'email')->find($complaint->user_id) : null;
+            $assignedUser = $complaint->assigned_to ? User::select('id', 'name')->find($complaint->assigned_to) : null;
+        } catch (\Throwable $e) {
+            $user = null;
+            $assignedUser = null;
+        }
+        $actions = [];
+        try {
+            $actions = $complaint->actions()->get();
+        } catch (\Throwable $e) {
+            $actions = [];
+        }
+
+        return [
+            'id' => $complaint->id,
+            'reference' => $complaint->ref,
+            'ref' => $complaint->ref,
+            'title' => $complaint->title,
+            'description' => $complaint->description,
+            'status' => $complaint->status,
+            'priority' => $complaint->priority,
+            'category' => $complaint->category,
+            'site_id' => $complaint->site_id,
+            'user_id' => $complaint->user_id,
+            'assigned_to' => $complaint->assigned_to,
+            'wants_email_response' => $complaint->wants_email_response,
+            'wants_mail' => $complaint->wants_mail,
+            'recommandations' => $complaint->recommandations,
+            'analysis' => $complaint->analysis,
+            'immediate_response' => $complaint->immediate_response,
+            'expected_solution' => $complaint->expected_solution,
+            'customer_name' => $complaint->customer_name,
+            'customer_email' => $complaint->customer_email,
+            'customer_phone' => $complaint->customer_phone,
+            'customer_address' => $complaint->customer_address,
+            'client_name' => $complaint->client_name,
+            'client_email' => $complaint->client_email,
+            'client_phone' => $complaint->client_phone,
+            'client_company' => $complaint->client_company,
+            'satisfaction_rating' => $complaint->satisfaction_rating,
+            'satisfaction_comment' => $complaint->satisfaction_comment,
+            'received_date' => $complaint->received_date?->toISOString(),
+            'due_date' => $complaint->due_date?->toISOString(),
+            'response_date' => $complaint->response_date?->toISOString(),
+            'closed_date' => $complaint->closed_date?->toISOString(),
+            'created_at' => $complaint->created_at?->toISOString(),
+            'updated_at' => $complaint->updated_at?->toISOString(),
+            'site' => $site,
+            'user' => $user,
+            'assignedUser' => $assignedUser,
+            'actions' => $actions,
+        ];
     }
 }

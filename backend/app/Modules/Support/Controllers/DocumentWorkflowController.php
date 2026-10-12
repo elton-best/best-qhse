@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Events\DocumentWorkflowEvent;
 use App\Models\Document;
 use App\Models\DocumentWorkflowHistory;
+use App\Models\Process;
 use App\Models\SecurityAuditLog;
 use App\Models\Site;
 use App\Models\User;
@@ -42,12 +43,15 @@ class DocumentWorkflowController extends Controller
     {
         $user = $request->user();
         $document = Document::findOrFail((int) $id);
+        $this->attachSafeRelations($document);
 
         // **SECURITY FIX**: Vérifier que l'auteur du document est l'utilisateur courant (IDOR prevention)
-        abort_unless($user && $document->author_id === $user->id, 403, 'Vous ne pouvez pas confirmer ce document.');
-        
-        // **SECURITY FIX**: Vérifier que le document appartient au site de l'utilisateur (tenant isolation)
-        abort_unless($user && $document->site_id === $user->site_id, 403, 'Acces non autorise.');
+        abort_unless($user && (int) $document->author_id === (int) $user->id, 403, 'Vous ne pouvez pas confirmer ce document.');
+
+        // **SECURITY FIX**: le document doit appartenir à l'entreprise de l'utilisateur
+        // (accès multi-sites : même entreprise, pas forcément même site).
+        $documentSite = Site::query()->find((int) $document->site_id);
+        abort_unless($user && $documentSite && (int) $documentSite->enterprise_id === (int) $user->enterprise_id, 403, 'Acces non autorise.');
 
         $request->validate([
             'needs_verification' => 'required|boolean',
@@ -70,7 +74,8 @@ class DocumentWorkflowController extends Controller
             'rejection_reason' => null,
         ]);
 
-        $document->refresh();
+        $this->refreshDocument($document);
+        $this->attachSafeRelations($document);
         $this->notifyForWorkflowState($document, $user);
         event(new DocumentWorkflowEvent($document, 'submitted_for_verification', $user));
         $this->logWorkflowSecurityEvent($document, $fromState, $nextState, 'confirm_code');
@@ -89,6 +94,7 @@ class DocumentWorkflowController extends Controller
         $user = $request->user();
         abort_unless($user?->can('verify_documents'), 403);
         $document = $this->findDocumentForUser((int) $id, $user);
+        $this->attachSafeRelations($document);
         
         $request->validate([
             'comment' => 'nullable|string|max:1000',
@@ -104,8 +110,9 @@ class DocumentWorkflowController extends Controller
             'rejection_reason' => null,
         ]);
 
-        $document->refresh();
-        
+        $this->refreshDocument($document);
+        $this->attachSafeRelations($document);
+
         // Log workflow history
         DocumentWorkflowHistory::logAction(
             documentId: $document->id,
@@ -142,6 +149,7 @@ class DocumentWorkflowController extends Controller
         $user = $request->user();
         abort_unless($user?->can('approve_documents'), 403);
         $document = $this->findDocumentForUser((int) $id, $user);
+        $this->attachSafeRelations($document);
         
         $request->validate([
             'comment' => 'nullable|string|max:1000',
@@ -175,7 +183,8 @@ class DocumentWorkflowController extends Controller
 
         $this->transitionDocument($document, $toState, $approvalAttributes);
 
-        $document->refresh();
+        $this->refreshDocument($document);
+        $this->attachSafeRelations($document);
         if (!empty($nextVersion)) {
             $document->currentVersion()->update(['version_number' => $nextVersion]);
         }
@@ -227,6 +236,7 @@ class DocumentWorkflowController extends Controller
     {
         $user = $request->user();
         $document = $this->findDocumentForUser((int) $id, $user);
+        $this->attachSafeRelations($document);
 
         $request->validate([
             'rejection_reason' => 'required|string',
@@ -261,8 +271,9 @@ class DocumentWorkflowController extends Controller
             ),
         ]);
 
-        $document->refresh();
-        
+        $this->refreshDocument($document);
+        $this->attachSafeRelations($document);
+
         // Log workflow history
         DocumentWorkflowHistory::logAction(
             documentId: $document->id,
@@ -298,6 +309,7 @@ class DocumentWorkflowController extends Controller
     {
         $user = $request->user();
         $document = $this->findDocumentForUser((int) $id, $user);
+        $this->attachSafeRelations($document);
 
         $request->validate([
             'release_code' => 'required|boolean',
@@ -332,8 +344,9 @@ class DocumentWorkflowController extends Controller
             releaseCode: $releaseCode
         );
 
-        $document->refresh();
-        
+        $this->refreshDocument($document);
+        $this->attachSafeRelations($document);
+
         // Log workflow history
         DocumentWorkflowHistory::logAction(
             documentId: $document->id,
@@ -367,6 +380,7 @@ class DocumentWorkflowController extends Controller
     {
         $user = $request->user();
         $document = $this->findDocumentForUser((int) $id, $user);
+        $this->attachSafeRelations($document);
 
         $history = DocumentWorkflowHistory::forDocument($document->id)
             ->withRelations()
@@ -470,6 +484,7 @@ class DocumentWorkflowController extends Controller
     {
         $user = $request->user();
         $document = $this->findDocumentForUser((int) $id, $user);
+        $this->attachSafeRelations($document);
 
         $request->validate([
             'delegated_to' => 'required|exists:users,id',
@@ -519,6 +534,7 @@ class DocumentWorkflowController extends Controller
     {
         $user = $request->user();
         $document = $this->findDocumentForUser((int) $id, $user);
+        $this->attachSafeRelations($document);
 
         if (!in_array($document->workflow_status, ['pending_verification', 'pending_approval'])) {
             return response()->json([
@@ -592,7 +608,9 @@ class DocumentWorkflowController extends Controller
 
     private function findDocumentForUser(int $documentId, ?User $user): Document
     {
-        $document = Document::with('site')->findOrFail($documentId);
+        // Pas de with('site') : la relation site du modèle pointe vers une
+        // classe d'un autre module ; le site est chargé via attachSafeRelations().
+        $document = Document::findOrFail($documentId);
 
         if (!$user || $user->user_type === 'super_admin') {
             return $document;
@@ -602,12 +620,50 @@ class DocumentWorkflowController extends Controller
             return $document;
         }
 
-        $site = $document->site ?? Site::query()->find($document->site_id);
+        $site = Site::query()->find((int) $document->site_id);
         if (!$site || (int) $site->enterprise_id !== (int) $user->enterprise_id) {
             abort(403);
         }
 
         return $document;
+    }
+
+    /**
+     * Rafraîchit les attributs sans recharger les relations (refresh() natif
+     * re-invoquerait les méthodes de relation inter-modules du modèle).
+     */
+    private function refreshDocument(Document $document): void
+    {
+        $fresh = Document::query()->findOrFail($document->id);
+        $document->setRawAttributes($fresh->getAttributes(), true);
+    }
+
+    /**
+     * Rattache les relations inter-modules (site, processus, utilisateurs)
+     * sans appeler les méthodes de relation du modèle (voir DocumentController).
+     */
+    private function attachSafeRelations(Document $document): void
+    {
+        try {
+            if ($document->site_id && !$document->relationLoaded('site')) {
+                $document->setRelation('site', Site::query()->find((int) $document->site_id));
+            }
+        } catch (\Throwable) {
+        }
+        try {
+            if ($document->process_id && !$document->relationLoaded('process')) {
+                $document->setRelation('process', Process::query()->find((int) $document->process_id));
+            }
+        } catch (\Throwable) {
+        }
+        foreach (['author' => 'author_id', 'approver' => 'approver_id', 'verifier' => 'verifier_id'] as $relation => $key) {
+            try {
+                if (!empty($document->{$key}) && !$document->relationLoaded($relation)) {
+                    $document->setRelation($relation, User::query()->find((int) $document->{$key}));
+                }
+            } catch (\Throwable) {
+            }
+        }
     }
 
     private function transitionDocument(Document $document, string $targetState, array $attributes = []): void
@@ -716,8 +772,13 @@ class DocumentWorkflowController extends Controller
 
         if ($document->site_id) {
             $query->where('site_id', $document->site_id);
-        } elseif ($document->site?->enterprise_id) {
-            $query->where('enterprise_id', $document->site->enterprise_id);
+        } else {
+            $fallbackSite = $document->relationLoaded('site')
+                ? $document->getRelation('site')
+                : Site::query()->find((int) $document->site_id);
+            if ($fallbackSite?->enterprise_id) {
+                $query->where('enterprise_id', $fallbackSite->enterprise_id);
+            }
         }
 
         if ($excludeUserId) {

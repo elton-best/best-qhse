@@ -100,8 +100,21 @@ class ActionService
 
     public function start(Action $action): Action
     {
-        if ($action->canTransitionTo('in_progress')) {
-            $action->transitionTo('in_progress');
+        // La colonne `status` (CHECK: planned/in_progress/completed/verified/cancelled)
+        // doit rester cohérente avec l'avancement, car le frontend (Vue + React)
+        // lit le statut depuis cette colonne.
+        $action->update(['status' => 'in_progress']);
+
+        // Remonter la chaîne du workflow (draft -> planned -> in_progress),
+        // chaque maillon étant tenté au mieux (permissions/transitions configurées).
+        foreach (['planned', 'in_progress'] as $state) {
+            try {
+                if (!$action->isInState($state) && $action->canTransitionTo($state)) {
+                    $action->transitionTo($state);
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('ActionService::start: transition failed', ['action_id' => $action->id, 'state' => $state, 'error' => $e->getMessage()]);
+            }
         }
 
         $action->addProgressNote('Action démarrée');
@@ -161,7 +174,13 @@ class ActionService
             }
 
             // If normalizedProgress is 0, keep as-is
-            $action->update(['progress' => $normalizedProgress]);
+            // (`progress`, `progress_rate` et `progress_percentage` sont tenus
+            // synchronisés : les frontends lisent indifféremment l'un ou l'autre.)
+            $action->update([
+                'progress' => $normalizedProgress,
+                'progress_rate' => $normalizedProgress,
+                'progress_percentage' => $normalizedProgress,
+            ]);
 
             if ($note) {
                 $action->addProgressNote($note);
@@ -188,9 +207,13 @@ class ActionService
 
     public function verify(Action $action, array $verificationData): Action
     {
+        $isEffective = (bool) $verificationData['is_effective'];
         $action->update([
-            'effectiveness_verified' => $verificationData['is_effective'],
+            'effectiveness_verified' => $isEffective,
             'verification_date' => now(),
+            // Colonne `status` (CHECK constraint) : `in_verification` n'y est pas
+            // autorisé ; on expose `verified` (efficace) ou retour `in_progress`.
+            'status' => $isEffective ? 'verified' : 'in_progress',
         ]);
 
         if ($verificationData['is_effective']) {
@@ -216,6 +239,10 @@ class ActionService
     {
         $action->update([
             'progress' => 100,
+            'progress_rate' => 100,
+            'progress_percentage' => 100,
+            'status' => 'completed',
+            'completion_date' => $action->completion_date ?? now(),
             'actual_cost' => $actualCost ?? $action->actual_cost,
         ]);
 
@@ -233,6 +260,8 @@ class ActionService
 
     public function cancel(Action $action, string $reason): Action
     {
+        $action->update(['status' => 'cancelled']);
+
         if ($action->canTransitionTo('cancelled')) {
             $action->transitionTo('cancelled');
         }
@@ -293,10 +322,10 @@ class ActionService
         $value = strtolower(trim((string) $status));
 
         return match ($value) {
-            'planned', 'a_faire', 'todo', 'draft', '' => 'planned',
+            'planned', 'a_faire', 'todo', 'draft', 'assigned', '' => 'planned',
             'in_progress', 'en_cours', 'inprogress' => 'in_progress',
             'completed', 'terminee', 'terminée', 'done' => 'completed',
-            'verified' => 'verified',
+            'verified', 'closed' => 'verified',
             'cancelled', 'canceled' => 'cancelled',
             default => 'planned',
         };

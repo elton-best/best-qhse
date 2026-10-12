@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Download, Eye, FileText, Send, X } from "lucide-react";
 import { backendApi } from "@/integrations/backend/client";
+import { PENDING_DOCUMENTS_KEY } from "@/integrations/backend/documents";
 import { flattenResource, useProcesses } from "@/integrations/backend/context";
 
 const card = "rounded-2xl border border-border bg-card";
@@ -39,6 +41,7 @@ function processType(value: unknown) {
 }
 
 export function DocumentActions({ siteId, title, generatePath, filename, payload = {} }: DocumentActionsProps) {
+  const queryClient = useQueryClient();
   const { data: resources = [] } = useProcesses(siteId);
   const [types, setTypes] = useState<DocumentType[]>([]);
   const [typeId, setTypeId] = useState("");
@@ -160,7 +163,8 @@ export function DocumentActions({ siteId, title, generatePath, filename, payload
       setVerifyOpen(false);
       setDocumentId(undefined);
       setDocumentCode("");
-      toast.success("Document envoyé pour vérification.");
+      await queryClient.invalidateQueries({ queryKey: PENDING_DOCUMENTS_KEY });
+      toast.success("Document envoyé pour vérification. Il apparaît dans la file Vérification.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Échec de la soumission pour vérification.");
     } finally {

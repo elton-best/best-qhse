@@ -14,8 +14,20 @@ export type PendingDocument = {
   process_label: string;
   author_name: string;
   approver_name: string;
+  verifier_name: string;
   created_at: string | null;
   metadata: Record<string, unknown>;
+};
+
+export type WorkflowHistoryEntry = {
+  id: string;
+  action: string;
+  action_label: string;
+  from_status: string | null;
+  to_status: string | null;
+  comment: string | null;
+  actor_name: string;
+  created_at: string | null;
 };
 
 function objectOf(value: unknown): Record<string, unknown> {
@@ -52,6 +64,7 @@ function normalizeDocument(item: unknown): PendingDocument | null {
   if (id == null) return null;
   const author = relationValue(attrs.author ?? raw.author);
   const approver = relationValue(attrs.approver ?? raw.approver);
+  const verifier = relationValue(attrs.verifier ?? raw.verifier);
   const process = relationValue(attrs.process ?? raw.process);
   const site = relationValue(attrs.site ?? raw.site);
   const source = [attrs.source_module, attrs.source_submodule, attrs.source_section]
@@ -78,6 +91,7 @@ function normalizeDocument(item: unknown): PendingDocument | null {
     ),
     author_name: String(author.name ?? author.email ?? "—"),
     approver_name: String(approver.name ?? approver.email ?? "—"),
+    verifier_name: String(verifier.name ?? verifier.email ?? "—"),
     created_at: attrs.created_at == null ? null : String(attrs.created_at),
     metadata: objectOf(attrs.metadata),
   };
@@ -105,17 +119,29 @@ export function usePendingDocuments(workflowStatus: "pending_verification" | "pe
 
 export function useDocumentWorkflow() {
   const queryClient = useQueryClient();
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: PENDING_DOCUMENTS_KEY });
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: PENDING_DOCUMENTS_KEY });
+    queryClient.invalidateQueries({ queryKey: ["workflow-history"] });
+  };
   return {
     verify: useMutation({
-      mutationFn: (id: string) => backendApi.request(`documents/${id}/verify`, { method: "POST" }),
+      mutationFn: (input: string | { id: string; comment?: string }) =>
+        backendApi.request(
+          `documents/${typeof input === "string" ? input : input.id}/verify`,
+          {
+            method: "POST",
+            body: JSON.stringify(
+              typeof input === "string" || !input.comment ? {} : { comment: input.comment },
+            ),
+          },
+        ),
       onSuccess: invalidate,
     }),
     approve: useMutation({
-      mutationFn: (input: { id: string; effective_date?: string; comment?: string }) =>
+      mutationFn: (input: { id: string; comment?: string }) =>
         backendApi.request(`documents/${input.id}/approve`, {
           method: "POST",
-          body: JSON.stringify({ effective_date: input.effective_date, comment: input.comment }),
+          body: JSON.stringify(input.comment ? { comment: input.comment } : {}),
         }),
       onSuccess: invalidate,
     }),
@@ -127,5 +153,103 @@ export function useDocumentWorkflow() {
         }),
       onSuccess: invalidate,
     }),
+    submit: useMutation({
+      mutationFn: (id: string) =>
+        backendApi.request(`documents/${id}/submit-for-approval`, { method: "POST" }),
+      onSuccess: invalidate,
+    }),
+    confirmRejectionDecision: useMutation({
+      mutationFn: (input: { id: string; release_code: boolean; comment?: string }) =>
+        backendApi.request(`documents/${input.id}/confirm-rejection-decision`, {
+          method: "POST",
+          body: JSON.stringify({
+            release_code: input.release_code,
+            ...(input.comment ? { comment: input.comment } : {}),
+          }),
+        }),
+      onSuccess: invalidate,
+    }),
   };
+}
+
+const WORKFLOW_ACTION_LABELS: Record<string, string> = {
+  submitted: "Soumis pour vérification",
+  confirm_code: "Code confirmé",
+  submit_for_approval: "Soumission au workflow",
+  verified: "Vérifié",
+  approved: "Approuvé",
+  rejected: "Rejeté",
+  rejection_confirmed: "Rejet confirmé",
+  rejection_cancelled: "Rejet annulé",
+  delegated: "Délégué",
+  reminded: "Rappel envoyé",
+  downloaded: "Téléchargé",
+  previewed: "Prévisualisé",
+  auto_submitted: "Soumis automatiquement",
+  verify: "Vérification effectuée",
+  approve: "Approbation effectuée",
+  reject: "Rejet effectué",
+  confirm_rejection_decision: "Décision du soumissionnaire",
+};
+
+export function workflowActionLabel(action: string): string {
+  return WORKFLOW_ACTION_LABELS[action] ?? action;
+}
+
+function historyEntry(item: unknown): WorkflowHistoryEntry | null {
+  const raw = objectOf(item);
+  const attrs =
+    raw.attributes && typeof raw.attributes === "object"
+      ? (raw.attributes as Record<string, unknown>)
+      : raw;
+  const id = raw.id ?? attrs.id;
+  if (id == null) return null;
+  const user = relationValue(attrs.user ?? raw.user);
+  const action = String(attrs.action ?? "");
+  return {
+    id: String(id),
+    action,
+    action_label: String(
+      attrs.action_label ?? WORKFLOW_ACTION_LABELS[action] ?? action,
+    ),
+    from_status: attrs.from_status == null ? null : String(attrs.from_status),
+    to_status: attrs.to_status == null ? null : String(attrs.to_status),
+    comment: attrs.comment == null ? null : String(attrs.comment),
+    actor_name: String(user.name ?? user.email ?? "Système"),
+    created_at:
+      attrs.action_at == null
+        ? attrs.created_at == null
+          ? null
+          : String(attrs.created_at)
+        : String(attrs.action_at),
+  };
+}
+
+export async function fetchWorkflowHistory(id: string) {
+  const payload = await backendApi.request<unknown>(
+    `documents/${encodeURIComponent(id)}/workflow-history`,
+  );
+  const root = objectOf(payload);
+  const data = Array.isArray(root.data) ? root.data : collection(payload);
+  return data
+    .map(historyEntry)
+    .filter((item): item is WorkflowHistoryEntry => item !== null);
+}
+
+export function useWorkflowHistory(id: string | null) {
+  return useQuery({
+    queryKey: ["workflow-history", id],
+    queryFn: () => fetchWorkflowHistory(id as string),
+    enabled: Boolean(id),
+    staleTime: 15_000,
+    retry: 1,
+  });
+}
+
+export async function previewDocumentBlob(id: string): Promise<Blob> {
+  return backendApi.blob(`documents/${encodeURIComponent(id)}/preview`);
+}
+
+export async function downloadDocumentBlob(id: string): Promise<Blob> {
+  return backendApi.blob(`documents/${encodeURIComponent(id)}/download`);
 }

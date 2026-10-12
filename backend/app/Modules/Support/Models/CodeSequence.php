@@ -6,6 +6,9 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\DB;
+use App\Modules\Enterprise\Models\Enterprise;
+use App\Modules\Enterprise\Models\Site;
+use App\Modules\Processes\Models\Process;
 
 class CodeSequence extends Model
 {

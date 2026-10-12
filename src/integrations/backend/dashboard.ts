@@ -163,17 +163,29 @@ function normalizeDashboard(payload: DashboardResponse): DashboardPayload {
 
 function normalizeCollaboratorActions(payload: CollaboratorResponse): CollaboratorActionsPayload {
   const data = payload.data && typeof payload.data === "object" ? payload.data : payload;
-  const stats = data.stats ?? {};
-  return {
+  const stats = (data.stats ?? {}) as Record<string, unknown>;
+  // Compatibilité avec la forme historique `{ counts: { total, planned,
+  // in_progress, overdue, completed } }` exposée par `actions/my-actions`.
+  const dataRecord = data as unknown as Record<string, unknown>;
+  const payloadRecord = payload as unknown as Record<string, unknown>;
+  const counts = (dataRecord["counts"] ?? payloadRecord["counts"] ?? {}) as Record<string, unknown>;
+  const rawActions = Array.isArray(data.actions)
+    ? data.actions
+    : Array.isArray(dataRecord["data"])
+      ? (dataRecord["data"] as CollaboratorAction[])
+      : [];
+  const result: CollaboratorActionsPayload = {
     stats: {
-      total_assigned: numberOf(stats.total_assigned),
-      open_count: numberOf(stats.open_count),
-      in_progress_count: numberOf(stats.in_progress_count),
-      overdue_count: numberOf(stats.overdue_count),
-      due_soon_count: numberOf(stats.due_soon_count),
-      completed_count: numberOf(stats.completed_count),
+      total_assigned: numberOf(stats["total_assigned"] ?? counts["total"]),
+      open_count: numberOf(
+        stats["open_count"] ?? numberOf(counts["total"]) - numberOf(counts["completed"]),
+      ),
+      in_progress_count: numberOf(stats["in_progress_count"] ?? counts["in_progress"]),
+      overdue_count: numberOf(stats["overdue_count"] ?? counts["overdue"]),
+      due_soon_count: numberOf(stats["due_soon_count"]),
+      completed_count: numberOf(stats["completed_count"] ?? counts["completed"]),
     },
-    actions: Array.isArray(data.actions) ? data.actions : [],
+    actions: rawActions,
     by_process: Array.isArray(data.by_process)
       ? data.by_process.map((item) => ({
           process_id: item.process_id ?? null,
@@ -184,8 +196,9 @@ function normalizeCollaboratorActions(payload: CollaboratorResponse): Collaborat
           overdue_count: numberOf(item.overdue_count),
         }))
       : [],
-    pagination: data.pagination,
   };
+  if (data.pagination) result.pagination = data.pagination;
+  return result;
 }
 
 export async function fetchDashboardStats(params?: {

@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Activitylog\LogOptions;
 use App\Modules\Enterprise\Models\Site;
+use App\Modules\Enterprise\Models\User;
 
 class AuditProgram extends Model
 {

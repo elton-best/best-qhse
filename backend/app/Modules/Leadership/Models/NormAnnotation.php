@@ -3,6 +3,8 @@
 namespace App\Modules\Leadership\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use App\Modules\Enterprise\Models\Enterprise;
+use App\Modules\Enterprise\Models\User;
 
 class NormAnnotation extends Model
 {

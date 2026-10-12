@@ -8,6 +8,9 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Laravel\Scout\Searchable;
+use App\Modules\Enterprise\Models\Site;
+use App\Modules\Enterprise\Models\User;
+use App\Modules\Processes\Models\Process;
 
 class Document extends Model
 {

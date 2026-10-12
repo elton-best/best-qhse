@@ -5,6 +5,7 @@ namespace App\Modules\Hse\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Modules\Support\Models\Equipement;
 
 class VerificationReglementaire extends Model
 {

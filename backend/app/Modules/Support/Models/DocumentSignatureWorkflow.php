@@ -4,6 +4,7 @@ namespace App\Modules\Support\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use App\Modules\Enterprise\Models\User;
 
 class DocumentSignatureWorkflow extends Model
 {

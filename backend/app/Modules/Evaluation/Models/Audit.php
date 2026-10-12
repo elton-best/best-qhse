@@ -17,6 +17,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Activitylog\Traits\LogsActivity;
+use App\Modules\Enterprise\Models\User;
+use App\Modules\Improvement\Models\NonConformity;
+use App\Modules\Planning\Models\Risk;
+use App\Modules\Processes\Models\Process;
+use App\Modules\Support\Models\Document;
 
 class Audit extends Model
 {
