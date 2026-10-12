@@ -4,7 +4,7 @@ namespace App\Modules\Evaluation\Models;
 
 use App\Models\Objective;
 use App\Models\Process;
-use App\Models\Site;
+use App\Modules\Enterprise\Models\Site;
 use App\Models\User;
 
 use App\Traits\BelongsToEnterprise;

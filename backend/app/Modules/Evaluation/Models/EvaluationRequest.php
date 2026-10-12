@@ -4,7 +4,7 @@ namespace App\Modules\Evaluation\Models;
 
 use App\Models\Activity;
 use App\Models\Audit;
-use App\Models\Site;
+use App\Modules\Enterprise\Models\Site;
 use App\Models\User;
 
 use App\Traits\BelongsToEnterprise;

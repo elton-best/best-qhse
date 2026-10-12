@@ -2,7 +2,7 @@
 
 namespace App\Modules\Evaluation\Models;
 
-use App\Models\Site;
+use App\Modules\Enterprise\Models\Site;
 
 use App\Traits\HasAuditFields;
 use App\Traits\HasReference;

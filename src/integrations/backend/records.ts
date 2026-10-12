@@ -281,6 +281,33 @@ function sanitizePayload(
     payload.name = title;
     payload.site_id = payload.site_id ?? undefined;
   }
+  if (kind === "action") {
+    // Le backend Laravel exige site_id, process_id, type, description (min 10),
+    // responsible_id et deadline. Le formulaire React produit pilot_id / due_date :
+    // on mappe + on complète avec le site courant (localStorage lq-site).
+    const PRIORITY_FR: Record<string, string> = {
+      Basse: "low",
+      Normale: "medium",
+      Haute: "high",
+      Urgente: "critical",
+    };
+    if (payload.site_id == null && typeof window !== "undefined") {
+      const currentSite = window.localStorage.getItem("lq-site");
+      if (currentSite) payload.site_id = currentSite;
+    }
+    if (payload.responsible_id == null && payload.pilot_id != null) {
+      payload.responsible_id = payload.pilot_id;
+    }
+    if (payload.deadline == null && payload.due_date != null) {
+      payload.deadline = payload.due_date;
+    }
+    if (payload.type == null) payload.type = "corrective";
+    if (typeof payload.priority === "string" && PRIORITY_FR[payload.priority]) {
+      payload.priority = PRIORITY_FR[payload.priority];
+    }
+    delete payload.pilot_id;
+    delete payload.due_date;
+  }
   if (kind === "indicator") {
     payload.name = payload.name ?? title;
     payload.code =

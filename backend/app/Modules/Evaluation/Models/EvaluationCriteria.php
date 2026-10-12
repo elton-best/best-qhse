@@ -6,7 +6,7 @@ use App\Models\Activity;
 use App\Models\Audit;
 use App\Models\ClientSatisfactionForm;
 use App\Models\Communication;
-use App\Models\Site;
+use App\Modules\Enterprise\Models\Site;
 use App\Models\User;
 
 use App\Traits\BelongsToEnterprise;

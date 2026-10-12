@@ -36,8 +36,8 @@ class ActionService
                 'estimated_cost' => $data['estimated_cost'] ?? null,
                 'required_resources' => $data['required_resources'] ?? null,
                 'status' => $normalizedStatus,
-                'progress' => isset($data['progress']) ? (int) $data['progress'] : null,
-                'progress_rate' => isset($data['progress_rate']) ? (int) $data['progress_rate'] : (isset($data['progress']) ? (int) $data['progress'] : null),
+                'progress' => isset($data['progress']) ? (int) $data['progress'] : 0,
+                'progress_rate' => isset($data['progress_rate']) ? (int) $data['progress_rate'] : (isset($data['progress']) ? (int) $data['progress'] : 0),
             ]);
 
             // Lier aux entités sources (polymorphique)

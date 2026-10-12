@@ -2,7 +2,7 @@
 
 namespace App\Modules\Evaluation\Models;
 
-use App\Models\Site;
+use App\Modules\Enterprise\Models\Site;
 use App\Models\User;
 
 use App\Traits\HasAuditFields;
