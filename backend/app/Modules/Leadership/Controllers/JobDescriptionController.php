@@ -373,22 +373,29 @@ class JobDescriptionController extends Controller
             }
             $document = null;
             if ($siteId > 0) {
-                $document = app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
-                    'site_id' => $siteId,
-                    'process_id' => null,
-                    'process_code' => 'GEN',
-                    'document_kind' => 'job_description_pdf',
-                    'source_type' => 'job_description',
-                    'source_id' => $jobDescription->id,
-                    'source_updated_at' => $jobDescription->updated_at?->toISOString(),
-                    'title' => 'Fiche de poste ' . ($jobDescription->job_title ?? '#'.$jobDescription->id),
-                    'description' => 'Fiche de poste exportée en PDF.',
-                    'file_source_path' => $tempPath,
-                    'file_extension' => 'pdf',
-                    'created_by' => $currentUser?->id,
-                    'type' => 'ENR',
-                    'force_new' => true,
-                ]);
+                try {
+                    $document = app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
+                        'site_id' => $siteId,
+                        'process_id' => null,
+                        'process_code' => 'GEN',
+                        'document_kind' => 'job_description_pdf',
+                        'source_type' => 'job_description',
+                        'source_id' => $jobDescription->id,
+                        'source_updated_at' => $jobDescription->updated_at?->toISOString(),
+                        'title' => 'Fiche de poste ' . ($jobDescription->job_title ?? '#'.$jobDescription->id),
+                        'description' => 'Fiche de poste exportée en PDF.',
+                        'file_source_path' => $tempPath,
+                        'file_extension' => 'pdf',
+                        'created_by' => $currentUser?->id,
+                        'type' => 'ENR',
+                        'force_new' => true,
+                    ]);
+                } catch (\Throwable $syncException) {
+                    Log::warning('Job description PDF inventory sync skipped', [
+                        'job_description_id' => $jobDescription->id,
+                        'error' => $syncException->getMessage(),
+                    ]);
+                }
             }
 
             $response = response()->download($tempPath, $filename)->deleteFileAfterSend(true);
@@ -422,19 +429,26 @@ class JobDescriptionController extends Controller
                 }
                 $document = null;
                 if ($siteId > 0) {
-                    $document = app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
-                        'site_id' => $siteId,
-                        'process_id' => null,
-                        'process_code' => 'GEN',
-                        'document_kind' => 'job_description_pdf',
-                        'title' => 'Fiche de poste ' . ($jobDescription->job_title ?? '#'.$jobDescription->id),
-                        'description' => 'Fiche de poste exportée en PDF.',
-                        'file_source_path' => $tempPath,
-                        'file_extension' => 'pdf',
-                        'created_by' => $currentUser?->id,
-                        'type' => 'ENR',
-                        'force_new' => true,
-                    ]);
+                    try {
+                        $document = app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
+                            'site_id' => $siteId,
+                            'process_id' => null,
+                            'process_code' => 'GEN',
+                            'document_kind' => 'job_description_pdf',
+                            'title' => 'Fiche de poste ' . ($jobDescription->job_title ?? '#'.$jobDescription->id),
+                            'description' => 'Fiche de poste exportée en PDF.',
+                            'file_source_path' => $tempPath,
+                            'file_extension' => 'pdf',
+                            'created_by' => $currentUser?->id,
+                            'type' => 'ENR',
+                            'force_new' => true,
+                        ]);
+                    } catch (\Throwable $syncException) {
+                        Log::warning('Job description PDF inventory sync skipped (fallback)', [
+                            'job_description_id' => $jobDescription->id,
+                            'error' => $syncException->getMessage(),
+                        ]);
+                    }
                 }
 
                 $response = response()->download($tempPath, $filename)->deleteFileAfterSend(true);

@@ -185,12 +185,16 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // ─── Throwable générique (dernier recours) ────────────────────────────
         $exceptions->renderable(function (\Throwable $e, $request) {
-            if ($e instanceof HttpExceptionInterface) {
+            if (!$request->is('api/*')) {
                 return null;
             }
 
-            if (!$request->is('api/*')) {
-                return null;
+            // Erreurs HTTP (404/403 via abort) : message métier seul, jamais de trace.
+            if ($e instanceof HttpExceptionInterface) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $e->getMessage() !== '' ? $e->getMessage() : 'Erreur.',
+                ], $e->getStatusCode());
             }
 
             $context = [
@@ -207,14 +211,11 @@ return Application::configure(basePath: dirname(__DIR__))
 
             Log::error('API Error non géré: ' . $e->getMessage(), $context);
 
-            // En local : laisser Laravel afficher l'erreur complète
-            if (app()->environment('local')) {
-                return null;
-            }
-
+            // API : réponse propre DANS TOUS LES ENVS (le détail reste dans les logs).
+            // On ne laisse jamais Laravel sérialiser exception/file/trace (APP_DEBUG).
             return response()->json([
                 'success' => false,
-                'message' => 'Une erreur est survenue. Veuillez réessayer.',
+                'message' => 'Une erreur inattendue est survenue.',
             ], 500);
         });
     })->create();

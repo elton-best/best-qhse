@@ -38,7 +38,7 @@ class StakeholderController extends Controller
             $query->where('site_id', $request->site_id);
         }
 
-        $stakeholders = $query->paginate(20);
+        $stakeholders = $query->paginate($request->integer('per_page', 20) > 0 ? min($request->integer('per_page', 20), 100) : 20);
         return StakeholderResource::collection($stakeholders);
     }
 
@@ -47,7 +47,7 @@ class StakeholderController extends Controller
         $validated = $request->validate([
             'site_id' => 'required|exists:sites,id',
             'type' => 'required|in:client,supplier,partner,regulator,employee,shareholder,other',
-            'relevance_degree' => 'nullable|string',
+            'relevance_degree' => 'nullable|in:low,medium,high',
             'needs_expectations' => 'nullable|string',
             'requirements' => 'nullable|string',
             'actions' => 'nullable|string',
@@ -56,15 +56,16 @@ class StakeholderController extends Controller
             'responsible_id' => 'nullable|exists:users,id',
             'needs' => 'nullable|array',
             'needs.*.description' => 'nullable|string',
-            'needs.*.priority' => 'nullable|string',
+            'needs.*.priority' => 'nullable|in:low,medium,high',
             'needs.*.requirements' => 'nullable|array',
             'needs.*.requirements.*.description' => 'nullable|string',
-            'needs.*.requirements.*.type' => 'nullable|string',
+            'needs.*.requirements.*.type' => 'nullable|in:legal,regulatory,contractual,other',
             'needs.*.requirements.*.actions' => 'nullable|array',
             'needs.*.requirements.*.actions.*.description' => 'nullable|string',
             'needs.*.requirements.*.actions.*.responsible_user_id' => 'nullable|integer|exists:users,id',
+            'needs.*.requirements.*.actions.*.responsible_name' => 'nullable|string|max:255',
             'needs.*.requirements.*.actions.*.deadline' => 'nullable|date',
-            'name' => 'nullable|string|max:255',
+            'name' => 'required|string|max:255',
         ]);
 
         if (array_key_exists('needs', $validated)) {
@@ -85,7 +86,7 @@ class StakeholderController extends Controller
         $validated = $request->validate([
             'site_id' => 'sometimes|exists:sites,id',
             'type' => 'sometimes|in:client,supplier,partner,regulator,employee,shareholder,other',
-            'relevance_degree' => 'nullable|string',
+            'relevance_degree' => 'nullable|in:low,medium,high',
             'needs_expectations' => 'nullable|string',
             'requirements' => 'nullable|string',
             'actions' => 'nullable|string',
@@ -94,15 +95,16 @@ class StakeholderController extends Controller
             'responsible_id' => 'nullable|exists:users,id',
             'needs' => 'nullable|array',
             'needs.*.description' => 'nullable|string',
-            'needs.*.priority' => 'nullable|string',
+            'needs.*.priority' => 'nullable|in:low,medium,high',
             'needs.*.requirements' => 'nullable|array',
             'needs.*.requirements.*.description' => 'nullable|string',
-            'needs.*.requirements.*.type' => 'nullable|string',
+            'needs.*.requirements.*.type' => 'nullable|in:legal,regulatory,contractual,other',
             'needs.*.requirements.*.actions' => 'nullable|array',
             'needs.*.requirements.*.actions.*.description' => 'nullable|string',
             'needs.*.requirements.*.actions.*.responsible_user_id' => 'nullable|integer|exists:users,id',
+            'needs.*.requirements.*.actions.*.responsible_name' => 'nullable|string|max:255',
             'needs.*.requirements.*.actions.*.deadline' => 'nullable|date',
-            'name' => 'nullable|string|max:255',
+            'name' => 'sometimes|required|string|max:255',
         ]);
 
         if (array_key_exists('needs', $validated)) {
@@ -272,10 +274,17 @@ class StakeholderController extends Controller
                                 }
                             }
 
+                            if ($responsibleName === null || $responsibleName === '') {
+                                $fallbackName = trim((string) ($action['responsible_name'] ?? $action['responsible'] ?? ''));
+                                $responsibleName = $fallbackName !== '' ? $fallbackName : null;
+                            }
+
                             return [
                                 'description' => trim((string) ($action['description'] ?? '')),
                                 'responsible_user_id' => $responsibleUserId,
                                 'responsible_name' => $responsibleName,
+                                // Alias lu par le générateur DOCX du registre.
+                                'responsible' => $responsibleName,
                                 'deadline' => !empty($action['deadline']) ? (string) $action['deadline'] : '',
                             ];
                         })

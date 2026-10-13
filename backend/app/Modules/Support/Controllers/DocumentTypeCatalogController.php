@@ -23,7 +23,12 @@ class DocumentTypeCatalogController extends Controller
         }
 
         if ($request->filled('site_id')) {
-            $query->where('site_id', (int) $request->integer('site_id'));
+            $siteId = (int) $request->integer('site_id');
+            // Les types sans site sont des types génériques de l'entreprise et
+            // doivent rester disponibles dans le sélecteur de chaque site.
+            $query->where(function ($scope) use ($siteId) {
+                $scope->where('site_id', $siteId)->orWhereNull('site_id');
+            });
         }
 
         if ($request->has('is_active')) {

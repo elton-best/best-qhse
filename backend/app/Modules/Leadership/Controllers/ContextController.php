@@ -17,22 +17,24 @@ class ContextController extends Controller
     {
         $query = Context::with('site');
 
-        // Filter by type (swot, pestel, internal, external)
-        if ($request->has('type')) {
+        // Filter by type (internal, external, swot, pestel, swot_pestel)
+        if ($request->filled('type')) {
             $query->where('type', $request->type);
         }
 
         // Filter by year
-        if ($request->has('year')) {
+        if ($request->filled('year')) {
             $query->where('year', $request->year);
         }
 
         // Filter by site_id
-        if ($request->has('site_id')) {
+        if ($request->filled('site_id')) {
             $query->where('site_id', $request->site_id);
         }
 
-        $contexts = $query->paginate(20);
+        // Latest first so list()[0] is the current record (single-record
+        // SWOT/PESTEL usage, same as ContextDocxGenerator::latest()).
+        $contexts = $query->orderByDesc('updated_at')->orderByDesc('id')->paginate(20);
         return ContextResource::collection($contexts);
     }
 
@@ -41,7 +43,8 @@ class ContextController extends Controller
         $validated = $request->validate([
             'site_id' => 'required|exists:sites,id',
             'type' => 'nullable|string|max:50',
-            'category' => 'nullable|in:economic,social,technological,environmental,legal,political,organizational,other,strength,weakness,opportunity,threat',
+            // Aligné sur la contrainte DB contexts_category_check (sinon 500 SQLSTATE 23514).
+            'category' => 'nullable|in:economic,social,technological,environmental,legal,political,organizational,other',
             'description' => 'nullable|string',
             'impact' => 'nullable|in:positive,negative,neutral',
             'analysis' => 'nullable|string',
@@ -83,7 +86,8 @@ class ContextController extends Controller
         $validated = $request->validate([
             'site_id' => 'sometimes|exists:sites,id',
             'type' => 'nullable|string|max:50',
-            'category' => 'nullable|in:economic,social,technological,environmental,legal,political,organizational,other,strength,weakness,opportunity,threat',
+            // Aligné sur la contrainte DB contexts_category_check (sinon 500 SQLSTATE 23514).
+            'category' => 'nullable|in:economic,social,technological,environmental,legal,political,organizational,other',
             'description' => 'nullable|string',
             'impact' => 'nullable|in:positive,negative,neutral',
             'analysis' => 'nullable|string',

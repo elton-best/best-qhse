@@ -47,7 +47,12 @@ class PlanSMController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $isGlobalViewer = $user->hasPermissionTo('view_all_tasks');
+        $isGlobalViewer = false;
+        try {
+            $isGlobalViewer = $user->hasPermissionTo('view_all_tasks');
+        } catch (\Spatie\Permission\Exceptions\PermissionDoesNotExist $e) {
+            $isGlobalViewer = false;
+        }
         $pilotOrCopilotProcessIds = Process::query()
             ->where('enterprise_id', $user->enterprise_id)
             ->where(function ($q) use ($user) {

@@ -41,16 +41,24 @@ class OrganizationContext extends Model
 
     public function site()
     {
-        return $this->belongsTo(Site::class);
+        return $this->belongsTo(Site::class, 'site_id');
     }
 
     public function enterprise()
     {
-        return $this->belongsTo(Enterprise::class);
+        return $this->belongsTo(Enterprise::class, 'enterprise_id');
     }
 
     public function issues()
     {
         return $this->hasMany(ContextIssue::class, 'context_id');
+    }
+
+    /**
+     * Enjeux majeurs (synthèse) : enjeux marqués is_major.
+     */
+    public function majorIssues()
+    {
+        return $this->hasMany(ContextIssue::class, 'context_id')->where('is_major', true);
     }
 }

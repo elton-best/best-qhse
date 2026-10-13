@@ -26,6 +26,7 @@ class StoreActionRequest extends FormRequest
             'source' => 'nullable|in:audit,complaint,non_conformity,suggestion,management_review',
             'source_type' => 'nullable|string|max:50',
             'source_id' => 'nullable|integer',
+            'source_ref' => 'nullable|string|max:255',
             'estimated_cost' => 'nullable|numeric|min:0',
             'required_resources' => 'nullable|string|max:5000',
             'actionables' => 'nullable|array',

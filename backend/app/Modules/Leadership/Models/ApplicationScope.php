@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use App\Modules\Enterprise\Models\Enterprise;
 use App\Modules\Enterprise\Models\Site;
+use App\Modules\Enterprise\Models\User;
+use App\Modules\Support\Models\Document;
 
 class ApplicationScope extends Model
 {
@@ -66,5 +68,20 @@ class ApplicationScope extends Model
     public function site()
     {
         return $this->belongsTo(Site::class);
+    }
+
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function updater()
+    {
+        return $this->belongsTo(User::class, 'updated_by');
+    }
+
+    public function documents()
+    {
+        return $this->hasMany(Document::class, 'module_id')->where('metadata->source_type', 'application_scope');
     }
 }

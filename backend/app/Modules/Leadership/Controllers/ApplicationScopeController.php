@@ -30,8 +30,44 @@ class ApplicationScopeController extends Controller
             $query->where('is_current', filter_var($request->is_current, FILTER_VALIDATE_BOOLEAN));
         }
 
-        $scopes = $query->orderByDesc('id')->paginate(20);
+        $scopes = $query->orderByDesc('is_current')->orderByDesc('id')->paginate(20);
         return ApplicationScopeResource::collection($scopes);
+    }
+
+    /**
+     * Périmètre courant d'un site (lecture du périmètre d'application actif).
+     */
+    public function current(Request $request)
+    {
+        $validated = $request->validate([
+            'site_id' => 'required|exists:sites,id',
+        ]);
+
+        $scope = ApplicationScope::with(['site'])
+            ->where('site_id', $validated['site_id'])
+            ->where('is_current', true)
+            ->orderByDesc('id')
+            ->first();
+
+        if (!$scope) {
+            return response()->json(['message' => 'Aucun périmètre courant pour ce site.'], 404);
+        }
+
+        return new ApplicationScopeResource($scope);
+    }
+
+    /**
+     * Activer un périmètre comme périmètre courant du site (un seul courant par site).
+     */
+    public function activate(Request $request, ApplicationScope $applicationScope)
+    {
+        ApplicationScope::where('site_id', $applicationScope->site_id)
+            ->where('id', '!=', $applicationScope->id)
+            ->update(['is_current' => false]);
+
+        $applicationScope->update(['is_current' => true]);
+
+        return new ApplicationScopeResource($applicationScope->load(['site']));
     }
 
     public function store(Request $request)
@@ -45,11 +81,20 @@ class ApplicationScopeController extends Controller
             'document_objective' => 'nullable|string',
             'scope_definition' => 'nullable|string',
             'referenced_documents' => 'nullable|array',
+            'referenced_documents.*' => 'nullable|string|max:500',
             'processes' => 'nullable|array',
+            'processes.*.id' => 'nullable|integer|exists:processes,id',
+            'processes.*.name' => 'nullable|string|max:255',
+            'processes.*.type' => 'nullable|string|max:50',
+            'processes.*.abbreviation' => 'nullable|string|max:20',
             'included_processes' => 'nullable|array',
+            'included_processes.*' => 'integer|exists:processes,id',
             'products_services' => 'nullable|array',
+            'products_services.*' => 'nullable|string|max:500',
             'organizational_units' => 'nullable|array',
+            'organizational_units.*' => 'nullable|string|max:500',
             'locations' => 'nullable|array',
+            'locations.*' => 'nullable|string|max:500',
             'scope_exclusions' => 'nullable|string',
             'exclusions' => 'nullable|string',
             'exclusions_justification' => 'nullable|string',
@@ -58,6 +103,7 @@ class ApplicationScopeController extends Controller
             'norm_exclusions' => 'nullable|array',
             'norm_exclusions_justifications' => 'nullable|array',
             'applicable_norms' => 'nullable|array',
+            'applicable_norms.*' => 'nullable|string|max:100',
             'document_generated' => 'nullable|boolean',
             'document_path' => 'nullable|string|max:500',
             'generated_at' => 'nullable|date',
@@ -70,6 +116,12 @@ class ApplicationScopeController extends Controller
 
         $validated = $this->normalizeNormExclusionsStorage($validated);
         $scope = ApplicationScope::create($validated);
+
+        if ($scope->is_current) {
+            ApplicationScope::where('site_id', $scope->site_id)
+                ->where('id', '!=', $scope->id)
+                ->update(['is_current' => false]);
+        }
         
         $this->syncProcessesToGlobal($scope);
         
@@ -92,11 +144,20 @@ class ApplicationScopeController extends Controller
             'document_objective' => 'nullable|string',
             'scope_definition' => 'nullable|string',
             'referenced_documents' => 'nullable|array',
+            'referenced_documents.*' => 'nullable|string|max:500',
             'processes' => 'nullable|array',
+            'processes.*.id' => 'nullable|integer|exists:processes,id',
+            'processes.*.name' => 'nullable|string|max:255',
+            'processes.*.type' => 'nullable|string|max:50',
+            'processes.*.abbreviation' => 'nullable|string|max:20',
             'included_processes' => 'nullable|array',
+            'included_processes.*' => 'integer|exists:processes,id',
             'products_services' => 'nullable|array',
+            'products_services.*' => 'nullable|string|max:500',
             'organizational_units' => 'nullable|array',
+            'organizational_units.*' => 'nullable|string|max:500',
             'locations' => 'nullable|array',
+            'locations.*' => 'nullable|string|max:500',
             'scope_exclusions' => 'nullable|string',
             'exclusions' => 'nullable|string',
             'exclusions_justification' => 'nullable|string',
@@ -105,6 +166,7 @@ class ApplicationScopeController extends Controller
             'norm_exclusions' => 'nullable|array',
             'norm_exclusions_justifications' => 'nullable|array',
             'applicable_norms' => 'nullable|array',
+            'applicable_norms.*' => 'nullable|string|max:100',
             'document_generated' => 'nullable|boolean',
             'document_path' => 'nullable|string|max:500',
             'generated_at' => 'nullable|date',
@@ -116,10 +178,22 @@ class ApplicationScopeController extends Controller
         }
         $validated = $this->normalizeNormExclusionsStorage($validated, $applicationScope);
         $applicationScope->update($validated);
+
+        if ($applicationScope->is_current) {
+            ApplicationScope::where('site_id', $applicationScope->site_id)
+                ->where('id', '!=', $applicationScope->id)
+                ->update(['is_current' => false]);
+        }
         
         $this->syncProcessesToGlobal($applicationScope);
         
         return new ApplicationScopeResource($applicationScope->load(['site']));
+    }
+
+    public function destroy(ApplicationScope $applicationScope)
+    {
+        $applicationScope->delete();
+        return response()->json(null, 204);
     }
 
     /**

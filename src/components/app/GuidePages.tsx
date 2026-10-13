@@ -24,7 +24,7 @@ function useOpen(slug: string) {
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-foreground/40 p-4" onClick={onClose}>
       <div className="max-h-[85vh] w-full max-w-2xl overflow-auto rounded-2xl bg-card p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between"><h2 className="font-display text-lg font-bold">{title}</h2><button onClick={onClose} aria-label="Fermer"><X className="h-5 w-5" /></button></div>
         {children}

@@ -55,7 +55,7 @@ class ObjectiveController extends Controller
     public function show(int $id): JsonResponse
     {
         $objective = Objective::with([
-            'site', 'responsible', 'indicateur', 'axes', 'workflowState', 'actions', 'milestones'
+            'site', 'responsible', 'indicateur', 'axes', 'workflowState', 'actions'
         ])->findOrFail($id);
 
         $this->authorize('view', $objective);
@@ -87,9 +87,9 @@ class ObjectiveController extends Controller
         $objective = Objective::findOrFail($id);
         $validated = $request->validated();
 
-        $objective = $this->service->updateProgress(
-            $objective, 
-            $validated['current_value'], 
+        $objective = $this->service->updateValue(
+            $objective,
+            (float) $validated['current_value'],
             $validated['notes'] ?? null
         );
 

@@ -59,14 +59,17 @@ class ResponsibilityController extends Controller
         $this->middleware($delete)->only(['destroy']);
     }
 
-    public function index()
+    public function index(Request $request)
     {
         $user = auth()->user();
         if (!$user instanceof User) {
             return response()->json(['message' => 'Utilisateur non authentifié'], 401);
         }
-        $responsibilities = $this->responsibilitiesBaseQueryForUser($user)
-            ->paginate(20);
+        $siteId = $request->integer('site_id') ?: null;
+        $perPage = min(max($request->integer('per_page', 20), 1), 100);
+        $responsibilities = $this->responsibilitiesBaseQueryForUser($user, $siteId)
+            ->orderByDesc('id')
+            ->paginate($perPage);
             
         return ResponsibilityResource::collection($responsibilities);
     }
@@ -93,6 +96,15 @@ class ResponsibilityController extends Controller
 
             // Récupérer enterprise_id via le processus → site → enterprise
             $process = \App\Models\Process::with('site')->findOrFail($validated['process_id']);
+
+            $user = $request->user();
+            $isSuperAdmin = $user && method_exists($user, 'isSuperAdmin') && $user->isSuperAdmin();
+            if (!$isSuperAdmin && (int) ($process->site?->enterprise_id ?? 0) !== (int) ($user?->enterprise_id ?? 0)) {
+                return response()->json([
+                    'message' => 'Le processus sélectionné doit appartenir à la même entreprise.',
+                ], 422);
+            }
+
             $validated['enterprise_id'] = $process->site->enterprise_id;
 
             Log::info('ResponsibilityController@store - Enterprise ID from process:', ['enterprise_id' => $validated['enterprise_id']]);
@@ -134,6 +146,19 @@ class ResponsibilityController extends Controller
             'end_date' => 'nullable|date',
         ]);
 
+        if (array_key_exists('process_id', $validated) && $validated['process_id']) {
+            $currentUser = $request->user();
+            $isSuperAdmin = $currentUser && method_exists($currentUser, 'isSuperAdmin') && $currentUser->isSuperAdmin();
+            if (!$isSuperAdmin) {
+                $process = \App\Models\Process::with('site')->findOrFail($validated['process_id']);
+                if ((int) ($process->site?->enterprise_id ?? 0) !== (int) ($currentUser?->enterprise_id ?? 0)) {
+                    return response()->json([
+                        'message' => 'Le processus sélectionné doit appartenir à la même entreprise.',
+                    ], 422);
+                }
+            }
+        }
+
         $responsibility->update($validated);
         return new ResponsibilityResource($responsibility->load(['process', 'user']));
     }
@@ -151,7 +176,10 @@ class ResponsibilityController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $responsibilities = $this->responsibilitiesBaseQueryForUser($user)
+        $responsibilities = $this->responsibilitiesBaseQueryForUser(
+                $user,
+                $request->integer('site_id') ?: ($user->site_id ? (int) $user->site_id : null)
+            )
             ->orderBy('process_id')
             ->get();
 
@@ -183,11 +211,19 @@ class ResponsibilityController extends Controller
 
         Pdf::loadHTML($html)->save($tempPath);
 
-        $document = $this->syncResponsibilityExportInInventory(
-            $tempPath,
-            'pdf',
-            (int) ($user->site_id ?? 0)
-        );
+        $document = null;
+        try {
+            $document = $this->syncResponsibilityExportInInventory(
+                $tempPath,
+                'pdf',
+                (int) ($user->site_id ?? 0)
+            );
+        } catch (\Throwable $syncException) {
+            Log::warning('Responsibility PDF inventory sync skipped', [
+                'error' => $syncException->getMessage(),
+                'site_id' => (int) ($user->site_id ?? 0),
+            ]);
+        }
 
         $response = response()->download($tempPath, $filename)->deleteFileAfterSend(true);
         if ($document) {
@@ -203,7 +239,10 @@ class ResponsibilityController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $responsibilities = $this->responsibilitiesBaseQueryForUser($user)
+        $responsibilities = $this->responsibilitiesBaseQueryForUser(
+                $user,
+                $request->integer('site_id') ?: ($user->site_id ? (int) $user->site_id : null)
+            )
             ->orderBy('process_id')
             ->get();
 
@@ -248,11 +287,19 @@ class ResponsibilityController extends Controller
 
         IOFactory::createWriter($phpWord, 'Word2007')->save($tempPath);
 
-        $document = $this->syncResponsibilityExportInInventory(
-            $tempPath,
-            'docx',
-            (int) ($user->site_id ?? 0)
-        );
+        $document = null;
+        try {
+            $document = $this->syncResponsibilityExportInInventory(
+                $tempPath,
+                'docx',
+                (int) ($user->site_id ?? 0)
+            );
+        } catch (\Throwable $syncException) {
+            Log::warning('Responsibility DOCX inventory sync skipped', [
+                'error' => $syncException->getMessage(),
+                'site_id' => (int) ($user->site_id ?? 0),
+            ]);
+        }
 
         $response = response()->download($tempPath, $filename)->deleteFileAfterSend(true);
         if ($document) {
@@ -261,9 +308,36 @@ class ResponsibilityController extends Controller
         return $response;
     }
 
-    private function responsibilitiesBaseQueryForUser(User $user)
+    private function responsibilitiesBaseQueryForUser(User $user, ?int $siteId = null)
     {
-        $processIds = Process::where('site_id', $user->site_id)->pluck('id');
+        $isSuperAdmin = method_exists($user, 'isSuperAdmin') && $user->isSuperAdmin();
+
+        if ($siteId !== null && $siteId > 0) {
+            if (!$isSuperAdmin) {
+                $siteBelongsToEnterprise = \App\Models\Site::whereKey($siteId)
+                    ->where('enterprise_id', $user->enterprise_id)
+                    ->exists();
+
+                if (!$siteBelongsToEnterprise) {
+                    return Responsibility::with(['process', 'user'])->whereRaw('1 = 0');
+                }
+            }
+
+            $processIds = Process::where('site_id', $siteId)->pluck('id');
+
+            return Responsibility::with(['process', 'user'])
+                ->whereIn('process_id', $processIds);
+        }
+
+        if ($isSuperAdmin) {
+            $processIds = Process::query()->pluck('id');
+
+            return Responsibility::with(['process', 'user'])
+                ->whereIn('process_id', $processIds);
+        }
+
+        $siteIds = \App\Models\Site::where('enterprise_id', $user->enterprise_id)->pluck('id');
+        $processIds = Process::whereIn('site_id', $siteIds)->pluck('id');
 
         return Responsibility::with(['process', 'user'])
             ->whereIn('process_id', $processIds);
@@ -279,7 +353,10 @@ class ResponsibilityController extends Controller
             'process_id' => 'nullable|integer|exists:processes,id',
         ]);
 
-        $responsibilities = $this->responsibilitiesBaseQueryForUser($user)->orderBy('process_id')->get();
+        $responsibilities = $this->responsibilitiesBaseQueryForUser(
+            $user,
+            $request->integer('site_id') ?: ($user->site_id ? (int) $user->site_id : null)
+        )->orderBy('process_id')->get();
         if ($responsibilities->isEmpty()) {
             return response()->json(['message' => 'Aucune fiche de responsabilité à exporter.'], 422);
         }

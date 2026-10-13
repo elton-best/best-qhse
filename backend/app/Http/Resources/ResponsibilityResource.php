@@ -10,8 +10,12 @@ class ResponsibilityResource extends JsonApiResource
     {
         return [
             'ref' => $this->ref,
+            'process_id' => $this->process_id,
+            'role_title' => $this->role_title,
             'level' => $this->level,
             'roles' => $this->roles,
+            'responsibilities' => $this->responsibilities,
+            'authorities' => $this->authorities,
             'deliverables' => $this->deliverables,
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),

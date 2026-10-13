@@ -67,7 +67,7 @@ Route::prefix('objectives')->group(function () {
     Route::post('{id}/milestone', [ObjectiveController::class, 'addMilestone']);
 });
 Route::get('objectives/export-xlsx', [ObjectiveController::class, 'exportXlsx']);
-Route::apiResource('objectives', ObjectiveController::class);
+Route::apiResource('objectives', ObjectiveController::class)->parameters(['objectives' => 'id']);
 
 // --- 6.3 Plan du Système de Management & Modifications ---
 // Plan du SM Hiérarchique (Canevas de Ben : Activité -> Sous-activité -> Action)

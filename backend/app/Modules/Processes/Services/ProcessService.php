@@ -7,7 +7,7 @@ use App\Models\Enterprise;
 use App\Models\Site;
 
 use App\Models\Process;
-use App\Models\ProcessIndicator;
+use App\Modules\Processes\Models\ProcessIndicator;
 use App\Models\ProcessRiskOpportunity;
 use App\Models\ProcessIsoCoverage;
 use App\Models\ProcessReview;
@@ -33,7 +33,9 @@ class ProcessService
         }
 
         // Code must be globally unique; do not scope by site.
-        $lastProcess = $query->where('code', 'like', "P-{$categoryCode}-{$year}-%")
+        // withTrashed: l'index unique couvre aussi les lignes soft-deleted.
+        $lastProcess = $query->withTrashed()
+            ->where('code', 'like', "P-{$categoryCode}-{$year}-%")
             ->orderBy('code', 'desc')
             ->first();
         
@@ -216,10 +218,18 @@ class ProcessService
         $attempt = 0;
 
         while ($attempt < $maxAttempts) {
+            // Savepoint par tentative : sous Postgres un INSERT en échec
+            // annule toute la transaction ; sans ce rollback partiel, la
+            // régénération du code mourrait en 25P02 et masquerait l'erreur.
+            DB::beginTransaction();
             try {
                 unset($data['ref']);
-                return Process::create($data);
+                $process = Process::create($data);
+                DB::commit();
+
+                return $process;
             } catch (QueryException $e) {
+                DB::rollBack();
                 $attempt++;
 
                 if ($this->isDuplicateCodeException($e)) {

@@ -332,7 +332,7 @@ export function RecordActions({ record, compact }: { record: QRecord; compact?: 
 
   const click = (t: Transition) => {
     if (t.reason || t.date || t.number) { setPending(t); return; }
-    if (t.confirm && !confirm(`${t.label} : « ${record.title} » ?`)) return;
+    if (t.confirm) { setPending(t); return; }
     run.mutate({ record, t });
   };
 
@@ -635,7 +635,7 @@ function DetailSheet({
                     toast.error(`Suppression impossible : ${incoming.length} élément(s) y sont liés. Archivez-le plutôt pour conserver l'historique.`);
                     return;
                   }
-                  if (confirm(`Supprimer définitivement « ${record.title} » ?`)) { del.mutate({ id: record.id, kind: record.kind }); onClose(); }
+                  del.mutate({ id: record.id, kind: record.kind }); onClose();
                 }}
                 aria-label="Supprimer"
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border px-4 text-sm font-semibold text-destructive hover:border-destructive"
@@ -681,7 +681,7 @@ function RecordForm({
       if (f.required && (data[f.key] === undefined || data[f.key] === null || data[f.key] === "")) { setError(`${f.label} est obligatoire.`); return; }
     }
     const dup = records.find((r) => r.kind === cfg.kind && r.id !== record?.id && r.title.trim().toLowerCase() === title.trim().toLowerCase() && r.status !== "Archivé");
-    if (dup && !confirm(`Un élément « ${dup.title} » (${dup.reference}) existe déjà. Enregistrer quand même ?`)) return;
+    if (dup) toast.info(`Un élément similaire existe déjà : ${dup.title} (${dup.reference}).`);
     setError("");
     try {
       await save.mutateAsync({ id: record?.id, kind: cfg.kind, title: title.trim(), status, data: payload, previous: record });

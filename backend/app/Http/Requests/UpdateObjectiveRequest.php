@@ -16,6 +16,7 @@ class UpdateObjectiveRequest extends FormRequest
     {
         return [
             'title' => 'sometimes|string|max:255',
+            'process_id' => 'nullable|exists:processes,id',
             'description' => 'nullable|string|max:2000',
             'type' => 'sometimes|in:strategic,operational,quality,safety,environmental',
             'target_value' => 'sometimes|numeric',
@@ -34,6 +35,7 @@ class UpdateObjectiveRequest extends FormRequest
             'planned_actions.*.due_date' => 'nullable|date',
             'planned_actions.*.status' => 'nullable|string|in:a_faire,en_cours,terminee,draft,planned,completed',
             'planned_actions.*.progress' => 'nullable|integer|min:0|max:100',
+            'measurement_frequency' => 'nullable|in:monthly,quarterly,semiannual,annual',
         ];
     }
 }

@@ -4,6 +4,9 @@ namespace App\Modules\Enterprise\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\DashboardResource;
+use App\Models\JobDescription;
+use App\Models\OrgChart;
+use App\Models\QhsePolicy;
 use App\Models\UserDashboardLayout;
 use App\Models\Dashboard;
 use App\Models\Site;
@@ -214,13 +217,28 @@ class DashboardController extends Controller
                 'performance' => $this->getPerformanceChartData($siteIds),
             ];
 
-            // Leadership stats
+            // Leadership stats (données réelles du périmètre)
+            $currentPolicy = QhsePolicy::where('enterprise_id', $enterpriseId)
+                ->where(function ($query) use ($siteIds) {
+                    $query->whereIn('site_id', $siteIds)->orWhereNull('site_id');
+                })
+                ->where('is_current', true)
+                ->latest('id')
+                ->first();
             $leadership = [
-                'policy_status' => 'not_created',
-                'policy_last_update' => null,
+                'policy_status' => $currentPolicy?->status ?? 'not_created',
+                'policy_last_update' => $currentPolicy?->updated_at?->toISOString(),
                 'total_employees' => $userCount,
-                'employees_with_job_description' => 0,
-                'organization_chart_updated' => false,
+                'employees_with_job_description' => JobDescription::where('enterprise_id', $enterpriseId)
+                    ->whereNotNull('user_id')
+                    ->distinct()
+                    ->count('user_id'),
+                'organization_chart_updated' => OrgChart::where('enterprise_id', $enterpriseId)
+                    ->where(function ($query) use ($siteIds) {
+                        $query->whereIn('site_id', $siteIds)->orWhereNull('site_id');
+                    })
+                    ->where('is_current', true)
+                    ->exists(),
             ];
 
             // Recent activities - last 10 actions or audits

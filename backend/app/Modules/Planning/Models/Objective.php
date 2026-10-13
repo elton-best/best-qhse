@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Activitylog\Traits\LogsActivity;
 use App\Modules\Enterprise\Models\User;
+use App\Modules\Enterprise\Models\Site;
 use App\Modules\Evaluation\Models\Indicateur;
 use App\Modules\Leadership\Models\StrategicAxis;
 use App\Modules\Processes\Models\Process;
@@ -39,6 +40,7 @@ class Objective extends Model
         'description',
         'start_date',
         'indicator',
+        'unit',
         'target_value',
         'current_value',
         'progress',
@@ -76,6 +78,11 @@ class Objective extends Model
     public function process(): BelongsTo
     {
         return $this->belongsTo(Process::class);
+    }
+
+    public function site(): BelongsTo
+    {
+        return $this->belongsTo(Site::class);
     }
 
     public function strategicAxis(): BelongsTo

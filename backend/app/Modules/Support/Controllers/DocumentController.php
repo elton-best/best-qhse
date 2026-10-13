@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
 use App\Models\Process;
+use Symfony\Component\Process\Process as SymfonyProcess;
 
 class DocumentController extends Controller
 {
@@ -937,9 +938,70 @@ class DocumentController extends Controller
             }
         }
 
+        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        if (in_array($extension, ['doc', 'docx', 'odt'], true)) {
+            $pdfPath = $this->convertOfficePreviewToPdf($disk->path($path), $extension);
+            if ($pdfPath) {
+                return response()->file($pdfPath, [
+                    'Content-Type' => 'application/pdf',
+                    'Content-Disposition' => 'inline; filename="' . pathinfo($downloadName, PATHINFO_FILENAME) . '.pdf"',
+                ])->deleteFileAfterSend(true);
+            }
+        }
+
         return response()->file($disk->path($path), [
             'Content-Disposition' => 'inline; filename="' . $downloadName . '"',
         ]);
+    }
+
+    private function convertOfficePreviewToPdf(string $sourcePath, string $extension): ?string
+    {
+        if (!is_file($sourcePath) || !is_executable('/usr/bin/soffice')) {
+            return null;
+        }
+
+        $directory = storage_path('app/temp/document-previews');
+        if (!is_dir($directory) && !@mkdir($directory, 0775, true) && !is_dir($directory)) {
+            return null;
+        }
+
+        $base = 'preview_' . Str::lower(Str::random(24));
+        $inputPath = $directory . DIRECTORY_SEPARATOR . $base . '.' . $extension;
+        $pdfPath = $directory . DIRECTORY_SEPARATOR . $base . '.pdf';
+        if (!@copy($sourcePath, $inputPath)) {
+            return null;
+        }
+
+        try {
+            $profile = $directory . DIRECTORY_SEPARATOR . $base . '_profile';
+            $command = new SymfonyProcess([
+                '/usr/bin/soffice',
+                '-env:UserInstallation=file://' . $profile,
+                '--headless',
+                '--convert-to', 'pdf',
+                '--outdir', $directory,
+                $inputPath,
+            ]);
+            $command->setTimeout(60);
+            $command->run();
+
+            return $command->isSuccessful() && is_file($pdfPath) ? $pdfPath : null;
+        } finally {
+            @unlink($inputPath);
+            if (isset($profile) && is_dir($profile)) {
+                $this->removePreviewDirectory($profile);
+            }
+        }
+    }
+
+    private function removePreviewDirectory(string $directory): void
+    {
+        foreach (scandir($directory) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            $path = $directory . DIRECTORY_SEPARATOR . $entry;
+            is_dir($path) ? $this->removePreviewDirectory($path) : @unlink($path);
+        }
+        @rmdir($directory);
     }
 
     public function submitForApproval(Document $document)

@@ -1,0 +1,445 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* SMI QHSE Professional Design System
+   Theme: Corporate QHSE with ISO compliance aesthetic
+   Colors: Deep navy, compliance green, alert red, neutral grays
+*/
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    /* Background & Foreground */
+    --background: 210 20% 98%;
+    --foreground: 222 47% 11%;
+
+    /* Cards & Surfaces */
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Primary - Deep Navy Professional */
+    --primary: 222 47% 20%;
+    --primary-foreground: 210 40% 98%;
+    --primary-glow: 222 60% 35%;
+
+    /* Secondary - Soft Blue Gray */
+    --secondary: 214 32% 91%;
+    --secondary-foreground: 222 47% 20%;
+
+    /* Muted */
+    --muted: 210 20% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    /* Accent - Teal/Compliance Blue */
+    --accent: 199 89% 48%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Success - Compliance Green */
+    --success: 152 69% 31%;
+    --success-foreground: 0 0% 100%;
+    --success-light: 152 69% 95%;
+
+    /* Warning - Amber */
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 0%;
+    --warning-light: 38 92% 95%;
+
+    /* Destructive/Error - Alert Red */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-light: 0 84% 97%;
+
+    /* ISO Points Colors */
+    --iso-context: 199 89% 48%;
+    --iso-leadership: 271 81% 56%;
+    --iso-planning: 38 92% 50%;
+    --iso-support: 152 69% 31%;
+    --iso-realization: 25 95% 53%;
+    --iso-evaluation: 217 91% 60%;
+    --iso-improvement: 338 71% 52%;
+
+    /* Risk Matrix Colors */
+    --risk-low: 152 69% 40%;
+    --risk-medium: 38 92% 50%;
+    --risk-high: 0 84% 60%;
+    --risk-critical: 0 84% 40%;
+
+    /* Borders & Inputs */
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 222 47% 20%;
+
+    --radius: 0.625rem;
+
+    /* Sidebar */
+    --sidebar-background: 222 47% 11%;
+    --sidebar-foreground: 210 40% 95%;
+    --sidebar-primary: 199 89% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 222 47% 18%;
+    --sidebar-accent-foreground: 210 40% 95%;
+    --sidebar-border: 222 30% 20%;
+    --sidebar-ring: 199 89% 48%;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(222 47% 20%) 0%, hsl(222 60% 35%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(199 89% 48%) 0%, hsl(217 91% 60%) 100%);
+    --gradient-success: linear-gradient(135deg, hsl(152 69% 31%) 0%, hsl(152 69% 45%) 100%);
+    --gradient-header: linear-gradient(90deg, hsl(222 47% 11%) 0%, hsl(222 47% 18%) 100%);
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
+    --shadow-card: 0 4px 20px -4px rgb(0 0 0 / 0.1);
+    --shadow-elevated: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.08);
+  }
+
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 95%;
+
+    --card: 222 47% 9%;
+    --card-foreground: 210 40% 95%;
+
+    --popover: 222 47% 9%;
+    --popover-foreground: 210 40% 95%;
+
+    --primary: 199 89% 48%;
+    --primary-foreground: 222 47% 6%;
+    --primary-glow: 199 89% 60%;
+
+    --secondary: 222 30% 18%;
+    --secondary-foreground: 210 40% 95%;
+
+    --muted: 222 30% 15%;
+    --muted-foreground: 215 16% 65%;
+
+    --accent: 199 89% 55%;
+    --accent-foreground: 222 47% 6%;
+
+    --success: 152 69% 45%;
+    --success-foreground: 0 0% 0%;
+    --success-light: 152 69% 12%;
+
+    --warning: 38 92% 55%;
+    --warning-foreground: 0 0% 0%;
+    --warning-light: 38 92% 12%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-light: 0 72% 12%;
+
+    --border: 222 30% 20%;
+    --input: 222 30% 18%;
+    --ring: 199 89% 48%;
+
+    --sidebar-background: 222 47% 5%;
+    --sidebar-foreground: 210 40% 90%;
+    --sidebar-primary: 199 89% 55%;
+    --sidebar-primary-foreground: 222 47% 6%;
+    --sidebar-accent: 222 47% 12%;
+    --sidebar-accent-foreground: 210 40% 90%;
+    --sidebar-border: 222 30% 15%;
+    --sidebar-ring: 199 89% 55%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(199 89% 48%) 0%, hsl(217 91% 60%) 100%);
+    --gradient-header: linear-gradient(90deg, hsl(222 47% 5%) 0%, hsl(222 47% 9%) 100%);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply scroll-smooth antialiased;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    @apply font-semibold tracking-tight;
+  }
+}
+
+@layer components {
+  /* Dashboard Cards */
+  .card-kpi {
+    @apply bg-card rounded-xl p-6 border border-border/50;
+    box-shadow: var(--shadow-card);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .card-kpi:hover {
+    box-shadow: var(--shadow-elevated);
+    transform: translateY(-2px);
+  }
+
+  /* ISO Point Cards */
+  .iso-card {
+    @apply relative overflow-hidden rounded-xl border border-border/50 bg-card;
+    box-shadow: var(--shadow-md);
+  }
+
+  .iso-card::before {
+    content: '';
+    @apply absolute left-0 top-0 h-full w-1;
+    background: var(--gradient-accent);
+  }
+
+  /* Risk Matrix Cells */
+  .risk-cell {
+    @apply rounded-lg flex items-center justify-center font-semibold text-sm transition-all cursor-pointer;
+    min-height: 48px;
+  }
+
+  .risk-cell:hover {
+    @apply ring-2 ring-ring ring-offset-2;
+  }
+
+  .risk-low {
+    @apply bg-success/20 text-success;
+  }
+
+  .risk-medium {
+    @apply bg-warning/20 text-warning;
+  }
+
+  .risk-high {
+    @apply bg-destructive/20 text-destructive;
+  }
+
+  .risk-critical {
+    @apply bg-destructive text-destructive-foreground;
+  }
+
+  /* Status Chips */
+  .status-chip {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium;
+  }
+
+  .status-draft {
+    @apply bg-muted text-muted-foreground;
+  }
+
+  .status-pending {
+    @apply bg-warning/15 text-warning;
+  }
+
+  .status-validated {
+    @apply bg-success/15 text-success;
+  }
+
+  .status-overdue {
+    @apply bg-destructive/15 text-destructive;
+  }
+
+  /* Sidebar Styles */
+  .sidebar-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sidebar-foreground/80 transition-all;
+  }
+
+  .sidebar-item:hover {
+    @apply bg-sidebar-accent text-sidebar-foreground;
+  }
+
+  .sidebar-item.active {
+    @apply bg-sidebar-primary/15 text-sidebar-primary font-medium;
+  }
+
+  /* Form Elements */
+  .input-qhse {
+    @apply w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm transition-colors;
+    @apply focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent;
+  }
+
+  .input-qhse::placeholder {
+    @apply text-muted-foreground;
+  }
+
+  /* Table Styles */
+  .table-qhse {
+    @apply w-full text-sm;
+  }
+
+  .table-qhse th {
+    @apply px-4 py-3 text-left font-semibold text-muted-foreground bg-muted/50 first:rounded-tl-lg last:rounded-tr-lg;
+  }
+
+  .table-qhse td {
+    @apply px-4 py-3 border-b border-border/50;
+  }
+
+  .table-qhse tr:hover td {
+    @apply bg-muted/30;
+  }
+
+  /* Heatmap Cell */
+  .heatmap-cell {
+    @apply rounded transition-all duration-200;
+  }
+
+  .heatmap-cell:hover {
+    @apply scale-105 shadow-lg;
+  }
+
+  /* Notification Badge */
+  .notification-badge {
+    @apply absolute -top-1 -right-1 h-5 w-5 rounded-full bg-destructive text-destructive-foreground text-xs flex items-center justify-center font-medium;
+    animation: pulse 2s infinite;
+  }
+
+  /* AI Assistant Button */
+  .ai-button {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all;
+    background: var(--gradient-accent);
+    @apply text-white;
+  }
+
+  .ai-button:hover {
+    @apply opacity-90 shadow-lg;
+    transform: translateY(-1px);
+  }
+
+  /* Progress Bars */
+  .progress-bar {
+    @apply h-2 w-full rounded-full bg-muted overflow-hidden;
+  }
+
+  .progress-fill {
+    @apply h-full rounded-full transition-all duration-500;
+    background: var(--gradient-success);
+  }
+
+  /* Wizard Steps */
+  .wizard-step {
+    @apply flex items-center gap-2;
+  }
+
+  .wizard-step-circle {
+    @apply w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-all;
+  }
+
+  .wizard-step-circle.active {
+    background: var(--gradient-primary);
+    @apply text-white;
+  }
+
+  .wizard-step-circle.completed {
+    @apply bg-success text-success-foreground;
+  }
+
+  .wizard-step-circle.pending {
+    @apply bg-muted text-muted-foreground;
+  }
+}
+
+@layer utilities {
+  /* Glassmorphism */
+  .glass {
+    @apply bg-white/80 backdrop-blur-md;
+  }
+
+  .dark .glass {
+    @apply bg-card/80;
+  }
+
+  /* Text Gradients */
+  .text-gradient-primary {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-accent {
+    background: var(--gradient-accent);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Animations */
+  .animate-slide-in {
+    animation: slideIn 0.3s ease-out;
+  }
+
+  .animate-fade-up {
+    animation: fadeUp 0.4s ease-out;
+  }
+
+  .animate-scale-in {
+    animation: scaleIn 0.2s ease-out;
+  }
+
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateX(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes fadeUp {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes scaleIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes pulse {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
+  }
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-muted/50 rounded-full;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-muted-foreground/20 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-muted-foreground/30;
+}

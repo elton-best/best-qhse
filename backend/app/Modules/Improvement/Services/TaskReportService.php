@@ -126,9 +126,15 @@ class TaskReportService
         $filename = "rapport-{$type}-{$task->id}-" . now()->format('YmdHis') . '.docx';
         $path = "task-reports/{$filename}";
 
-        // Save to storage (le dossier n'existe pas sur une installation fraîche)
-        \Illuminate\Support\Facades\Storage::makeDirectory('task-reports');
-        $phpWord->save(storage_path("app/{$path}"));
+        // Save to storage (cohérent avec le disque configuré : Storage::path)
+        $disk = \Illuminate\Support\Facades\Storage::disk(
+            (string) config('filesystems.default', 'local')
+        );
+        $directory = $disk->path('task-reports');
+        if (!is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+        $phpWord->save($disk->path($path));
 
         return $path;
     }

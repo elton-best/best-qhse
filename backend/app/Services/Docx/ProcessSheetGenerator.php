@@ -48,6 +48,7 @@ class ProcessSheetGenerator
         $this->addGeneralInfo($process);
         $this->addSequences($process);
         $this->addObjectives($process);
+        $this->addIndicators($process);
         $this->addResources($process);
         $this->addRisksOpportunities($process);
 
@@ -88,6 +89,14 @@ class ProcessSheetGenerator
         $this->addTableRow($table, 'Pilote', $process->pilot?->name ?? 'Non défini');
         $this->addTableRow($table, 'Co-pilote(s)', $this->formatCopilots($process));
         $this->addTableRow($table, 'Finalité', $process->purpose ?? $process->finalite ?? 'Non définie');
+        $this->addTableRow($table, 'Observation', $process->observation ?? '');
+        $this->addTableRow($table, 'Interfaces', $this->formatArray($process->interfaces ?? []));
+        $this->addTableRow($table, 'Normes ISO', $this->formatArray($process->normes_iso ?? []));
+        $this->addTableRow($table, 'Aspects couverts', implode(', ', array_keys(array_filter([
+            'Qualité' => $process->aspect_qualite,
+            'Environnement' => $process->aspect_environnement,
+            'Santé & sécurité' => $process->aspect_sante_securite,
+        ]))) ?: 'Aucun');
 
         $this->section->addTextBreak();
     }
@@ -127,6 +136,12 @@ class ProcessSheetGenerator
             $table->addCell(1666)->addText($seq->output_description ?? '');
             $table->addCell(1666)->addText($this->formatArray($seq->client_processes ?? []));
 
+            $this->addTableRow($table, 'Responsable de la séquence', $seq->responsibleUser?->name ?? 'Non assigné');
+            $this->addTableRow($table, 'Durée', $seq->duration_minutes ? $seq->duration_minutes . ' minutes' : 'Non définie');
+            if ($seq->documents && $seq->documents->count() > 0) {
+                $this->addTableRow($table, 'Documents associés', $this->formatArray($seq->documents));
+            }
+
             $this->section->addTextBreak();
         }
     }
@@ -152,9 +167,37 @@ class ProcessSheetGenerator
         foreach ($objectives as $obj) {
             $table->addRow();
             $table->addCell(5000)->addText($obj->title ?? '');
-            $table->addCell(5000)->addText($obj->indicator?->name ?? $obj->indicator_name ?? 'Non défini');
+            $table->addCell(5000)->addText(($obj->indicator?->name ?? $obj->indicator_name ?? 'Non défini') . ' · cible : ' . ($obj->target_value ?? '—') . ' · statut : ' . ($obj->status ?? '—'));
         }
 
+        $this->section->addTextBreak();
+    }
+
+    private function addIndicators(Process $process): void
+    {
+        $this->addSectionTitle('3 BIS. KPI DU PROCESSUS');
+        $indicators = $process->indicators ?? [];
+        if (count($indicators) === 0) {
+            $this->section->addText('Aucun KPI défini.', ['italic' => true]);
+            $this->section->addTextBreak();
+            return;
+        }
+
+        $table = $this->section->addTable(['borderSize' => 6, 'borderColor' => '000000']);
+        $headerRow = $table->addRow();
+        foreach (['Nom', 'Type / catégorie', 'Unité', 'Cible', 'Dernière valeur', 'Responsable'] as $heading) {
+            $headerRow->addCell(1666)->addText($heading, ['bold' => true]);
+        }
+        foreach ($indicators as $indicator) {
+            $latest = $indicator->values?->sortByDesc('measurement_date')->first();
+            $row = $table->addRow();
+            $row->addCell(1666)->addText((string) ($indicator->name ?? ''));
+            $row->addCell(1666)->addText(($indicator->type ?? '') . ' / ' . ($indicator->category ?? ''));
+            $row->addCell(1666)->addText((string) ($indicator->unit ?? ''));
+            $row->addCell(1666)->addText((string) ($indicator->target_value ?? '—'));
+            $row->addCell(1666)->addText((string) ($latest?->value ?? '—'));
+            $row->addCell(1666)->addText($indicator->responsibleUser?->name ?? '—');
+        }
         $this->section->addTextBreak();
     }
 
@@ -227,7 +270,12 @@ class ProcessSheetGenerator
     {
         if (empty($array)) return 'Non défini';
         if (is_string($array)) return $array;
-        return implode(', ', $array);
+        if ($array instanceof \Illuminate\Support\Collection) $array = $array->all();
+        return collect($array)->map(function ($item) {
+            if (is_array($item)) return (string) ($item['name'] ?? $item['title'] ?? $item['label'] ?? $item['description'] ?? '');
+            if (is_object($item)) return (string) ($item->name ?? $item->title ?? $item->label ?? $item->description ?? '');
+            return (string) $item;
+        })->filter(fn ($item) => trim($item) !== '')->implode(', ') ?: 'Non défini';
     }
 
     private function formatCopilots(Process $process): string

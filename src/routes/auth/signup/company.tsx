@@ -168,7 +168,7 @@ function CompanySignupPage() {
   return (
     <AuthLayout
       title="Inscription entreprise"
-      subtitle="Les informations et pièces sont envoyées au backend Laravel LOGIQUALI."
+      subtitle="Les informations et pièces sont envoyées à la plateforme LOGIQUALI."
     >
       <ol className="mb-8 flex items-center">
         {STEPS.map((label, i) => (

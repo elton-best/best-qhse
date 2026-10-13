@@ -31,6 +31,8 @@ Route::post('processes/{process}/reject', [ProcessController::class, 'reject']);
 
 // Indicateurs & Couverture ISO
 Route::post('processes/{process}/indicators', [ProcessController::class, 'addIndicator']);
+Route::put('processes/{process}/indicators/{indicator}', [ProcessController::class, 'updateIndicator']);
+Route::delete('processes/{process}/indicators/{indicator}', [ProcessController::class, 'deleteIndicator']);
 Route::post('indicators/{indicator}/values', [ProcessController::class, 'addIndicatorValue']);
 Route::post('processes/{process}/iso-coverage', [ProcessController::class, 'addIsoCoverage']);
 Route::get('iso-coverage-matrix', [ProcessController::class, 'isoCoverageMatrix']);

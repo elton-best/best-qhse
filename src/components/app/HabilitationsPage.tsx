@@ -42,21 +42,21 @@ function statusLabel(h: Hab, days: number | null): string {
   return "Active";
 }
 
-function RenewDialog({
-  hab,
-  onClose,
-}: {
-  hab: Hab;
-  onClose: () => void;
-}) {
+function RenewDialog({ hab, onClose }: { hab: Hab; onClose: () => void }) {
   const { renew } = useHabilitationMutations();
   const [date, setDate] = useState("");
   const [certificateNumber, setCertificateNumber] = useState(str(hab.certificate_number));
   const [authority, setAuthority] = useState(str(hab.issuing_authority));
   const [notes, setNotes] = useState("");
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-foreground/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <p className="font-display text-lg font-bold text-foreground">Renouveler l'habilitation</p>
         <p className="mt-1 text-sm text-muted-foreground">
           {str(hab.title ?? hab.name) || `HAB-${hab.id}`} — {hab.user?.name ?? "—"}
@@ -95,7 +95,10 @@ function RenewDialog({
           />
         </label>
         <div className="mt-5 flex justify-end gap-2">
-          <button onClick={onClose} className="h-11 rounded-xl border border-border px-4 text-sm font-semibold">
+          <button
+            onClick={onClose}
+            className="h-11 rounded-xl border border-border px-4 text-sm font-semibold"
+          >
             Annuler
           </button>
           <button
@@ -121,7 +124,9 @@ function RenewDialog({
                     onClose();
                   },
                   onError: (error) =>
-                    toast.error(error instanceof Error ? error.message : "Renouvellement impossible."),
+                    toast.error(
+                      error instanceof Error ? error.message : "Renouvellement impossible.",
+                    ),
                 },
               );
             }}
@@ -157,7 +162,11 @@ export function HabilitationsPage() {
         .filter(({ hab, days, label }) => {
           const matchesFilter =
             !filter ||
-            (filter === "expired" ? label === "Expirée" : filter === "expiring" ? label === "Expire bientôt" : label === "Active");
+            (filter === "expired"
+              ? label === "Expirée"
+              : filter === "expiring"
+                ? label === "Expire bientôt"
+                : label === "Active");
           void days;
           const haystack = [
             hab.user?.name,
@@ -177,7 +186,8 @@ export function HabilitationsPage() {
     [rows, filter, query],
   );
 
-  const expiringCount = stats?.expiring_soon ?? rows.filter((r) => r.label === "Expire bientôt").length;
+  const expiringCount =
+    stats?.expiring_soon ?? rows.filter((r) => r.label === "Expire bientôt").length;
 
   const cards = [
     { key: "", label: "Total", value: stats?.total ?? rows.length, tone: "text-primary" },
@@ -190,16 +200,28 @@ export function HabilitationsPage() {
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <Link to="/app" className="text-xs font-bold uppercase tracking-[0.16em] text-primary">Vue d'ensemble</Link>
-          <h1 className="mt-1 font-display text-2xl font-extrabold text-foreground md:text-3xl">Habilitations</h1>
+          <Link to="/app" className="text-xs font-bold uppercase tracking-[0.16em] text-primary">
+            Vue d'ensemble
+          </Link>
+          <h1 className="mt-1 font-display text-2xl font-extrabold text-foreground md:text-3xl">
+            Habilitations
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Certifications et habilitations employés, expirations et renouvellements — depuis le backend Laravel.
+            Certifications et habilitations employés, expirations et renouvellements.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => {
-              const header = ["Employé", "Type", "Titre", "N° certificat", "Expiration", "Jours restants", "Statut"];
+              const header = [
+                "Employé",
+                "Type",
+                "Titre",
+                "N° certificat",
+                "Expiration",
+                "Jours restants",
+                "Statut",
+              ];
               downloadHabilitationsExport([
                 header,
                 ...filtered.map(({ hab, days, label }) => [
@@ -248,7 +270,9 @@ export function HabilitationsPage() {
         <p className="rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
           <ShieldCheck className="mr-2 inline h-4 w-4" />
           {expiringCount} habilitation(s) expirent dans les 30 prochains jours.
-          <button onClick={() => setFilter("expiring")} className="ml-2 font-bold underline">Voir</button>
+          <button onClick={() => setFilter("expiring")} className="ml-2 font-bold underline">
+            Voir
+          </button>
         </p>
       )}
 
@@ -263,7 +287,11 @@ export function HabilitationsPage() {
           />
         </div>
         <button
-          onClick={() => void fetchHabilitationsExpiring(7).then((list) => toast.info(`${list.length} habilitation(s) critique(s) ≤ 7 j`))}
+          onClick={() =>
+            void fetchHabilitationsExpiring(7).then((list) =>
+              toast.info(`${list.length} habilitation(s) critique(s) ≤ 7 j`),
+            )
+          }
           className="h-11 rounded-xl border border-border px-4 text-sm font-semibold hover:border-primary"
         >
           Critiques ≤ 7 j
@@ -272,17 +300,24 @@ export function HabilitationsPage() {
 
       {isError && (
         <p className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-          Impossible de charger les habilitations depuis le backend Laravel.
+          Impossible de charger les habilitations depuis le serveur.
         </p>
       )}
       {isLoading ? (
-        <div className="rounded-2xl border border-border bg-card p-6 text-sm text-muted-foreground" aria-busy="true">
+        <div
+          className="rounded-2xl border border-border bg-card p-6 text-sm text-muted-foreground"
+          aria-busy="true"
+        >
           Chargement des habilitations…
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-2xl border border-border bg-card p-10 text-center">
-          <p className="font-display font-bold text-foreground">Aucune habilitation correspondante</p>
-          <p className="mt-1 text-sm text-muted-foreground">Créez la première habilitation via le bouton ci-dessus.</p>
+          <p className="font-display font-bold text-foreground">
+            Aucune habilitation correspondante
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Créez la première habilitation via le bouton ci-dessus.
+          </p>
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
@@ -302,17 +337,25 @@ export function HabilitationsPage() {
               <tbody className="divide-y divide-border">
                 {filtered.map(({ hab, days, label }) => (
                   <tr key={String(hab.id)} className="hover:bg-primary-soft/40">
-                    <td className="px-4 py-3 font-semibold text-foreground">{hab.user?.name ?? "—"}</td>
+                    <td className="px-4 py-3 font-semibold text-foreground">
+                      {hab.user?.name ?? "—"}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">{str(hab.type) || "—"}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{str(hab.title ?? hab.name) || "—"}</td>
-                    <td className={`px-4 py-3 ${label !== "Active" ? "font-bold text-destructive" : "text-muted-foreground"}`}>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {str(hab.title ?? hab.name) || "—"}
+                    </td>
+                    <td
+                      className={`px-4 py-3 ${label !== "Active" ? "font-bold text-destructive" : "text-muted-foreground"}`}
+                    >
                       {hab.expiry_date ? fmt(hab.expiry_date) : "—"}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {days == null ? "—" : days < 0 ? `Dépassée de ${-days} j` : `${days} j`}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${label === "Active" ? "bg-success/10 text-success" : label === "Expire bientôt" ? "bg-warning/15 text-warning" : "bg-destructive/10 text-destructive"}`}>
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-xs font-bold ${label === "Active" ? "bg-success/10 text-success" : label === "Expire bientôt" ? "bg-warning/15 text-warning" : "bg-destructive/10 text-destructive"}`}
+                      >
                         {label}
                       </span>
                     </td>

@@ -15,6 +15,7 @@ class StoreObjectiveRequest extends FormRequest
     {
         return [
             'site_id' => 'required|exists:sites,id',
+            'process_id' => 'nullable|exists:processes,id',
             'title' => 'required|string|max:255',
             'description' => 'nullable|string|max:2000',
             'type' => 'required|in:strategic,operational,quality,safety,environmental',
@@ -33,6 +34,7 @@ class StoreObjectiveRequest extends FormRequest
             'planned_actions.*.due_date' => 'nullable|date',
             'planned_actions.*.status' => 'nullable|string|in:a_faire,en_cours,terminee,draft,planned,completed',
             'planned_actions.*.progress' => 'nullable|integer|min:0|max:100',
+            'measurement_frequency' => 'nullable|in:monthly,quarterly,semiannual,annual',
         ];
     }
 }

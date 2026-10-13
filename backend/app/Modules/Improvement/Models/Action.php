@@ -33,6 +33,7 @@ class Action extends Model
         'process_id',
         'source_type',
         'source_id',
+        'source_ref',
         'objective_id',
         'risk_id',
         'non_conformity_id',

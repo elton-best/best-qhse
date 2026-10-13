@@ -187,6 +187,22 @@
     </style>
 </head>
 <body>
+    @php
+        $displayList = function ($value) use (&$displayList): string {
+            if ($value instanceof \Illuminate\Support\Collection) {
+                $value = $value->all();
+            }
+            if (is_array($value)) {
+                return collect($value)->map(function ($item) use (&$displayList) {
+                    if (is_array($item)) return $displayList($item['name'] ?? $item['title'] ?? $item['label'] ?? $item['description'] ?? '');
+                    if (is_object($item)) return $displayList($item->name ?? $item->title ?? $item->label ?? $item->description ?? '');
+                    return trim((string) $item);
+                })->filter()->implode(', ');
+            }
+            if (is_object($value)) return $displayList($value->name ?? $value->title ?? $value->label ?? $value->description ?? '');
+            return trim((string) ($value ?? ''));
+        };
+    @endphp
 
     <!-- Header -->
     <table class="header-table">
@@ -271,6 +287,22 @@
             <th>Finalité du Processus</th>
             <td>{{ $process->purpose ?? $process->finalite ?? 'Non définie' }}</td>
         </tr>
+        <tr>
+            <th>Observation</th>
+            <td>{{ $process->observation ?: '—' }}</td>
+        </tr>
+        <tr>
+            <th>Interfaces avec les autres processus</th>
+            <td>{{ $displayList($process->interfaces) ?: '—' }}</td>
+        </tr>
+        <tr>
+            <th>Normes ISO applicables</th>
+            <td>{{ $displayList($process->normes_iso) ?: '—' }}</td>
+        </tr>
+        <tr>
+            <th>Aspects couverts</th>
+            <td>{{ collect(['Qualité' => $process->aspect_qualite, 'Environnement' => $process->aspect_environnement, 'Santé & sécurité' => $process->aspect_sante_securite])->filter()->keys()->implode(', ') ?: '—' }}</td>
+        </tr>
     </table>
 
     <!-- 2. Séquences d'Activités & Interactions (SIPOC) -->
@@ -284,6 +316,7 @@
                 $outDesc = $seq->output_description ?? $seq->outputs ?? null;
                 $clients = $seq->client_processes ?? $seq->clients ?? null;
                 $subActivities = $seq->sub_activities ?? $seq->subActivities ?? null;
+                $documents = $seq->documents ?? collect();
             @endphp
             <div class="sequence-card">
                 <div class="sequence-header">
@@ -293,7 +326,7 @@
                     <tr>
                         <th style="width: 20%; background: #eff6ff; color: #1e40af;">Fournisseurs (Amont)</th>
                         <td style="width: 80%;">
-                            {{ is_array($suppliers) && count($suppliers) > 0 ? implode(', ', $suppliers) : 'Clients / Direction / Parties intéressées' }}
+                            {{ $displayList($suppliers) ?: 'Clients / Direction / Parties intéressées' }}
                         </td>
                     </tr>
                     <tr>
@@ -304,10 +337,10 @@
                         <th style="background: #f0fdf4; color: #166534;">Activité & Sous-activités</th>
                         <td>
                             <strong>{{ $actDesc }}</strong>
-                            @if(is_array($subActivities) && count($subActivities) > 0)
+                            @if($displayList($subActivities))
                                 <ul style="margin: 3px 0 3px 18px; padding: 0;">
-                                    @foreach($subActivities as $sub)
-                                        <li>{{ $sub }}</li>
+                                    @foreach((is_array($subActivities) ? $subActivities : ($subActivities instanceof \Illuminate\Support\Collection ? $subActivities->all() : [])) as $sub)
+                                        <li>{{ $displayList($sub) }}</li>
                                     @endforeach
                                 </ul>
                             @endif
@@ -320,9 +353,19 @@
                     <tr>
                         <th style="background: #f0fdf4; color: #166534;">Clients (Aval)</th>
                         <td>
-                            {{ is_array($clients) && count($clients) > 0 ? implode(', ', $clients) : 'Clients / Processus partenaires' }}
+                            {{ $displayList($clients) ?: 'Clients / Processus partenaires' }}
                         </td>
                     </tr>
+                    <tr>
+                        <th>Responsable / durée</th>
+                        <td>{{ $seq->responsibleUser?->name ?? 'Non assigné' }}{{ $seq->duration_minutes ? ' · ' . $seq->duration_minutes . ' min' : '' }}</td>
+                    </tr>
+                    @if($documents->count() > 0)
+                    <tr>
+                        <th>Documents associés</th>
+                        <td>{{ $displayList($documents) }}</td>
+                    </tr>
+                    @endif
                 </table>
             </div>
         @endforeach
@@ -330,6 +373,30 @@
         <div style="color: #64748b; font-style: italic; margin-bottom: 10px;">
             Aucune séquence détaillée n'a été formalisée pour ce processus.
         </div>
+    @endif
+
+    <!-- 3 bis. KPI du processus -->
+    <div class="section-title">3 bis. KPI du processus</div>
+    @php $indicators = $process->indicators ?? collect(); @endphp
+    @if(count($indicators) > 0)
+        <table class="data-table">
+            <thead><tr><th>Nom</th><th>Type / catégorie</th><th>Unité</th><th>Cible</th><th>Dernière valeur</th><th>Responsable</th></tr></thead>
+            <tbody>
+            @foreach($indicators as $indicator)
+                @php $latest = $indicator->values?->sortByDesc('measurement_date')->first(); @endphp
+                <tr>
+                    <td><strong>{{ $indicator->name }}</strong><br><span style="color:#64748b;">{{ $indicator->description ?: '' }}</span></td>
+                    <td>{{ $indicator->type }} / {{ $indicator->category }}</td>
+                    <td>{{ $indicator->unit }}</td>
+                    <td>{{ $indicator->target_value ?? '—' }}</td>
+                    <td>{{ $latest?->value ?? '—' }}{{ $latest?->measurement_date ? ' (' . $latest->measurement_date->format('d/m/Y') . ')' : '' }}</td>
+                    <td>{{ $indicator->responsibleUser?->name ?? '—' }}</td>
+                </tr>
+            @endforeach
+            </tbody>
+        </table>
+    @else
+        <div style="color: #64748b; font-style: italic; margin-bottom: 10px;">Aucun KPI défini pour ce processus.</div>
     @endif
 
     <!-- 3. Objectifs et Indicateurs de Performance -->
@@ -370,19 +437,19 @@
     <table class="info-table">
         <tr>
             <th style="width: 25%;">Ressources Humaines</th>
-            <td>{{ !empty($res['human']) ? (is_array($res['human']) ? implode(', ', $res['human']) : $res['human']) : 'Personnel qualifié et habilité' }}</td>
+            <td>{{ $displayList($res['human'] ?? '') ?: 'Personnel qualifié et habilité' }}</td>
         </tr>
         <tr>
             <th>Ressources Matérielles</th>
-            <td>{{ !empty($res['material']) ? (is_array($res['material']) ? implode(', ', $res['material']) : $res['material']) : 'Équipements et infrastructure' }}</td>
+            <td>{{ $displayList($res['material'] ?? '') ?: 'Équipements et infrastructure' }}</td>
         </tr>
         <tr>
             <th>Ressources Technologiques & SI</th>
-            <td>{{ !empty($res['technological']) ? (is_array($res['technological']) ? implode(', ', $res['technological']) : $res['technological']) : 'Systèmes d’information et logiciels métier' }}</td>
+            <td>{{ $displayList($res['technological'] ?? '') ?: 'Systèmes d’information et logiciels métier' }}</td>
         </tr>
         <tr>
             <th>Ressources Documentaires</th>
-            <td>{{ !empty($res['documentary']) ? (is_array($res['documentary']) ? implode(', ', $res['documentary']) : $res['documentary']) : 'Procédures, instructions et formulaires applicables' }}</td>
+            <td>{{ $displayList($res['documentary'] ?? '') ?: 'Procédures, instructions et formulaires applicables' }}</td>
         </tr>
     </table>
 

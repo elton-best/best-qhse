@@ -29,6 +29,8 @@ class ObjectiveService
                 'deadline' => $data['deadline'],
                 'allocated_budget' => $data['allocated_budget'] ?? null,
                 'required_resources' => $data['required_resources'] ?? null,
+                'measurement_frequency' => $data['measurement_frequency'] ?? null,
+                'unit' => $data['unit'] ?? null,
             ]);
 
             // Validation SMART si fournie
@@ -139,7 +141,7 @@ class ObjectiveService
         activity()
             ->performedOn($objective)
             ->causedBy(auth()->user())
-            ->log("Jalon ajouté : {$milestoneData['description']}");
+            ->log('Jalon ajouté : '.($milestoneData['title'] ?? $milestoneData['description'] ?? ''));
 
         return $objective->fresh();
     }
@@ -362,7 +364,8 @@ class ObjectiveService
     protected function generateReference(): string
     {
         $year = now()->year;
-        $lastObjective = Objective::where('ref', 'like', "OBJ-{$year}-%")
+        $lastObjective = Objective::withTrashed()
+            ->where('ref', 'like', "OBJ-{$year}-%")
             ->orderBy('ref', 'desc')
             ->first();
 

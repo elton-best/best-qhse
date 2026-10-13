@@ -131,15 +131,86 @@ function apiUrl(path: string): string {
   return `${API_BASE}/${path.replace(/^\//, "")}`;
 }
 
+const FIELD_LABELS_FR: Record<string, string> = {
+  site_id: "Site",
+  title: "Titre",
+  description: "Description",
+  category: "Catégorie",
+  priority: "Priorité",
+  subject: "Objet",
+  message: "Message",
+  type: "Type",
+  year: "Année",
+  responses: "Réponses",
+  total_score: "Score total",
+  satisfaction_level: "Niveau de satisfaction",
+  name: "Nom",
+  location: "Adresse",
+  city: "Ville",
+  phone: "Téléphone",
+  email: "E-mail",
+  first_name: "Prénom",
+  last_name: "Nom",
+  password: "Mot de passe",
+  is_headquarter: "Siège social",
+  is_active: "Statut actif",
+  manager_id: "Responsable",
+  customer_name: "Nom du client",
+  customer_email: "E-mail du client",
+  customer_phone: "Téléphone du client",
+  customer_address: "Adresse du client",
+  client_name: "Nom du client",
+  client_email: "E-mail du client",
+  client_phone: "Téléphone du client",
+  client_company: "Société du client",
+  expected_solution: "Solution attendue",
+  satisfaction_rating: "Note de satisfaction",
+  satisfaction_comment: "Commentaire de satisfaction",
+  wants_email_response: "Réponse par e-mail",
+  response: "Réponse",
+  status: "Statut",
+  role: "Rôle",
+};
+
+function fieldLabelFr(field: string): string {
+  return FIELD_LABELS_FR[field] ?? field.replace(/_/g, " ");
+}
+
+function translateRuleMessage(field: string, message: string): string {
+  const label = fieldLabelFr(field);
+  if (/field is required/i.test(message) || /is required\.?$/i.test(message))
+    return `Le champ « ${label} » est obligatoire.`;
+  let m = message.match(/must be at least (\d+) characters?/i);
+  if (m) return `Le champ « ${label} » doit contenir au moins ${m[1]} caractères.`;
+  m =
+    message.match(/may not be greater than (\d+) characters?/i) ||
+    message.match(/must not be greater than (\d+) characters?/i);
+  if (m) return `Le champ « ${label} » ne doit pas dépasser ${m[1]} caractères.`;
+  if (/must be a valid email/i.test(message))
+    return `Le champ « ${label} » doit être une adresse e-mail valide.`;
+  if (/must be a number|must be numeric/i.test(message))
+    return `Le champ « ${label} » doit être un nombre.`;
+  if (/has already been taken|already exists/i.test(message))
+    return `La valeur du champ « ${label} » est déjà utilisée.`;
+  if (/must be (a string|an integer|a boolean|an array|a date)/i.test(message))
+    return `Le champ « ${label} » a un format invalide.`;
+  if (/is invalid/i.test(message)) return `La valeur du champ « ${label} » est invalide.`;
+  return `Le champ « ${label} » est invalide.`;
+}
+
 function extractMessage(payload: unknown, fallback: string): string {
   if (payload && typeof payload === "object") {
     const p = payload as Record<string, unknown>;
-    if (typeof p.message === "string" && p.message) return p.message;
     if (p.errors && typeof p.errors === "object") {
-      const first = Object.values(p.errors as Record<string, unknown>)[0];
-      if (Array.isArray(first) && typeof first[0] === "string") return first[0];
-      if (typeof first === "string") return first;
+      const translated = Object.entries(p.errors as Record<string, unknown>).map(
+        ([field, value]) => {
+          const first = Array.isArray(value) ? value[0] : value;
+          return translateRuleMessage(field, typeof first === "string" ? first : "");
+        },
+      );
+      if (translated.length > 0) return translated.join(" ");
     }
+    if (typeof p.message === "string" && p.message) return p.message;
   }
   return fallback;
 }
@@ -368,13 +439,10 @@ export const backendApi = {
         mfa_expires_at?: string;
         mfa_code?: string;
         message?: string;
-      }>(
-        "auth/mfa/resend",
-        {
-          method: "POST",
-          body: JSON.stringify({ token }),
-        },
-      );
+      }>("auth/mfa/resend", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      });
     },
     async registerClient(input: {
       username: string;

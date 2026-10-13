@@ -86,6 +86,13 @@ class ContextDocxGenerator
             }
         }
 
+        $section->addTextBreak(1);
+        $section->addText('4. SYNTHÈSE DU CONTEXTE', ['bold' => true, 'size' => 13], ['spaceAfter' => 120]);
+        $section->addText('Synthèse des enjeux internes', ['bold' => true, 'size' => 11], ['spaceAfter' => 40]);
+        $section->addText(trim((string) ($context->swot_strengths ?? '')) ?: 'Aucune synthèse interne renseignée.', ['size' => 11], ['spaceAfter' => 100]);
+        $section->addText('Synthèse des enjeux externes', ['bold' => true, 'size' => 11], ['spaceAfter' => 40]);
+        $section->addText(trim((string) ($context->pestel_political ?? '')) ?: 'Aucune synthèse externe renseignée.', ['size' => 11]);
+
         return $this->save($phpWord, $siteId);
     }
 

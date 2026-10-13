@@ -13,7 +13,7 @@ use App\Http\Resources\DocumentResource;
 use App\Http\Resources\ProcessResource;
 use App\Models\Action;
 use App\Models\Process;
-use App\Models\ProcessIndicator;
+use App\Modules\Processes\Models\ProcessIndicator;
 use App\Models\ProcessObjective;
 use App\Models\ProcessRiskOpportunity;
 use App\Models\TeamMember;
@@ -58,10 +58,19 @@ class ProcessController extends Controller
     {
         $user = $request->user();
         
-        $query = Process::with([
-            'site', 'pilot', 'copilot', 'copilots', 'parentProcess',
-            'indicators', 'risksOpportunities', 'processObjectives.indicator'
-        ]);
+        // Mode allégé (?light=1) : sans relations coûteuses (site.manager/pilot
+        // embarquent des centaines de permissions via UserResource). Réservé aux
+        // selects et listes ; les vues détaillées utilisent le mode complet.
+        $light = $request->boolean('light');
+
+        $query = Process::query();
+
+        if (!$light) {
+            $query->with([
+                'site', 'pilot', 'copilot', 'copilots', 'parentProcess',
+                'indicators', 'risksOpportunities', 'processObjectives.indicator'
+            ]);
+        }
 
         // Scope access by user type / enterprise / site context
         if ($user->user_type !== 'super_admin') {
@@ -100,6 +109,14 @@ class ProcessController extends Controller
             });
         }
 
+        if ($light) {
+            $processes = $query
+                ->select(['id', 'site_id', 'title', 'code', 'abbreviation', 'category', 'type', 'status', 'purpose'])
+                ->paginate($request->get('per_page', 20));
+
+            return response()->json($processes);
+        }
+
         $processes = $query->paginate($request->get('per_page', 20));
 
         return ProcessResource::collection($processes);
@@ -116,8 +133,8 @@ class ProcessController extends Controller
                 'type' => 'sometimes|in:management,operational,support,pilotage,operationnel,realization,realisation',
                 'category' => 'sometimes|in:pilotage,support,operationnel,mesure_amelioration,management,realization,realisation',
                 'status' => 'sometimes|in:draft,active,inactive',
-                'pilot_id' => 'nullable|exists:users,id',
-                'copilot_id' => 'nullable|exists:users,id',
+                'pilot_id' => 'nullable|integer|exists:users,id',
+                'copilot_id' => 'nullable|integer|exists:users,id',
                 'copilot_ids' => 'nullable|array',
                 'copilot_ids.*' => 'integer|exists:users,id',
                 'purpose' => 'nullable|string',
@@ -132,6 +149,7 @@ class ProcessController extends Controller
                 'aspect_sante_securite' => 'nullable|boolean',
                 'normes_iso' => 'nullable|array',
                 'sequences' => 'nullable|array',
+                'sequences.*.sequence_order' => 'nullable|integer',
                 'sequences.*.input_description' => 'nullable|string',
                 'sequences.*.activity_description' => 'nullable|string',
                 'sequences.*.output_description' => 'nullable|string',
@@ -139,6 +157,10 @@ class ProcessController extends Controller
                 'sequences.*.sub_activities.*' => 'nullable|string|max:255',
                 'sequences.*.supplier_processes' => 'nullable|array',
                 'sequences.*.client_processes' => 'nullable|array',
+                'sequences.*.responsible_user_id' => 'nullable|integer|exists:users,id',
+                'sequences.*.duration_minutes' => 'nullable|integer|min:1',
+                'sequences.*.document_ids' => 'nullable|array',
+                'sequences.*.document_ids.*' => 'exists:documents,id',
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             Log::error('[ProcessController] Validation failed', ['errors' => $e->errors()]);
@@ -179,7 +201,10 @@ class ProcessController extends Controller
             if (!empty($sequences)) {
                 foreach ($sequences as $index => $seqData) {
                     $payload = $this->buildSequencePayload($seqData, $index);
-                    $process->sequences()->create($payload);
+                    $sequence = $process->sequences()->create($payload);
+                    if (!empty($payload['document_ids'])) {
+                        $sequence->documents()->sync($payload['document_ids']);
+                    }
                 }
             }
 
@@ -192,7 +217,7 @@ class ProcessController extends Controller
             throw $e;
         }
 
-        return new ProcessResource($process->load(['sequences', 'copilots']));
+        return new ProcessResource($process->load(['sequences.responsibleUser', 'sequences.documents', 'copilots']));
     }
 
     public function show(Process $process)
@@ -204,7 +229,7 @@ class ProcessController extends Controller
             'risksOpportunities.responsibleUser',
             'isoCoverages',
             'reviews.leader',
-            'sequences.responsibleUser',
+            'sequences.responsibleUser', 'sequences.documents',
             'versions.author',
             'processObjectives.indicator',
             'risks',
@@ -225,8 +250,8 @@ class ProcessController extends Controller
             'type' => 'sometimes|in:management,operational,support,pilotage,operationnel,realization,realisation',
             'category' => 'sometimes|in:pilotage,support,operationnel,mesure_amelioration,management,realization,realisation',
             'status' => 'sometimes|in:draft,active,inactive,in_review,validated,obsolete',
-            'pilot_id' => 'sometimes|exists:users,id',
-            'copilot_id' => 'nullable|exists:users,id',
+            'pilot_id' => 'sometimes|integer|exists:users,id',
+            'copilot_id' => 'nullable|integer|exists:users,id',
             'copilot_ids' => 'nullable|array',
             'copilot_ids.*' => 'integer|exists:users,id',
             'purpose' => 'sometimes|string',
@@ -241,6 +266,7 @@ class ProcessController extends Controller
             'aspect_sante_securite' => 'nullable|boolean',
             'normes_iso' => 'nullable|array',
             'sequences' => 'nullable|array',
+            'sequences.*.sequence_order' => 'nullable|integer',
             'sequences.*.input_description' => 'nullable|string',
             'sequences.*.activity_description' => 'nullable|string',
             'sequences.*.output_description' => 'nullable|string',
@@ -248,6 +274,10 @@ class ProcessController extends Controller
             'sequences.*.sub_activities.*' => 'nullable|string|max:255',
             'sequences.*.supplier_processes' => 'nullable|array',
             'sequences.*.client_processes' => 'nullable|array',
+            'sequences.*.responsible_user_id' => 'nullable|integer|exists:users,id',
+            'sequences.*.duration_minutes' => 'nullable|integer|min:1',
+            'sequences.*.document_ids' => 'nullable|array',
+            'sequences.*.document_ids.*' => 'exists:documents,id',
         ]);
         
         Log::info('[ProcessController] UPDATE - Validated sequences:', $validated['sequences'] ?? []);
@@ -288,7 +318,10 @@ class ProcessController extends Controller
                 foreach ($sequences as $index => $seqData) {
                     $payload = $this->buildSequencePayload($seqData, $index);
                     Log::info('[ProcessController] Creating sequence:', $payload);
-                    $process->sequences()->create($payload);
+                    $sequence = $process->sequences()->create($payload);
+                    if (!empty($payload['document_ids'])) {
+                        $sequence->documents()->sync($payload['document_ids']);
+                    }
                 }
             }
 
@@ -301,7 +334,7 @@ class ProcessController extends Controller
             throw $e;
         }
 
-        return new ProcessResource($process->fresh()->load(['sequences', 'copilots']));
+        return new ProcessResource($process->fresh()->load(['sequences.responsibleUser', 'sequences.documents', 'copilots']));
     }
 
     public function destroy(Process $process)
@@ -318,11 +351,44 @@ class ProcessController extends Controller
             'category' => 'required|in:qualite,environnement,sante_securite,global',
             'unit' => 'required|string|max:50',
             'target_value' => 'nullable|numeric',
+            'description' => 'nullable|string',
         ]);
 
         $indicator = $this->processService->createIndicator($process, $validated, $request->user()->id);
 
         return response()->json(['data' => $indicator], 201);
+    }
+
+    public function updateIndicator(Request $request, Process $process, ProcessIndicator $indicator)
+    {
+        abort_unless((int) $indicator->process_id === (int) $process->id, 404);
+
+        $validated = $request->validate([
+            'name' => 'sometimes|string|max:255',
+            'description' => 'nullable|string',
+            'type' => 'sometimes|in:efficacite,efficience,conformite,performance',
+            'category' => 'sometimes|in:qualite,environnement,sante_securite,global',
+            'unit' => 'sometimes|string|max:50',
+            'measurement_frequency' => 'nullable|in:daily,weekly,monthly,quarterly,semiannual,annual',
+            'target_value' => 'nullable|numeric',
+            'min_threshold' => 'nullable|numeric',
+            'max_threshold' => 'nullable|numeric',
+            'alert_threshold' => 'nullable|numeric',
+            'formula' => 'nullable|string',
+            'responsible_user_id' => 'nullable|integer|exists:users,id',
+            'is_active' => 'nullable|boolean',
+            'status' => 'nullable|string|max:50',
+        ]);
+
+        $indicator->update($validated);
+        return response()->json(['data' => $indicator->fresh()->load('responsibleUser')]);
+    }
+
+    public function deleteIndicator(Process $process, ProcessIndicator $indicator)
+    {
+        abort_unless((int) $indicator->process_id === (int) $process->id, 404);
+        $indicator->delete();
+        return response()->json(['message' => 'Indicateur supprimé'], 204);
     }
 
     public function addRiskOpportunity(Request $request, Process $process)
@@ -339,7 +405,7 @@ class ProcessController extends Controller
             'strategie' => 'nullable|in:accepter,reduire,transferer,eviter,exploiter',
             'actions_prevues' => 'nullable|string',
             'planned_actions' => 'nullable',
-            'responsible_user_id' => 'nullable|exists:users,id',
+            'responsible_user_id' => 'nullable|integer|exists:users,id',
             'target_date' => 'nullable|date',
             'status' => 'nullable|in:identifie,en_cours,traite,surveille,cloture,a_traiter',
             'probabilite_residuelle' => 'nullable|integer|min:1|max:4',
@@ -1259,6 +1325,47 @@ class ProcessController extends Controller
     }
 
     /**
+     * Matrice de couverture ISO par site (contrat `iso-coverage-matrix`).
+     * Réutilisée par la rubrique « Système de management » (couverture ISO 9001/14001/45001).
+     */
+    public function isoCoverageMatrix(Request $request)
+    {
+        $user = $request->user();
+        $siteId = $request->filled('site_id') ? (int) $request->site_id : ($user?->site_id ? (int) $user->site_id : null);
+        if (!$siteId && $user?->enterprise_id) {
+            $siteId = (int) (Site::where('enterprise_id', (int) $user->enterprise_id)->value('id') ?? 0);
+        }
+        if (!$siteId) {
+            return response()->json(['message' => 'Le paramètre site_id est requis.'], 422);
+        }
+
+        $rawNorme = trim((string) ($request->query('norme', $request->input('norme', '9001')) ?? '9001'));
+        $norme = '9001';
+        if (preg_match('/(\d{4,5})/', $rawNorme, $matches)) {
+            $candidate = $matches[1];
+            $norme = in_array($candidate, ['9001', '14001', '45001', '50001'], true) ? $candidate : '9001';
+        }
+
+        $matrix = $this->processService->generateIsoCoverageMatrix($siteId, $norme);
+
+        // Les normes peuvent être stockées sous forme « ISO 9001 » : repli sans toucher au service.
+        if (empty($matrix)) {
+            $variant = 'ISO ' . $norme;
+            $retry = $this->processService->generateIsoCoverageMatrix($siteId, $variant);
+            if (!empty($retry)) {
+                $matrix = $retry;
+            }
+        }
+
+        return response()->json([
+            'data' => array_values(is_array($matrix) ? $matrix : []),
+            'site_id' => $siteId,
+            'norme' => $norme,
+            'total' => is_array($matrix) ? count($matrix) : 0,
+        ]);
+    }
+
+    /**
      * Export Process Sheet as DOCX
      */
     public function exportDocx(Request $request, Process $process)
@@ -1268,7 +1375,8 @@ class ProcessController extends Controller
 
             $process->load([
                 'pilot', 'copilot', 'copilots',
-                'sequences',
+                'sequences.responsibleUser', 'sequences.documents',
+                'indicators.values', 'indicators.responsibleUser',
                 'processObjectives.indicator',
                 'risksOpportunities'
             ]);
@@ -1356,7 +1464,8 @@ class ProcessController extends Controller
             $process->load([
                 'pilot', 'copilot', 'copilots',
                 'site.enterprise',
-                'sequences.responsibleUser',
+                'sequences.responsibleUser', 'sequences.documents',
+                'indicators.values', 'indicators.responsibleUser',
                 'processObjectives.indicator',
                 'risksOpportunities'
             ]);
@@ -1404,7 +1513,8 @@ class ProcessController extends Controller
 
         $process->load([
             'pilot', 'copilot', 'copilots',
-            'sequences',
+            'sequences.responsibleUser', 'sequences.documents',
+            'indicators.values', 'indicators.responsibleUser',
             'processObjectives.indicator',
             'risksOpportunities'
         ]);
@@ -1475,7 +1585,7 @@ class ProcessController extends Controller
             'output_description' => 'nullable|string',
             'supplier_processes' => 'nullable|array',
             'client_processes' => 'nullable|array',
-            'responsible_user_id' => 'nullable|exists:users,id',
+            'responsible_user_id' => 'nullable|integer|exists:users,id',
             'duration_minutes' => 'nullable|integer|min:1',
             'document_ids' => 'nullable|array',
             'document_ids.*' => 'exists:documents,id',
@@ -1542,6 +1652,7 @@ class ProcessController extends Controller
             'output_description' => $seqData['output_description'] ?? $seqData['outputs'] ?? '',
             'responsible_user_id' => $seqData['responsible_user_id'] ?? null,
             'duration_minutes' => $seqData['duration_minutes'] ?? null,
+            'document_ids' => array_values(array_filter(array_map('intval', $seqData['document_ids'] ?? []))),
         ];
 
         if ($this->hasSubActivitiesColumn()) {
@@ -1614,7 +1725,7 @@ class ProcessController extends Controller
             'output_description' => 'nullable|string',
             'supplier_processes' => 'nullable|array',
             'client_processes' => 'nullable|array',
-            'responsible_user_id' => 'nullable|exists:users,id',
+            'responsible_user_id' => 'nullable|integer|exists:users,id',
             'duration_minutes' => 'nullable|integer|min:1',
             'document_ids' => 'nullable|array',
             'document_ids.*' => 'exists:documents,id',

@@ -344,10 +344,10 @@ export async function downloadTaskReport(type: string, id: number): Promise<void
   if (!response.ok) throw new Error("Le téléchargement du rapport a échoué.");
   const blob = await response.blob();
   const url = window.URL.createObjectURL(blob);
-  const link = document.createElement("a");
+  const link = window.document.createElement("a");
   link.href = url;
   link.setAttribute("download", `rapport-${type}-${id}.docx`);
-  document.body.append(link);
+  window.document.body.append(link);
   link.click();
   link.remove();
   window.URL.revokeObjectURL(url);

@@ -62,11 +62,12 @@ function normalizeDocument(item: unknown): PendingDocument | null {
       : raw;
   const id = raw.id ?? attrs.id;
   if (id == null) return null;
-  const author = relationValue(attrs.author ?? raw.author);
-  const approver = relationValue(attrs.approver ?? raw.approver);
-  const verifier = relationValue(attrs.verifier ?? raw.verifier);
-  const process = relationValue(attrs.process ?? raw.process);
-  const site = relationValue(attrs.site ?? raw.site);
+  const relationships = objectOf(raw.relationships);
+  const author = relationValue(attrs.author ?? raw.author ?? relationships.author);
+  const approver = relationValue(attrs.approver ?? raw.approver ?? relationships.approver);
+  const verifier = relationValue(attrs.verifier ?? raw.verifier ?? relationships.verifier);
+  const process = relationValue(attrs.process ?? raw.process ?? relationships.process);
+  const site = relationValue(attrs.site ?? raw.site ?? relationships.site);
   const source = [attrs.source_module, attrs.source_submodule, attrs.source_section]
     .filter(Boolean)
     .join(" > ");
@@ -99,19 +100,20 @@ function normalizeDocument(item: unknown): PendingDocument | null {
 
 export async function fetchPendingDocuments(
   workflowStatus: "pending_verification" | "pending_approval",
+  siteId?: string,
 ) {
   const payload = await backendApi.request<unknown>(
-    `documents?workflow_status=${encodeURIComponent(workflowStatus)}`,
+    `document-code-workflow/${workflowStatus === "pending_verification" ? "pending-verification" : "pending-approval"}${siteId ? `?site_id=${encodeURIComponent(siteId)}` : ""}`,
   );
   return collection(payload)
     .map(normalizeDocument)
     .filter((item): item is PendingDocument => item !== null);
 }
 
-export function usePendingDocuments(workflowStatus: "pending_verification" | "pending_approval") {
+export function usePendingDocuments(workflowStatus: "pending_verification" | "pending_approval", siteId?: string) {
   return useQuery({
-    queryKey: [...PENDING_DOCUMENTS_KEY, workflowStatus],
-    queryFn: () => fetchPendingDocuments(workflowStatus),
+    queryKey: [...PENDING_DOCUMENTS_KEY, workflowStatus, siteId ?? "all-sites"],
+    queryFn: () => fetchPendingDocuments(workflowStatus, siteId),
     staleTime: 15_000,
     retry: 1,
   });

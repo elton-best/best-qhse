@@ -379,15 +379,11 @@ class MyTasksController extends Controller
         // Find the task
         $task = $modelClass::findOrFail($id);
 
-        // Check authorization
+        // Fenêtre d'activation : informative uniquement (tracking_available).
+        // Le responsable peut enregistrer l'avancement à tout moment ; la
+        // fenêtre borne l'exigibilité, pas la saisie.
         if (!$this->userCanTrackTask($user, $task, $type)) {
-            return response()->json(['error' => 'Unauthorized'], 403);
-        }
-
-        // Check if in activation window
-        $trackingAvailable = $this->isTrackingAvailable($task, $user);
-        if (!$trackingAvailable) {
-            return response()->json(['error' => 'Task is outside activation window'], 422);
+            return response()->json(['error' => 'Seul le responsable peut mettre à jour le suivi.'], 403);
         }
 
         // Find or create TaskTracking entry
@@ -486,9 +482,9 @@ class MyTasksController extends Controller
         try {
             $path = $this->reportService->generateReport($task, $type, $user);
 
-            // Download file
+            // Download file (même disque que la génération : Storage::path)
             return response()->download(
-                storage_path("app/{$path}"),
+                \Illuminate\Support\Facades\Storage::path($path),
                 "rapport-{$type}-{$task->id}.docx"
             )->deleteFileAfterSend(true);
         } catch (\Exception $e) {
@@ -579,6 +575,7 @@ class MyTasksController extends Controller
             'responsible' => $responsible,
             'process_id' => $task->process_id ?? null,
             'process_name' => $processName,
+            'site_id' => $task->site_id ?? null,
             'tracking_available' => $trackingAvailable,
             'has_tracking' => $tracking !== null,
             'frequency' => $task->frequency ?? null,

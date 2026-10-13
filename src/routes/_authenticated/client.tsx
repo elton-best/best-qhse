@@ -87,7 +87,7 @@ const backendStatus = (v: string) =>
       Fermée: "closed",
     }) as Record<string, string>
   )[v] ?? "pending";
-// Catégories Vue (ComplaintCreate) affichées en FR, stockées normalisées côté Laravel.
+// Catégories Vue (ComplaintCreate) affichées en FR, stockées normalisées côté serveur.
 const CATEGORY_FR: Record<string, string> = {
   product_quality: "Qualité produit",
   product_defect: "Qualité produit",
@@ -133,8 +133,7 @@ function normalizeRec(item: Record<string, unknown>, kind: string): Rec {
       ? (item.relationships as Record<string, unknown>)
       : {};
   const relSite = (rels.site as Record<string, unknown> | undefined)?.data as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   const siteAttrs =
     relSite?.attributes && typeof relSite.attributes === "object"
       ? (relSite.attributes as Record<string, unknown>)
@@ -182,8 +181,10 @@ function useClientRecords() {
         backendApi
           .request<unknown>("satisfaction-surveys?per_page=100")
           .catch(() => ({ data: [] })),
-        // Route réelle : /api/v1/clientb/support/tickets (voir backend/routes/modules/clientb.php).
-        backendApi.request<unknown>("clientb/support/tickets?per_page=100").catch(() => ({ data: [] })),
+        // Route réelle : /api/v1/clientb/support/tickets (voir routes/modules/clientb.php).
+        backendApi
+          .request<unknown>("clientb/support/tickets?per_page=100")
+          .catch(() => ({ data: [] })),
       ]);
       return [
         ...listFrom(complaints).map((x) => normalizeRec(x, "client_complaint")),
@@ -217,7 +218,7 @@ function useCreate() {
         });
       }
       if (v.kind !== "client_complaint")
-        throw new Error("Ce type de demande n'est pas encore exposé par le backend.");
+        throw new Error("Ce type de demande n'est pas encore disponible.");
       // Aligne Vue ComplaintCreate : champs customer_*, priorité, réponse souhaitée, solution attendue.
       return backendApi.request("complaints", {
         method: "POST",
@@ -274,7 +275,7 @@ function useUpdate() {
         });
       }
       // Plainte : seuls title/description/category/priority + satisfaction (1-5) sont
-      // persistés côté Laravel (voir ComplaintController). Pas de history/unread/rating fantômes.
+      // persistés côté serveur (voir ComplaintController). Pas de history/unread/rating fantômes.
       const payload: Record<string, unknown> = {};
       if (v.data.title !== undefined) payload.title = v.data.title;
       if (v.data.description !== undefined) payload.description = v.data.description;
@@ -284,8 +285,7 @@ function useUpdate() {
         payload.wants_email_response = v.data.wants_email_response;
       if (v.data.expected_solution !== undefined)
         payload.expected_solution = v.data.expected_solution;
-      if (v.data.customer_address !== undefined)
-        payload.customer_address = v.data.customer_address;
+      if (v.data.customer_address !== undefined) payload.customer_address = v.data.customer_address;
       if (v.data.satisfaction_rating !== undefined)
         payload.satisfaction_rating = v.data.satisfaction_rating;
       if (v.data.satisfaction_comment !== undefined)
@@ -317,9 +317,11 @@ function ClientSpace() {
   const [mobile, setMobile] = useState(false);
   const { data: recs = [] } = useClientRecords();
   const complaints = recs.filter((r) => r.kind === "client_complaint");
-  // Pas de flag "unread" côté Laravel : on signale les plaintes en attente de suivi
+  // Pas de flag "unread" côté serveur : on signale les plaintes en attente de suivi
   // (En attente / En cours), comme Vue (pastilles pending/in_progress).
-  const unread = complaints.filter((c) => c.status === "En attente" || c.status === "En cours").length;
+  const unread = complaints.filter(
+    (c) => c.status === "En attente" || c.status === "En cours",
+  ).length;
   const name = [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Client";
   const initials = name
     .split(/\s+/)
@@ -459,7 +461,9 @@ function Dashboard({ name, complaints }: { name: string; complaints: Rec[] }) {
             year: "numeric",
           })}
         </p>
-        <h2 className="mt-1 font-display text-2xl font-bold text-foreground">Bonjour {name}</h2>
+        <h2 className="mt-1 min-w-0 break-words font-display text-xl font-bold text-foreground sm:text-2xl">
+          Bonjour {name}
+        </h2>
         <div className="mt-4 flex flex-wrap gap-2">
           <Link
             to="/client"
@@ -484,7 +488,7 @@ function Dashboard({ name, complaints }: { name: string; complaints: Rec[] }) {
           </Link>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {stats.map((x) => (
           <div key={x.label} className={card}>
             <p className={`font-display text-3xl font-bold ${x.cls}`}>{x.v}</p>
@@ -533,7 +537,8 @@ function Complaints({ complaints }: { complaints: Rec[] }) {
     expected_solution: "",
     signature: false,
   });
-  const customerName = [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Client";
+  const customerName =
+    [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Client";
   const { data: companies = [] } = useQuery({
     queryKey: ["sites", "client", siteSearch],
     queryFn: async () => {
@@ -585,9 +590,7 @@ function Complaints({ complaints }: { complaints: Rec[] }) {
       ...(c.data["response_date"]
         ? [{ at: String(c.data["response_date"]), text: "Réponse de l'entreprise" }]
         : []),
-      ...(c.status === "Résolue"
-        ? [{ at: c.updated_at, text: "Plainte résolue" }]
-        : []),
+      ...(c.status === "Résolue" ? [{ at: c.updated_at, text: "Plainte résolue" }] : []),
       ...(c.status === "Fermée"
         ? [{ at: String(c.data["closed_date"] ?? c.updated_at), text: "Plainte fermée" }]
         : []),
@@ -641,7 +644,10 @@ function Complaints({ complaints }: { complaints: Rec[] }) {
           <div className="mt-6">
             <h3 className="font-display font-bold">Réponses de l’entreprise</h3>
             {recoParts.map((part, i) => (
-              <p key={i} className="mt-2 whitespace-pre-wrap rounded-xl bg-secondary/50 p-3 text-sm">
+              <p
+                key={i}
+                className="mt-2 whitespace-pre-wrap rounded-xl bg-secondary/50 p-3 text-sm"
+              >
                 {part}
               </p>
             ))}
@@ -680,8 +686,8 @@ function Complaints({ complaints }: { complaints: Rec[] }) {
           {c.status === "En attente" && (
             <button
               onClick={() => {
-                if (confirm("Retirer cette plainte ?"))
-                  update.mutate({ id: c.id, kind: "client_complaint", data: c.data, remove: true });
+                toast.info("Retrait de la plainte en cours.");
+                update.mutate({ id: c.id, kind: "client_complaint", data: c.data, remove: true });
               }}
               className="inline-flex h-10 items-center rounded-xl bg-destructive/10 px-4 text-sm font-semibold text-destructive"
             >
@@ -914,16 +920,19 @@ function Complaints({ complaints }: { complaints: Rec[] }) {
 }
 
 function Notifications({ complaints }: { complaints: Rec[] }) {
-  // Laravel ne stocke pas de history : on reconstruit depuis created/updated/response/closed + recommandations.
+  // Le serveur ne stocke pas de history : on reconstruit depuis created/updated/response/closed + recommandations.
   const items = complaints
     .flatMap((c) => {
       const rows: { c: Rec; at: string; text: string }[] = [
         { c, at: c.created_at, text: "Plainte déposée" },
       ];
-      if (c.data["recommandations"]) rows.push({ c, at: c.updated_at, text: "Réponse de l'entreprise reçue" });
+      if (c.data["recommandations"])
+        rows.push({ c, at: c.updated_at, text: "Réponse de l'entreprise reçue" });
       if (c.status === "Résolue") rows.push({ c, at: c.updated_at, text: "Plainte résolue" });
-      if (c.status === "Fermée") rows.push({ c, at: String(c.data["closed_date"] ?? c.updated_at), text: "Plainte fermée" });
-      else if (c.status === "En cours") rows.push({ c, at: c.updated_at, text: "Plainte en cours de traitement" });
+      if (c.status === "Fermée")
+        rows.push({ c, at: String(c.data["closed_date"] ?? c.updated_at), text: "Plainte fermée" });
+      else if (c.status === "En cours")
+        rows.push({ c, at: c.updated_at, text: "Plainte en cours de traitement" });
       return rows;
     })
     .sort((a, b) => b.at.localeCompare(a.at));
@@ -1079,7 +1088,7 @@ function Help({ tickets }: { tickets: Rec[] }) {
         {faq.map(([q, a]) => (
           <details key={q} className="mt-3">
             <summary className="cursor-pointer text-sm font-semibold">{q}</summary>
-            <p className="mt-1 text-sm text-muted-foreground">{a}</p>
+            <p className="mt-1 break-words text-sm text-muted-foreground">{a}</p>
           </details>
         ))}
       </div>

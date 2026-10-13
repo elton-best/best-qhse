@@ -42,7 +42,10 @@ class DocumentWorkflowController extends Controller
     public function confirmCode(Request $request, int $id)
     {
         $user = $request->user();
-        $document = Document::findOrFail((int) $id);
+        $document = Document::query()->find((int) $id);
+        if (!$document) {
+            abort(404, 'Document introuvable ou inaccessible.');
+        }
         $this->attachSafeRelations($document);
 
         // **SECURITY FIX**: Vérifier que l'auteur du document est l'utilisateur courant (IDOR prevention)
@@ -610,7 +613,11 @@ class DocumentWorkflowController extends Controller
     {
         // Pas de with('site') : la relation site du modèle pointe vers une
         // classe d'un autre module ; le site est chargé via attachSafeRelations().
-        $document = Document::findOrFail($documentId);
+        // 404 métier (pas findOrFail) pour ne jamais exposer de trace interne.
+        $document = Document::query()->find($documentId);
+        if (!$document) {
+            abort(404, 'Document introuvable ou inaccessible.');
+        }
 
         if (!$user || $user->user_type === 'super_admin') {
             return $document;

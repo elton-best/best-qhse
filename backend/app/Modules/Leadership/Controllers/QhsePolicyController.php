@@ -14,6 +14,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use App\Notifications\PolicyCreatedNotification;
 use App\Services\DocumentBrandingService;
 use App\Services\DocumentSyncService;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
@@ -107,8 +108,9 @@ class QhsePolicyController extends Controller
         $axes = $this->normalizeAxes($validated['axes'] ?? []);
         unset($validated['axes']);
 
-        // Marquer les anciennes politiques comme non courantes
+        // Marquer les anciennes politiques DU SITE comme non courantes
         QhsePolicy::where('enterprise_id', $user->enterprise_id)
+            ->where('site_id', $siteId)
             ->update(['is_current' => false]);
 
         $policy = QhsePolicy::create([
@@ -117,7 +119,7 @@ class QhsePolicyController extends Controller
             'site_id' => $siteId,
             'is_current' => true,
             'status' => 'draft',
-            'version' => $this->getNextVersion($user->enterprise_id),
+            'version' => $this->getNextVersion($user->enterprise_id, $siteId),
         ]);
         if ($this->hasPolicyAxesTable()) {
             $policy->syncAxes($axes);
@@ -349,24 +351,31 @@ class QhsePolicyController extends Controller
         $generationContext = $this->resolveGeneratedDocumentContext($request, $siteId);
         $document = null;
         if ($siteId > 0) {
-            $document = app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
-                'site_id' => $siteId,
-                'process_id' => $generationContext['process_id'],
-                'process_code' => $generationContext['process_code'],
-                'process_name' => $generationContext['process_name'],
-                'document_kind' => 'qhse_policy_pdf',
-                'source_type' => 'qhse_policy',
-                'source_id' => $qhsePolicy->id,
-                'source_updated_at' => $qhsePolicy->updated_at?->toISOString(),
-                'title' => 'Politique QHSE v' . ($qhsePolicy->version ?? '1.0'),
-                'description' => 'Version PDF de la politique QHSE générée automatiquement.',
-                'file_source_path' => $tempPath,
-                'file_extension' => 'pdf',
-                'created_by' => $user?->id,
-                'type' => $generationContext['type'],
-                'force_new' => true,
-                'metadata' => $generationContext['metadata'],
-            ]);
+            try {
+                $document = app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
+                    'site_id' => $siteId,
+                    'process_id' => $generationContext['process_id'],
+                    'process_code' => $generationContext['process_code'],
+                    'process_name' => $generationContext['process_name'],
+                    'document_kind' => 'qhse_policy_pdf',
+                    'source_type' => 'qhse_policy',
+                    'source_id' => $qhsePolicy->id,
+                    'source_updated_at' => $qhsePolicy->updated_at?->toISOString(),
+                    'title' => 'Politique QHSE v' . ($qhsePolicy->version ?? '1.0'),
+                    'description' => 'Version PDF de la politique QHSE générée automatiquement.',
+                    'file_source_path' => $tempPath,
+                    'file_extension' => 'pdf',
+                    'created_by' => $user?->id,
+                    'type' => $generationContext['type'],
+                    'force_new' => true,
+                    'metadata' => $generationContext['metadata'],
+                ]);
+            } catch (\Throwable $syncException) {
+                Log::warning('QHSE policy PDF inventory sync skipped', [
+                    'qhse_policy_id' => $qhsePolicy->id,
+                    'error' => $syncException->getMessage(),
+                ]);
+            }
         }
 
         $response = response()->download($tempPath, $filename)->deleteFileAfterSend(true);
@@ -401,29 +410,40 @@ class QhsePolicyController extends Controller
         $generationContext = $this->resolveGeneratedDocumentContext($request, $siteId);
         $document = null;
         if ($siteId > 0) {
-            $document = app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
-                'site_id' => $siteId,
-                'process_id' => $generationContext['process_id'],
-                'process_code' => $generationContext['process_code'],
-                'process_name' => $generationContext['process_name'],
-                'document_kind' => 'qhse_policy_docx',
-                'source_type' => 'qhse_policy',
-                'source_id' => $qhsePolicy->id,
-                'source_updated_at' => $qhsePolicy->updated_at?->toISOString(),
-                'title' => 'Politique QHSE v' . ($qhsePolicy->version ?? '1.0'),
-                'description' => 'Version DOCX de la politique QHSE générée automatiquement.',
-                'file_source_path' => $path,
-                'created_by' => $user?->id,
-                'type' => $generationContext['type'],
-                'force_new' => true,
-                'metadata' => $generationContext['metadata'],
-            ]);
+            try {
+                $document = app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
+                    'site_id' => $siteId,
+                    'process_id' => $generationContext['process_id'],
+                    'process_code' => $generationContext['process_code'],
+                    'process_name' => $generationContext['process_name'],
+                    'document_kind' => 'qhse_policy_docx',
+                    'source_type' => 'qhse_policy',
+                    'source_id' => $qhsePolicy->id,
+                    'source_updated_at' => $qhsePolicy->updated_at?->toISOString(),
+                    'title' => 'Politique QHSE v' . ($qhsePolicy->version ?? '1.0'),
+                    'description' => 'Version DOCX de la politique QHSE générée automatiquement.',
+                    'file_source_path' => $path,
+                    'created_by' => $user?->id,
+                    'type' => $generationContext['type'],
+                    'force_new' => true,
+                    'metadata' => $generationContext['metadata'],
+                ]);
+            } catch (\Throwable $syncException) {
+                Log::warning('QHSE policy DOCX inventory sync skipped', [
+                    'qhse_policy_id' => $qhsePolicy->id,
+                    'error' => $syncException->getMessage(),
+                ]);
+            }
         }
 
-        return response()
+        $response = response()
             ->download($path, 'politique_qhse_v'.$qhsePolicy->version.'.docx')
-            ->header('X-Generated-Document-Id', $document ? (string) $document->id : '')
             ->deleteFileAfterSend(true);
+        if ($document) {
+            $response->headers->set('X-Generated-Document-Id', (string) $document->id);
+        }
+
+        return $response;
     }
 
     public function generateDraftDocx(Request $request, QhsePolicy $qhsePolicy)
@@ -483,9 +503,10 @@ class QhsePolicyController extends Controller
         return response()->json($policies->map(fn (QhsePolicy $policy) => $this->serializePolicy($policy)));
     }
 
-    private function getNextVersion(int $enterpriseId): string
+    private function getNextVersion(int $enterpriseId, ?int $siteId = null): string
     {
         $lastPolicy = QhsePolicy::where('enterprise_id', $enterpriseId)
+            ->when($siteId, fn ($query) => $query->where('site_id', $siteId))
             ->orderBy('version', 'desc')
             ->first();
 

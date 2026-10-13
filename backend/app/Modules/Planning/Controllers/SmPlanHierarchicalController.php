@@ -187,9 +187,18 @@ class SmPlanHierarchicalController extends Controller
     /**
      * Store a new level 2 Sub-Activity (Mandatory per REQ-6.3-06).
      */
-    public function storeSubActivity(Request $request, int $activityId): JsonResponse
+    public function storeSubActivity(Request $request, ?int $activityId = null): JsonResponse
     {
         $user = Auth::user();
+        // La route POST /sub-activities ne fournit aucun paramètre d'URL :
+        // repli rétrocompatible sur le champ body {activity_id}.
+        $activityId ??= (int) $request->input('activity_id', 0);
+        if ($activityId <= 0) {
+            return response()->json([
+                'message' => 'Le champ activity_id est requis.',
+                'errors' => ['activity_id' => ['Le champ activity_id est requis.']],
+            ], 422);
+        }
         $activity = SmPlanActivity::where('enterprise_id', $user->enterprise_id)->findOrFail($activityId);
 
         $validated = $request->validate([
@@ -259,9 +268,18 @@ class SmPlanHierarchicalController extends Controller
     /**
      * Store level 3 Action / Task (No weights per REQ-6.3-06).
      */
-    public function storeAction(Request $request, int $subActivityId): JsonResponse
+    public function storeAction(Request $request, ?int $subActivityId = null): JsonResponse
     {
         $user = Auth::user();
+        // La route POST /actions ne fournit aucun paramètre d'URL :
+        // repli rétrocompatible sur le champ body {sub_activity_id}.
+        $subActivityId ??= (int) $request->input('sub_activity_id', 0);
+        if ($subActivityId <= 0) {
+            return response()->json([
+                'message' => 'Le champ sub_activity_id est requis.',
+                'errors' => ['sub_activity_id' => ['Le champ sub_activity_id est requis.']],
+            ], 422);
+        }
         $subActivity = SmPlanSubActivity::whereHas('activity', function ($q) use ($user) {
             $q->where('enterprise_id', $user->enterprise_id);
         })->findOrFail($subActivityId);

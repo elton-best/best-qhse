@@ -76,6 +76,14 @@ class ProcessResource extends JsonApiResource
                             'id' => $sequence->responsibleUser?->id,
                             'name' => $sequence->responsibleUser?->name,
                         ] : null,
+                        'documents' => $sequence->relationLoaded('documents')
+                            ? $sequence->documents->map(fn ($document) => [
+                                'id' => $document->id,
+                                'code' => $document->code,
+                                'title' => $document->title,
+                                'version' => $document->version,
+                            ])->values()->all()
+                            : [],
                     ];
                 });
             }),
@@ -154,6 +162,18 @@ class ProcessResource extends JsonApiResource
                         'alert_threshold' => $indicator->alert_threshold,
                         'formula' => $indicator->formula,
                         'status' => $indicator->status,
+                        'responsible_user' => $indicator->relationLoaded('responsibleUser') ? [
+                            'id' => $indicator->responsibleUser?->id,
+                            'name' => $indicator->responsibleUser?->name,
+                        ] : null,
+                        'values' => $indicator->relationLoaded('values') ? $indicator->values->map(fn ($value) => [
+                            'id' => $value->id,
+                            'measurement_date' => $value->measurement_date?->toDateString(),
+                            'period' => $value->period,
+                            'value' => $value->value,
+                            'comment' => $value->comment,
+                            'status' => $value->status,
+                        ])->values()->all() : [],
                     ];
                 });
             }),

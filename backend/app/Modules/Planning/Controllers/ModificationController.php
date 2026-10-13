@@ -124,6 +124,7 @@ class ModificationController extends Controller
             'additional_actions' => 'nullable|array',
             'additional_actions.*.title' => 'required|string|max:255',
             'additional_actions.*.responsible_id' => 'required|exists:users,id',
+            'additional_actions.*.process_id' => 'nullable|exists:processes,id',
             'additional_actions.*.deadline' => 'required|date',
         ]);
 
@@ -140,6 +141,7 @@ class ModificationController extends Controller
                 Action::create([
                     'enterprise_id' => $modification->enterprise_id,
                     'site_id' => $modification->site_id,
+                    'process_id' => $actionData['process_id'] ?? null,
                     'type' => 'improvement',
                     'title' => $actionData['title'],
                     'description' => "Action issue de la demande de modification {$modification->number}",

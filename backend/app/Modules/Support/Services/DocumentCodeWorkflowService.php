@@ -106,7 +106,7 @@ class DocumentCodeWorkflowService
         }
     }
 
-    public function getPendingVerification(?int $siteId = null)
+    public function getPendingVerification(?int $siteId = null, ?int $enterpriseId = null)
     {
         $query = Document::query()
             ->with(['site', 'process', 'author', 'category', 'typeConfiguration'])
@@ -114,12 +114,14 @@ class DocumentCodeWorkflowService
 
         if ($siteId) {
             $query->where('site_id', $siteId);
+        } elseif ($enterpriseId) {
+            $query->whereHas('site', fn ($site) => $site->where('enterprise_id', $enterpriseId));
         }
 
         return $query->latest('id')->get();
     }
 
-    public function getPendingApproval(?int $siteId = null)
+    public function getPendingApproval(?int $siteId = null, ?int $enterpriseId = null)
     {
         $query = Document::query()
             ->with(['site', 'process', 'author', 'category', 'typeConfiguration', 'verifier'])
@@ -127,6 +129,8 @@ class DocumentCodeWorkflowService
 
         if ($siteId) {
             $query->where('site_id', $siteId);
+        } elseif ($enterpriseId) {
+            $query->whereHas('site', fn ($site) => $site->where('enterprise_id', $enterpriseId));
         }
 
         return $query->latest('verified_at')->get();

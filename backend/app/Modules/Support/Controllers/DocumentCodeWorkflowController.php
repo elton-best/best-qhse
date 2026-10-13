@@ -23,7 +23,7 @@ class DocumentCodeWorkflowController extends Controller
         abort_unless($user?->can('verify_documents'), 403);
 
         $siteId = $this->resolveScopedSiteId($request, $user);
-        $documents = $this->workflowService->getPendingVerification($siteId);
+        $documents = $this->workflowService->getPendingVerification($siteId, (int) ($user?->enterprise_id ?? 0));
 
         return DocumentResource::collection($documents);
     }
@@ -34,7 +34,7 @@ class DocumentCodeWorkflowController extends Controller
         abort_unless($user?->can('approve_documents'), 403);
 
         $siteId = $this->resolveScopedSiteId($request, $user);
-        $documents = $this->workflowService->getPendingApproval($siteId);
+        $documents = $this->workflowService->getPendingApproval($siteId, (int) ($user?->enterprise_id ?? 0));
 
         return DocumentResource::collection($documents);
     }
@@ -95,6 +95,7 @@ class DocumentCodeWorkflowController extends Controller
     {
         $requestedSiteId = (int) $request->integer('site_id');
         if ($requestedSiteId <= 0) {
+            if ($user?->can('verify_documents') || $user?->can('approve_documents')) return null;
             return (int) ($user?->site_id ?? 0) > 0 ? (int) $user->site_id : null;
         }
 
@@ -103,7 +104,10 @@ class DocumentCodeWorkflowController extends Controller
         }
 
         if ((int) ($user->site_id ?? 0) > 0) {
-            abort_unless((int) $user->site_id === $requestedSiteId, 403);
+            $canWorkEnterpriseWide = $user->can('verify_documents') || $user->can('approve_documents');
+            abort_unless($canWorkEnterpriseWide || (int) $user->site_id === $requestedSiteId, 403);
+            $requestedEnterpriseId = (int) Site::query()->whereKey($requestedSiteId)->value('enterprise_id');
+            abort_unless($requestedEnterpriseId > 0 && $requestedEnterpriseId === (int) $user->enterprise_id, 403);
             return $requestedSiteId;
         }
 
