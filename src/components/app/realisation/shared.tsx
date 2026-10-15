@@ -45,16 +45,30 @@ import {
   type RealisationKey,
 } from "@/integrations/backend/realisation";
 import { useProcesses } from "@/integrations/backend/context";
+import { useRelationOptions, type RelationOption, type RelationSource } from "@/integrations/backend/energy";
 
-export type RealisationFieldType = "text" | "textarea" | "select" | "date" | "number" | "process";
+export type RealisationFieldType =
+  | "text"
+  | "textarea"
+  | "select"
+  | "date"
+  | "number"
+  | "process"
+  | "relation";
 
 export type RealisationField = {
   key: string;
   label: string;
   type: RealisationFieldType;
   options?: string[];
+  /** Liste à valeurs codées (valeur envoyée au backend ≠ libellé affiché). */
+  choices?: { value: string; label: string }[];
+  /** Champ relationnel : liste chargée depuis l'API (responsable, IPÉ, équipement, prestataire). */
+  source?: RelationSource;
   required?: boolean;
   full?: boolean;
+  /** Valeur calculée par le serveur : affichée (détail, résumé), jamais saisie ni envoyée. */
+  readOnly?: boolean;
 };
 
 export type RealisationPageConfig = {
@@ -73,6 +87,8 @@ export type RealisationPageConfig = {
   defaults?: Record<string, unknown>;
   /** Filtre client supplémentaire (ex. procédures parmi les documents). */
   clientFilter?: (item: RealisationItem) => boolean;
+  /** Champs résumés sous le titre des cartes (en plus de la description). */
+  summaryKeys?: string[];
   /** Préfixe des noms de fichiers exportés. */
   filePrefix: string;
   searchPlaceholder?: string;
@@ -212,6 +228,43 @@ function RealisationPageInner({ config }: { config: RealisationPageConfig }) {
     [processResources],
   );
 
+  const editableFields = fields.filter((field) => !field.readOnly);
+  const usedSources = new Set(fields.flatMap((f) => (f.source ? [f.source] : [])));
+  const relationOptions: Record<RelationSource, RelationOption[]> = {
+    users: useRelationOptions("users", siteId, usedSources.has("users")).data ?? [],
+    ipe: useRelationOptions("ipe", siteId, usedSources.has("ipe")).data ?? [],
+    equipment: useRelationOptions("equipment", siteId, usedSources.has("equipment")).data ?? [],
+    provider: useRelationOptions("provider", siteId, usedSources.has("provider")).data ?? [],
+  };
+
+  /** Valeur lisible d'un champ : libellé d'un choix codé, nom d'une relation, date FR. */
+  const displayValue = (field: RealisationField, item: RealisationItem): string => {
+    const raw = str(item[field.key]);
+    if (!raw) return "";
+    if (field.choices) return field.choices.find((c) => c.value === raw)?.label ?? raw;
+    if (field.source) {
+      if (field.source === "users") {
+        const responsible = item["responsible"];
+        if (field.key === "responsible_id" && responsible && typeof responsible === "object") {
+          const name = (responsible as Record<string, unknown>)["name"];
+          if (typeof name === "string" && name) return name;
+        }
+      }
+      return relationOptions[field.source].find((o) => o.value === raw)?.label ?? `#${raw}`;
+    }
+    if (field.type === "date") return formatDateFR(item[field.key]);
+    return raw;
+  };
+
+  const summaryOf = (item: RealisationItem): string =>
+    (config.summaryKeys ?? [])
+      .flatMap((key) => {
+        const field = fields.find((f) => f.key === key);
+        const value = field ? displayValue(field, item) : "";
+        return field && value ? [`${field.label} : ${value}`] : [];
+      })
+      .join(" · ");
+
   const displayStatus = (item: RealisationItem): string => statusLabelOf(resource, item);
 
   const visible = useMemo(() => {
@@ -271,7 +324,7 @@ function RealisationPageInner({ config }: { config: RealisationPageConfig }) {
     setForm((current) => ({ ...current, [key]: value }));
 
   const submit = async (): Promise<void> => {
-    for (const field of fields) {
+    for (const field of editableFields) {
       if (field.required && !(form[field.key] ?? "").trim()) {
         toast.error(`Le champ « ${field.label} » est obligatoire.`);
         return;
@@ -284,7 +337,7 @@ function RealisationPageInner({ config }: { config: RealisationPageConfig }) {
     setBusy(true);
     try {
       const raw: Record<string, unknown> = { ...(defaults ?? {}) };
-      fields.forEach((field) => {
+      editableFields.forEach((field) => {
         const value = (form[field.key] ?? "").trim();
         raw[field.key] = field.type === "number" ? value === "" ? null : Number(value) : value || null;
       });
@@ -524,6 +577,9 @@ function RealisationPageInner({ config }: { config: RealisationPageConfig }) {
                 <h3 className="mt-2 font-display font-bold">
                   {firstOf(item, titleKeys) || "Sans intitulé"}
                 </h3>
+                {summaryOf(item) && (
+                  <p className="mt-1 text-xs font-semibold text-foreground/80">{summaryOf(item)}</p>
+                )}
                 <p className={`mt-1 line-clamp-2 text-sm ${muted}`}>
                   {str(item["description"]) || "—"}
                 </p>
@@ -610,7 +666,7 @@ function RealisationPageInner({ config }: { config: RealisationPageConfig }) {
                   ))}
                 </select>
               </div>
-              {fields.map((field) => (
+              {editableFields.map((field) => (
                 <div key={field.key} className={field.full ? "sm:col-span-2" : undefined}>
                   <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
                     {field.label} {field.required ? "*" : ""}
@@ -628,9 +684,28 @@ function RealisationPageInner({ config }: { config: RealisationPageConfig }) {
                       onChange={(e) => touch(field.key, e.target.value)}
                     >
                       <option value="">—</option>
-                      {(field.options ?? []).map((option) => (
-                        <option key={option} value={option}>
-                          {option}
+                      {field.choices
+                        ? field.choices.map((choice) => (
+                            <option key={choice.value} value={choice.value}>
+                              {choice.label}
+                            </option>
+                          ))
+                        : (field.options ?? []).map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                    </select>
+                  ) : field.type === "relation" && field.source ? (
+                    <select
+                      className={input}
+                      value={form[field.key] ?? ""}
+                      onChange={(e) => touch(field.key, e.target.value)}
+                    >
+                      <option value="">—</option>
+                      {relationOptions[field.source].map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
                         </option>
                       ))}
                     </select>
@@ -722,9 +797,7 @@ function RealisationPageInner({ config }: { config: RealisationPageConfig }) {
                     {field.label}
                   </dt>
                   <dd className="mt-1 text-sm">
-                    {field.type === "date"
-                      ? formatDateFR(detail[field.key])
-                      : str(detail[field.key]) || "—"}
+                    {displayValue(field, detail) || "—"}
                   </dd>
                 </div>
               ))}

@@ -13,11 +13,14 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthenticatedAppRouteRouteImport } from './routes/_authenticated/app/route'
 import { Route as AuthenticatedClientRouteImport } from './routes/_authenticated/client'
+import { Route as AuthenticatedSuperadminRouteRouteImport } from './routes/_authenticated/superadmin/route'
 import { Route as AuthForgotPasswordRouteImport } from './routes/auth/forgot-password'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthResetPasswordRouteImport } from './routes/auth/reset-password'
 import { Route as AuthenticatedAppIndexRouteImport } from './routes/_authenticated/app/index'
 import { Route as AuthenticatedAppSectionRouteImport } from './routes/_authenticated/app/$section'
+import { Route as AuthenticatedSuperadminIndexRouteImport } from './routes/_authenticated/superadmin/index'
+import { Route as AuthenticatedSuperadminSectionRouteImport } from './routes/_authenticated/superadmin/$section'
 import { Route as AuthSignupIndexRouteImport } from './routes/auth/signup/index'
 import { Route as AuthSignupCompanyRouteImport } from './routes/auth/signup/company'
 import { Route as AuthSignupIndividualRouteImport } from './routes/auth/signup/individual'
@@ -41,6 +44,12 @@ const AuthenticatedClientRoute = AuthenticatedClientRouteImport.update({
   path: '/client',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedSuperadminRouteRoute =
+  AuthenticatedSuperadminRouteRouteImport.update({
+    id: '/superadmin',
+    path: '/superadmin',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthForgotPasswordRoute = AuthForgotPasswordRouteImport.update({
   id: '/auth/forgot-password',
   path: '/auth/forgot-password',
@@ -66,6 +75,18 @@ const AuthenticatedAppSectionRoute = AuthenticatedAppSectionRouteImport.update({
   path: '/$section',
   getParentRoute: () => AuthenticatedAppRouteRoute,
 } as any)
+const AuthenticatedSuperadminIndexRoute =
+  AuthenticatedSuperadminIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedSuperadminRouteRoute,
+  } as any)
+const AuthenticatedSuperadminSectionRoute =
+  AuthenticatedSuperadminSectionRouteImport.update({
+    id: '/$section',
+    path: '/$section',
+    getParentRoute: () => AuthenticatedSuperadminRouteRoute,
+  } as any)
 const AuthSignupIndexRoute = AuthSignupIndexRouteImport.update({
   id: '/auth/signup/',
   path: '/auth/signup/',
@@ -85,14 +106,17 @@ const AuthSignupIndividualRoute = AuthSignupIndividualRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AuthenticatedAppRouteRouteWithChildren
+  '/superadmin': typeof AuthenticatedSuperadminRouteRouteWithChildren
   '/client': typeof AuthenticatedClientRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
   '/app/$section': typeof AuthenticatedAppSectionRoute
+  '/superadmin/$section': typeof AuthenticatedSuperadminSectionRoute
   '/auth/signup/company': typeof AuthSignupCompanyRoute
   '/auth/signup/individual': typeof AuthSignupIndividualRoute
   '/app/': typeof AuthenticatedAppIndexRoute
+  '/superadmin/': typeof AuthenticatedSuperadminIndexRoute
   '/auth/signup/': typeof AuthSignupIndexRoute
 }
 export interface FileRoutesByTo {
@@ -102,9 +126,11 @@ export interface FileRoutesByTo {
   '/auth/login': typeof AuthLoginRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
   '/app/$section': typeof AuthenticatedAppSectionRoute
+  '/superadmin/$section': typeof AuthenticatedSuperadminSectionRoute
   '/auth/signup/company': typeof AuthSignupCompanyRoute
   '/auth/signup/individual': typeof AuthSignupIndividualRoute
   '/app': typeof AuthenticatedAppIndexRoute
+  '/superadmin': typeof AuthenticatedSuperadminIndexRoute
   '/auth/signup': typeof AuthSignupIndexRoute
 }
 export interface FileRoutesById {
@@ -112,14 +138,17 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/_authenticated/app': typeof AuthenticatedAppRouteRouteWithChildren
+  '/_authenticated/superadmin': typeof AuthenticatedSuperadminRouteRouteWithChildren
   '/_authenticated/client': typeof AuthenticatedClientRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
   '/_authenticated/app/$section': typeof AuthenticatedAppSectionRoute
+  '/_authenticated/superadmin/$section': typeof AuthenticatedSuperadminSectionRoute
   '/auth/signup/company': typeof AuthSignupCompanyRoute
   '/auth/signup/individual': typeof AuthSignupIndividualRoute
   '/_authenticated/app/': typeof AuthenticatedAppIndexRoute
+  '/_authenticated/superadmin/': typeof AuthenticatedSuperadminIndexRoute
   '/auth/signup/': typeof AuthSignupIndexRoute
 }
 export interface FileRouteTypes {
@@ -127,14 +156,17 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/app'
+    | '/superadmin'
     | '/client'
     | '/auth/forgot-password'
     | '/auth/login'
     | '/auth/reset-password'
     | '/app/$section'
+    | '/superadmin/$section'
     | '/auth/signup/company'
     | '/auth/signup/individual'
     | '/app/'
+    | '/superadmin/'
     | '/auth/signup/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -144,23 +176,28 @@ export interface FileRouteTypes {
     | '/auth/login'
     | '/auth/reset-password'
     | '/app/$section'
+    | '/superadmin/$section'
     | '/auth/signup/company'
     | '/auth/signup/individual'
     | '/app'
+    | '/superadmin'
     | '/auth/signup'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/_authenticated/app'
+    | '/_authenticated/superadmin'
     | '/_authenticated/client'
     | '/auth/forgot-password'
     | '/auth/login'
     | '/auth/reset-password'
     | '/_authenticated/app/$section'
+    | '/_authenticated/superadmin/$section'
     | '/auth/signup/company'
     | '/auth/signup/individual'
     | '/_authenticated/app/'
+    | '/_authenticated/superadmin/'
     | '/auth/signup/'
   fileRoutesById: FileRoutesById
 }
@@ -205,6 +242,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedClientRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/superadmin': {
+      id: '/_authenticated/superadmin'
+      path: '/superadmin'
+      fullPath: '/superadmin'
+      preLoaderRoute: typeof AuthenticatedSuperadminRouteRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/auth/forgot-password': {
       id: '/auth/forgot-password'
       path: '/auth/forgot-password'
@@ -239,6 +283,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/$section'
       preLoaderRoute: typeof AuthenticatedAppSectionRouteImport
       parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/superadmin/': {
+      id: '/_authenticated/superadmin/'
+      path: '/'
+      fullPath: '/superadmin/'
+      preLoaderRoute: typeof AuthenticatedSuperadminIndexRouteImport
+      parentRoute: typeof AuthenticatedSuperadminRouteRoute
+    }
+    '/_authenticated/superadmin/$section': {
+      id: '/_authenticated/superadmin/$section'
+      path: '/$section'
+      fullPath: '/superadmin/$section'
+      preLoaderRoute: typeof AuthenticatedSuperadminSectionRouteImport
+      parentRoute: typeof AuthenticatedSuperadminRouteRoute
     }
     '/auth/signup/': {
       id: '/auth/signup/'
@@ -279,13 +337,32 @@ const AuthenticatedAppRouteRouteWithChildren =
     AuthenticatedAppRouteRouteChildren,
   )
 
+interface AuthenticatedSuperadminRouteRouteChildren {
+  AuthenticatedSuperadminSectionRoute: typeof AuthenticatedSuperadminSectionRoute
+  AuthenticatedSuperadminIndexRoute: typeof AuthenticatedSuperadminIndexRoute
+}
+
+const AuthenticatedSuperadminRouteRouteChildren: AuthenticatedSuperadminRouteRouteChildren =
+  {
+    AuthenticatedSuperadminSectionRoute: AuthenticatedSuperadminSectionRoute,
+    AuthenticatedSuperadminIndexRoute: AuthenticatedSuperadminIndexRoute,
+  }
+
+const AuthenticatedSuperadminRouteRouteWithChildren =
+  AuthenticatedSuperadminRouteRoute._addFileChildren(
+    AuthenticatedSuperadminRouteRouteChildren,
+  )
+
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAppRouteRoute: typeof AuthenticatedAppRouteRouteWithChildren
+  AuthenticatedSuperadminRouteRoute: typeof AuthenticatedSuperadminRouteRouteWithChildren
   AuthenticatedClientRoute: typeof AuthenticatedClientRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAppRouteRoute: AuthenticatedAppRouteRouteWithChildren,
+  AuthenticatedSuperadminRouteRoute:
+    AuthenticatedSuperadminRouteRouteWithChildren,
   AuthenticatedClientRoute: AuthenticatedClientRoute,
 }
 

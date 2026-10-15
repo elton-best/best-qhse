@@ -15,6 +15,11 @@ import {
 import { useMemo } from "react";
 import { isOverdue, useRecords, type QRecord } from "@/hooks/use-records";
 import { useCurrentSite } from "@/hooks/use-workspace";
+import { useNormMode } from "@/hooks/use-norm-mode";
+import { useAccessibleSubModules } from "@/integrations/backend/access";
+import { useManagementOverview } from "@/integrations/backend/aes";
+import { ACCESS_CODES } from "@/components/app/nav";
+import { NORM_SECTIONS, NormSummaryCards } from "@/components/app/NormSummary";
 import { useCollaboratorActions, useDashboardStats } from "@/integrations/backend/dashboard";
 import { KINDS, sectionForKind } from "@/components/app/sections";
 import { StatusBadge } from "@/components/app/SectionView";
@@ -53,6 +58,14 @@ function Dashboard() {
     scope: currentSite ? "site" : "enterprise",
     per_page: 20,
   });
+  const { mode, codes: activeNormCodes } = useNormMode(currentSite || undefined);
+  const { data: accessible } = useAccessibleSubModules(currentSite || undefined);
+  const { data: overview } = useManagementOverview(currentSite || undefined);
+  const specificNorms = activeNormCodes.filter((code) => NORM_SECTIONS[code]);
+  const canOpen = (slug: string): boolean => {
+    const required = ACCESS_CODES[slug];
+    return !accessible || !required || required.some((code) => accessible.has(code));
+  };
   const of = (k: string) => records.filter((r) => r.kind === k);
 
   const today = new Date(new Date().toDateString());
@@ -281,11 +294,28 @@ function Dashboard() {
         ))}
       </div>
 
+      {/* Modules des normes choisies : seuls ceux inclus dans l'offre sont proposés */}
+      {overview && specificNorms.length > 0 && (
+        <div className="space-y-4" data-testid="norm-modules">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-display text-base font-bold text-foreground">
+              {mode === "integrated" ? "Votre système intégré" : `Votre système ${specificNorms[0] ?? ""}`}
+            </h2>
+            {mode === "integrated" && (
+              <Link to="/app/$section" params={{ section: "systeme-integre" }} className="text-sm font-semibold text-primary underline">
+                Pilotage intégré
+              </Link>
+            )}
+          </div>
+          <NormSummaryCards codes={specificNorms} figures={overview.norms} accessible={accessible} />
+        </div>
+      )}
+
       {/* Quick actions */}
       <section className="rounded-2xl border border-border bg-card p-5">
         <h2 className="font-display text-base font-bold text-foreground">Actions rapides</h2>
         <div className="mt-3 flex flex-wrap gap-2">
-          {QUICK.map((q) => (
+          {QUICK.filter((q) => canOpen(q.section)).map((q) => (
             <Link
               key={q.section}
               to="/app/$section"

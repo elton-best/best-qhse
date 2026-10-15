@@ -3,6 +3,7 @@
 namespace App\Modules\Hse\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use App\Traits\BelongsToEnterprise;
 use Illuminate\Database\Eloquent\Model;
 use App\Modules\Enterprise\Models\Enterprise;
 use App\Modules\Enterprise\Models\Site;
@@ -10,7 +11,7 @@ use App\Modules\Support\Models\Equipement;
 
 class ConsommationEnergie extends Model
 {
-    use HasFactory;
+    use BelongsToEnterprise, HasFactory;
 
     protected $table = 'consommations_energie';
 

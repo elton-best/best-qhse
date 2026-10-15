@@ -49,6 +49,19 @@ import {
   ReleasePage,
   RequirementsPage,
 } from "@/components/app/realisation";
+import {
+  EnergyAuditPage,
+  EnergyBaselinePage,
+  EnergyCompliancePage,
+  EnergyDataCollectionPage,
+  EnergyDesignPage,
+  EnergyEquipmentPurchasesPage,
+  EnergyMonitoringPage,
+  EnergyObjectivesPage,
+  EnergyPurchasesPage,
+  IpePage,
+} from "@/components/app/energy";
+import { AesPage, IntegratedSystemPage } from "@/components/app/aes";
 import { HabilitationsPage } from "@/components/app/HabilitationsPage";
 import { SitesPage } from "@/components/app/SitesPage";
 import {
@@ -110,6 +123,18 @@ const CUSTOM = [
   "realisation",
   "liberation",
   "sorties-non-conformes",
+  "aspects-environnementaux",
+  "systeme-integre",
+  "situation-energetique",
+  "collecte-energetique",
+  "ipe",
+  "objectifs-energetiques",
+  "conception-energetique",
+  "achats-energie",
+  "achats-equipements-energetiques",
+  "surveillance-energetique",
+  "conformite-energetique",
+  "audit-energetique",
 ];
 
 type Search = {
@@ -258,6 +283,30 @@ function SectionPage() {
       return <ReleasePage />;
     case "sorties-non-conformes":
       return <NonconformingPage />;
+    case "aspects-environnementaux":
+      return <AesPage />;
+    case "systeme-integre":
+      return <IntegratedSystemPage />;
+    case "situation-energetique":
+      return <EnergyBaselinePage />;
+    case "collecte-energetique":
+      return <EnergyDataCollectionPage />;
+    case "ipe":
+      return <IpePage />;
+    case "objectifs-energetiques":
+      return <EnergyObjectivesPage />;
+    case "conception-energetique":
+      return <EnergyDesignPage />;
+    case "achats-energie":
+      return <EnergyPurchasesPage />;
+    case "achats-equipements-energetiques":
+      return <EnergyEquipmentPurchasesPage />;
+    case "surveillance-energetique":
+      return <EnergyMonitoringPage />;
+    case "conformite-energetique":
+      return <EnergyCompliancePage />;
+    case "audit-energetique":
+      return <EnergyAuditPage />;
   }
   const section = SECTIONS[slug]!;
   if (GUIDE[slug] && !search.open && !search.new)

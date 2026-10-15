@@ -37,9 +37,9 @@ type Site = {
   email: string;
   is_headquarter: boolean;
   is_active: boolean;
-  manager_id?: string;
+  manager_id?: string | undefined;
   manager_name: string;
-  manager_role?: string;
+  manager_role?: string | undefined;
   users_count: number;
   processes_count: number;
   active_norms: string[];
@@ -70,7 +70,7 @@ type NewManager = {
 type SiteRole = {
   id: number;
   name: string;
-  label?: string;
+  label?: string | undefined;
   permissions_count: number;
   permissions: string[];
 };
@@ -78,10 +78,10 @@ type SiteRole = {
 type Offer = {
   id: number;
   name: string;
-  description?: string;
+  description?: string | undefined;
   price: number;
   duration_months: number;
-  is_active?: boolean;
+  is_active?: boolean | undefined;
 };
 
 const emptyForm: SiteForm = {
@@ -112,49 +112,49 @@ function objectOf(value: unknown): Record<string, unknown> {
 function collection(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload;
   const root = objectOf(payload);
-  if (Array.isArray(root.data)) return root.data;
-  const data = objectOf(root.data);
-  return Array.isArray(data.data) ? data.data : [];
+  if (Array.isArray(root["data"])) return root["data"];
+  const data = objectOf(root["data"]);
+  return Array.isArray(data["data"]) ? data["data"] : [];
 }
 
 function flatten(value: unknown): Record<string, unknown> {
   const raw = objectOf(value);
-  const attrs = objectOf(raw.attributes ?? raw);
-  const relationships = objectOf(raw.relationships);
-  const manager = objectOf(relationships.manager ?? raw.manager);
-  const managerAttrs = objectOf(manager.attributes ?? manager);
-  const subscriptions = collection(relationships.subscriptions ?? raw.subscriptions);
-  return { ...attrs, id: raw.id ?? attrs.id, manager: managerAttrs, subscriptions };
+  const attrs = objectOf(raw["attributes"] ?? raw);
+  const relationships = objectOf(raw["relationships"]);
+  const manager = objectOf(relationships["manager"] ?? raw["manager"]);
+  const managerAttrs = objectOf(manager["attributes"] ?? manager);
+  const subscriptions = collection(relationships["subscriptions"] ?? raw["subscriptions"]);
+  return { ...attrs, id: raw["id"] ?? attrs["id"], manager: managerAttrs, subscriptions };
 }
 
 function normalizeSite(value: unknown): Site {
   const raw = flatten(value);
-  const manager = objectOf(raw.manager);
-  const activeNorms = Array.isArray(raw.active_norms) ? raw.active_norms.map(String) : [];
+  const manager = objectOf(raw["manager"]);
+  const activeNorms = Array.isArray(raw["active_norms"]) ? raw["active_norms"].map(String) : [];
   return {
-    id: String(raw.id ?? ""),
-    name: String(raw.name ?? "Site sans nom"),
-    ref: String(raw.ref ?? raw.code ?? ""),
-    location: String(raw.location ?? raw.address ?? ""),
-    city: String(raw.city ?? ""),
-    phone: String(raw.phone ?? ""),
-    email: String(raw.email ?? ""),
-    is_headquarter: Boolean(raw.is_headquarter),
-    is_active: raw.is_active !== false,
-    manager_id: raw.manager_id == null ? undefined : String(raw.manager_id),
-    manager_name: String(raw.manager_name ?? manager.name ?? manager.full_name ?? ""),
+    id: String(raw["id"] ?? ""),
+    name: String(raw["name"] ?? "Site sans nom"),
+    ref: String(raw["ref"] ?? raw["code"] ?? ""),
+    location: String(raw["location"] ?? raw["address"] ?? ""),
+    city: String(raw["city"] ?? ""),
+    phone: String(raw["phone"] ?? ""),
+    email: String(raw["email"] ?? ""),
+    is_headquarter: Boolean(raw["is_headquarter"]),
+    is_active: raw["is_active"] !== false,
+    manager_id: raw["manager_id"] == null ? undefined : String(raw["manager_id"]),
+    manager_name: String(raw["manager_name"] ?? manager["name"] ?? manager["full_name"] ?? ""),
     manager_role: String(
-      raw.manager_role ??
-        (Array.isArray(manager.role_names) ? manager.role_names[0] : undefined) ??
-        raw.role ??
+      raw["manager_role"] ??
+        (Array.isArray(manager["role_names"]) ? manager["role_names"][0] : undefined) ??
+        raw["role"] ??
         "",
     ),
-    users_count: Number(raw.users_count ?? 0),
-    processes_count: Number(raw.processes_count ?? 0),
+    users_count: Number(raw["users_count"] ?? 0),
+    processes_count: Number(raw["processes_count"] ?? 0),
     active_norms: activeNorms,
-    created_at: String(raw.created_at ?? ""),
-    subscriptions: Array.isArray(raw.subscriptions)
-      ? raw.subscriptions.map((item) => objectOf(item))
+    created_at: String(raw["created_at"] ?? ""),
+    subscriptions: Array.isArray(raw["subscriptions"])
+      ? raw["subscriptions"].map((item) => objectOf(item))
       : [],
   };
 }
@@ -168,7 +168,7 @@ function dateLabel(value: unknown) {
 function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return parts.length > 1
-    ? `${parts[0][0]}${parts.at(-1)?.[0] ?? ""}`.toUpperCase()
+    ? `${parts[0]?.[0] ?? ""}${parts.at(-1)?.[0] ?? ""}`.toUpperCase()
     : (parts[0]?.slice(0, 2) || "?").toUpperCase();
 }
 
@@ -206,10 +206,10 @@ function SiteDialog({
       collection(await backendApi.request<unknown>("users?per_page=100")).map((item) => {
         const raw = flatten(item);
         const fallbackName =
-          `${String(raw.first_name ?? "")} ${String(raw.last_name ?? "")}`.trim() || "Sans nom";
+          `${String(raw["first_name"] ?? "")} ${String(raw["last_name"] ?? "")}`.trim() || "Sans nom";
         const name =
-          raw.name == null || String(raw.name).trim() === "" ? fallbackName : String(raw.name);
-        return { id: String(raw.id ?? ""), name, email: String(raw.email ?? "") };
+          raw["name"] == null || String(raw["name"]).trim() === "" ? fallbackName : String(raw["name"]);
+        return { id: String(raw["id"] ?? ""), name, email: String(raw["email"] ?? "") };
       }),
     staleTime: 30_000,
   });
@@ -221,16 +221,16 @@ function SiteDialog({
           site?.id ? `available-roles?site_id=${site.id}` : "available-roles",
         ),
       );
-      const items = Array.isArray(payload.roles) ? payload.roles : [];
+      const items = Array.isArray(payload["roles"]) ? payload["roles"] : [];
       return items
         .map((item) => {
           const raw = objectOf(item);
           return {
-            id: Number(raw.id ?? 0),
-            name: String(raw.name ?? ""),
-            label: raw.label == null ? undefined : String(raw.label),
-            permissions_count: Number(raw.permissions_count ?? 0),
-            permissions: Array.isArray(raw.permissions) ? raw.permissions.map(String) : [],
+            id: Number(raw["id"] ?? 0),
+            name: String(raw["name"] ?? ""),
+            label: raw["label"] == null ? undefined : String(raw["label"]),
+            permissions_count: Number(raw["permissions_count"] ?? 0),
+            permissions: Array.isArray(raw["permissions"]) ? raw["permissions"].map(String) : [],
           } satisfies SiteRole;
         })
         .filter((item) => item.name);
@@ -682,19 +682,19 @@ function SiteDetails({
           ) : (
             <div className="mt-3 space-y-2">
               {subscriptions.map((subscription, index) => {
-                const offer = objectOf(subscription.offer);
+                const offer = objectOf(subscription["offer"]);
                 return (
                   <div
-                    key={String(subscription.id ?? index)}
+                    key={String(subscription["id"] ?? index)}
                     className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-background p-3 text-sm"
                   >
                     <span className="font-semibold">
-                      {String(offer.name ?? subscription.plan_name ?? "Offre")}
+                      {String(offer["name"] ?? subscription["plan_name"] ?? "Offre")}
                     </span>
                     <span className="text-muted-foreground">
-                      {dateLabel(subscription.start_date)} →{" "}
-                      {dateLabel(subscription.expiration_date)} ·{" "}
-                      {subscription.is_active ? "Actif" : "Inactif"}
+                      {dateLabel(subscription["start_date"])} →{" "}
+                      {dateLabel(subscription["expiration_date"])} ·{" "}
+                      {subscription["is_active"] ? "Actif" : "Inactif"}
                     </span>
                   </div>
                 );
@@ -743,19 +743,19 @@ function SubscriptionDialog({
         .map((item) => {
           const raw = flatten(item);
           return {
-            id: Number(raw.id ?? 0),
-            name: String(raw.name ?? "Offre"),
-            description: raw.description == null ? undefined : String(raw.description),
-            price: Number(raw.price ?? 0),
-            duration_months: Number(raw.duration_months ?? 1),
-            is_active: raw.is_active !== false,
+            id: Number(raw["id"] ?? 0),
+            name: String(raw["name"] ?? "Offre"),
+            description: raw["description"] == null ? undefined : String(raw["description"]),
+            price: Number(raw["price"] ?? 0),
+            duration_months: Number(raw["duration_months"] ?? 1),
+            is_active: raw["is_active"] !== false,
           } satisfies Offer;
         })
         .filter((offer) => offer.id > 0 && offer.is_active !== false);
     },
     staleTime: 60_000,
   });
-  const activeSubscription = site.subscriptions.find((item) => item.is_active !== false);
+  const activeSubscription = site.subscriptions.find((item) => item["is_active"] !== false);
   const subscribe = useMutation({
     mutationFn: () => {
       if (selectedOfferIds.length === 0) throw new Error("Sélectionnez au moins une offre.");
@@ -775,8 +775,8 @@ function SubscriptionDialog({
   });
   const renew = useMutation({
     mutationFn: () => {
-      if (!activeSubscription?.id) throw new Error("Aucun abonnement à renouveler.");
-      return backendApi.request(`enterprise-subscriptions/${activeSubscription.id}/renew`, {
+      if (!activeSubscription?.["id"]) throw new Error("Aucun abonnement à renouveler.");
+      return backendApi.request(`enterprise-subscriptions/${activeSubscription["id"]}/renew`, {
         method: "POST",
         body: JSON.stringify({ duration_months: Number(durationMonths) }),
       });
@@ -827,13 +827,13 @@ function SubscriptionDialog({
                 <p className="text-xs font-bold uppercase text-success">Abonnement actuel</p>
                 <p className="mt-1 font-display font-bold">
                   {String(
-                    objectOf(activeSubscription.offer).name ??
-                      activeSubscription.plan_name ??
+                    objectOf(activeSubscription["offer"])["name"] ??
+                      activeSubscription["plan_name"] ??
                       "Offre",
                   )}
                 </p>
                 <p className="mt-1 break-words text-sm text-muted-foreground">
-                  Expire le {dateLabel(activeSubscription.expiration_date)}
+                  Expire le {dateLabel(activeSubscription["expiration_date"])}
                 </p>
               </div>
               <div className="flex items-center gap-2">

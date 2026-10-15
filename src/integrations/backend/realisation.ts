@@ -31,6 +31,16 @@ export const REALISATION_RESOURCES = {
   procedure: "documents",
   compliance: "compliance-obligations",
   provider: "provider-partners",
+  // ISO 50001 — contrats Laravel : EnergyRecordController (CRUD + template/export/import).
+  energy_baseline: "energy-baselines",
+  energy_collection: "energy-data-collection-plans",
+  energy_objective: "energy-objectives",
+  energy_design: "energy-design-reviews",
+  energy_purchase: "energy-purchases",
+  energy_equipment: "energy-equipment-purchases",
+  energy_monitoring: "energy-monitoring-records",
+  energy_compliance: "energy-compliance-evaluations",
+  energy_audit: "energy-internal-audits",
 } as const;
 
 export type RealisationKey = keyof typeof REALISATION_RESOURCES;
@@ -158,6 +168,15 @@ const REALISATION_ENDPOINTS: Record<RealisationKey, RealisationEndpoints> = {
     exportXlsx: "provider-partners/export-xlsx",
     importXlsx: "provider-partners/import-file",
   },
+  energy_baseline: standardEndpoints(REALISATION_RESOURCES.energy_baseline),
+  energy_collection: standardEndpoints(REALISATION_RESOURCES.energy_collection),
+  energy_objective: standardEndpoints(REALISATION_RESOURCES.energy_objective),
+  energy_design: standardEndpoints(REALISATION_RESOURCES.energy_design),
+  energy_purchase: standardEndpoints(REALISATION_RESOURCES.energy_purchase),
+  energy_equipment: standardEndpoints(REALISATION_RESOURCES.energy_equipment),
+  energy_monitoring: standardEndpoints(REALISATION_RESOURCES.energy_monitoring),
+  energy_compliance: standardEndpoints(REALISATION_RESOURCES.energy_compliance),
+  energy_audit: standardEndpoints(REALISATION_RESOURCES.energy_audit),
 };
 
 function endpointsOf(key: RealisationKey): RealisationEndpoints {
@@ -283,6 +302,99 @@ export const REALISATION_STATUS_RULES: Record<RealisationKey, RealisationStatusR
       Exclu: { code: "excluded" },
     },
   },
+  energy_baseline: {
+    key: "status",
+    persist: true,
+    frToBackend: {
+      Brouillon: { code: "draft" },
+      Validée: { code: "validated" },
+      Révisée: { code: "revised" },
+      Archivée: { code: "archived" },
+    },
+  },
+  energy_collection: {
+    key: "status",
+    persist: true,
+    frToBackend: {
+      Planifiée: { code: "planned" },
+      Active: { code: "active" },
+      Suspendue: { code: "suspended" },
+      Archivée: { code: "archived" },
+    },
+  },
+  energy_objective: {
+    key: "status",
+    persist: true,
+    frToBackend: {
+      Planifié: { code: "planned" },
+      "En cours": { code: "in_progress" },
+      Atteint: { code: "achieved" },
+      "Non atteint": { code: "missed" },
+      Annulé: { code: "cancelled" },
+    },
+  },
+  energy_design: {
+    key: "status",
+    persist: true,
+    frToBackend: {
+      Planifiée: { code: "planned" },
+      "En revue": { code: "in_review" },
+      Validée: { code: "validated" },
+      Rejetée: { code: "rejected" },
+    },
+  },
+  energy_purchase: {
+    key: "status",
+    persist: true,
+    frToBackend: {
+      Brouillon: { code: "draft" },
+      Commandé: { code: "ordered" },
+      Reçu: { code: "received" },
+      Évalué: { code: "evaluated" },
+      Annulé: { code: "cancelled" },
+    },
+  },
+  energy_equipment: {
+    key: "status",
+    persist: true,
+    frToBackend: {
+      Brouillon: { code: "draft" },
+      Commandé: { code: "ordered" },
+      Reçu: { code: "received" },
+      Évalué: { code: "evaluated" },
+      Annulé: { code: "cancelled" },
+    },
+  },
+  energy_monitoring: {
+    key: "status",
+    persist: true,
+    frToBackend: {
+      Enregistré: { code: "recorded" },
+      Analysé: { code: "analysed" },
+      "Action requise": { code: "action_required" },
+      Clôturé: { code: "closed" },
+    },
+  },
+  energy_compliance: {
+    key: "status",
+    persist: true,
+    frToBackend: {
+      Planifiée: { code: "planned" },
+      Évaluée: { code: "evaluated" },
+      "Action ouverte": { code: "action_open" },
+      Clôturée: { code: "closed" },
+    },
+  },
+  energy_audit: {
+    key: "status",
+    persist: true,
+    frToBackend: {
+      Planifié: { code: "planned" },
+      "En cours": { code: "in_progress" },
+      Réalisé: { code: "completed" },
+      Clôturé: { code: "closed" },
+    },
+  },
 };
 
 export function statusKeyOf(key: RealisationKey): string {
@@ -323,7 +435,7 @@ export function statusForBackend(
   if (!rule || !rule.persist) return null;
   const norm = normFr(frLabel);
   const direct = Object.entries(rule.frToBackend).find(([label]) => normFr(label) === norm);
-  if (direct) return { code: direct[1].code, extra: direct[1].extra };
+  if (direct) return direct[1].extra ? { code: direct[1].code, extra: direct[1].extra } : { code: direct[1].code };
   return null;
 }
 
@@ -484,6 +596,144 @@ const PAYLOAD_ALLOWLIST: Record<RealisationKey, Set<string>> = {
     "observation",
     "status",
   ]),
+  energy_baseline: new Set([
+    "site_id",
+    "title",
+    "responsible_id",
+    "energy_source",
+    "period_start",
+    "period_end",
+    "baseline_consumption",
+    "unit",
+    "relevant_variables",
+    "normalization_method",
+    "adjustment_notes",
+    "ipe_id",
+  ]),
+  energy_collection: new Set([
+    "site_id",
+    "title",
+    "responsible_id",
+    "data_point",
+    "energy_source",
+    "measurement_method",
+    "equipment_id",
+    "frequency",
+    "unit",
+    "data_source",
+    "storage_location",
+    "last_collected_at",
+    "next_due_date",
+  ]),
+  energy_objective: new Set([
+    "site_id",
+    "title",
+    "responsible_id",
+    "objective_type",
+    "ipe_id",
+    "energy_source",
+    "baseline_value",
+    "target_value",
+    "current_value",
+    "unit",
+    "deadline",
+    "action_plan",
+    "resources_needed",
+    "progress_percent",
+  ]),
+  energy_design: new Set([
+    "site_id",
+    "title",
+    "responsible_id",
+    "project_ref",
+    "design_stage",
+    "description",
+    "performance_criteria",
+    "expected_saving",
+    "unit",
+    "review_notes",
+    "outputs",
+    "review_date",
+  ]),
+  energy_purchase: new Set([
+    "site_id",
+    "title",
+    "responsible_id",
+    "provider_partner_id",
+    "supplier_name",
+    "energy_type",
+    "contract_ref",
+    "quantity",
+    "unit",
+    "unit_price",
+    "total_amount",
+    "purchase_date",
+    "delivery_date",
+    "evaluation_criteria",
+    "supplier_score",
+    "evaluation_notes",
+  ]),
+  energy_equipment: new Set([
+    "site_id",
+    "title",
+    "responsible_id",
+    "equipment_id",
+    "provider_partner_id",
+    "supplier_name",
+    "efficiency_class",
+    "expected_consumption",
+    "unit",
+    "purchase_cost",
+    "lifecycle_cost",
+    "purchase_date",
+    "efficiency_criteria",
+    "evaluation_notes",
+  ]),
+  energy_monitoring: new Set([
+    "site_id",
+    "title",
+    "responsible_id",
+    "ipe_id",
+    "equipment_id",
+    "period_start",
+    "period_end",
+    "planned_value",
+    "measured_value",
+    "unit",
+    "analysis",
+    "action_required",
+  ]),
+  energy_compliance: new Set([
+    "site_id",
+    "title",
+    "responsible_id",
+    "legal_requirement",
+    "source",
+    "evaluation_method",
+    "evaluation_date",
+    "next_evaluation_date",
+    "result",
+    "gap_description",
+    "action_required",
+    "evidence",
+  ]),
+  energy_audit: new Set([
+    "site_id",
+    "title",
+    "responsible_id",
+    "audit_id",
+    "scope",
+    "criteria",
+    "planned_date",
+    "actual_date",
+    "auditors",
+    "nonconformities_count",
+    "observations_count",
+    "findings",
+    "improvement_opportunities",
+    "conclusion",
+    "next_audit_date",
+  ]),
 };
 
 const REQUIREMENT_TYPE_FR: Record<string, string> = {
@@ -558,7 +808,10 @@ export function normalizeRealisationPayload(
     if (
       field === "process_id" ||
       field === "production_operation_id" ||
-      field === "responsible_id"
+      field === "responsible_id" ||
+      field === "ipe_id" ||
+      field === "provider_partner_id" ||
+      field === "audit_id"
     ) {
       const num = Number(value);
       out[field] = Number.isFinite(num) ? num : value;

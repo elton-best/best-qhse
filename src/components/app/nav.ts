@@ -3,7 +3,7 @@ import {
   GraduationCap, Landmark, LayoutDashboard, MapPin, MessageSquareWarning, ShieldAlert, ShieldCheck, Target,
   Truck, Users, Wrench, Factory, ListChecks, CheckSquare, BadgeCheck, Stamp, Crown, Lightbulb, Settings,
   Leaf, HardHat, Zap, UtensilsCrossed, Lock, Megaphone, Network, Siren, ScrollText, SlidersHorizontal,
-  FileSearch, Package, PackageX, Scale, PenTool, Presentation, UserCheck, Smile, RefreshCw, type LucideIcon,
+  FileSearch, Package, PackageX, Scale, PenTool, Presentation, UserCheck, Smile, RefreshCw, Activity, ShoppingCart, ScanSearch, Layers, type LucideIcon,
 } from "lucide-react";
 
 export type NavItem = {
@@ -12,12 +12,15 @@ export type NavItem = {
   icon: LucideIcon;
   /** Only visible when one of these norms is active. */
   norms?: string[];
+  /** Only visible when at least this many norms are active (integrated management system). */
+  minNorms?: number;
   badge?: string;
 };
 export type NavGroup = { id: string; label: string; icon: LucideIcon; items: NavItem[] };
 
 /** Top-level shortcuts (Vue d'ensemble is /app). */
 export const TOP_ITEMS: NavItem[] = [
+  { slug: "systeme-integre", label: "Système intégré", icon: Layers, minNorms: 2 },
   { slug: "taches", label: "Mes tâches", icon: CheckSquare },
   { slug: "mes-actions", label: "Mes actions", icon: ListChecks },
   { slug: "boite-reception", label: "Plaintes clients", icon: MessageSquareWarning },
@@ -58,6 +61,10 @@ export const NAV_GROUPS: NavGroup[] = [
       { slug: "aspects-environnementaux", label: "Aspects environnementaux", icon: Leaf, norms: ["ISO 14001"] },
       { slug: "dangers", label: "DUERP & dangers", icon: HardHat, norms: ["ISO 45001"] },
       { slug: "energie", label: "Revue énergétique", icon: Zap, norms: ["ISO 50001"] },
+      { slug: "situation-energetique", label: "Situation énergétique de référence", icon: Gauge, norms: ["ISO 50001"] },
+      { slug: "collecte-energetique", label: "Collecte des données énergétiques", icon: ScanSearch, norms: ["ISO 50001"] },
+      { slug: "ipe", label: "Indicateurs de performance énergétique", icon: Activity, norms: ["ISO 50001"] },
+      { slug: "objectifs-energetiques", label: "Objectifs et cibles énergétiques", icon: Target, norms: ["ISO 50001"] },
       { slug: "securite-information", label: "Actifs & risques SI", icon: Lock, norms: ["ISO 27001"] },
     ],
   },
@@ -86,6 +93,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { slug: "urgences", label: "Situations d'urgence", icon: Siren, norms: ["ISO 14001", "ISO 45001"] },
       { slug: "incidents", label: "Accidents & incidents", icon: HardHat, norms: ["ISO 45001"] },
       { slug: "haccp", label: "Plan HACCP", icon: UtensilsCrossed, norms: ["ISO 22000"] },
+      { slug: "conception-energetique", label: "Conception énergétique", icon: PenTool, norms: ["ISO 50001"] },
+      { slug: "achats-energie", label: "Achats d'énergie", icon: Zap, norms: ["ISO 50001"] },
+      { slug: "achats-equipements-energetiques", label: "Achats d'équipements énergétiques", icon: ShoppingCart, norms: ["ISO 50001"] },
     ],
   },
   {
@@ -95,6 +105,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { slug: "enquetes", label: "Évaluations PIP", icon: Smile },
       { slug: "revue-processus", label: "Revue des processus", icon: RefreshCw },
       { slug: "audits", label: "Audits internes", icon: ClipboardCheck },
+      { slug: "surveillance-energetique", label: "Surveillance de la performance énergétique", icon: Gauge, norms: ["ISO 50001"] },
+      { slug: "conformite-energetique", label: "Évaluation de la conformité énergétique", icon: Scale, norms: ["ISO 50001"] },
+      { slug: "audit-energetique", label: "Audit énergétique interne", icon: ClipboardCheck, norms: ["ISO 50001"] },
       { slug: "auditeurs", label: "Évaluation des auditeurs", icon: UserCheck },
       { slug: "revue-direction", label: "Revue de direction", icon: Presentation },
     ],
@@ -144,4 +157,68 @@ export function policyTitle(norms?: Set<string>): string {
   const h = norms.has("ISO 22000"), sec = norms.has("ISO 45001"), e = norms.has("ISO 14001");
   if (!h && !sec && !e) return "Politique Qualité";
   return `Politique Q${h ? "H" : ""}${sec ? "S" : ""}${e ? "E" : ""}`;
+}
+
+/**
+ * Slug de rubrique -> codes de sous-modules du catalogue Laravel (offre + normes choisies).
+ * Une rubrique est visible si l'un de ses codes est accessible ; sans entrée ici, elle reste toujours visible.
+ */
+export const ACCESS_CODES: Record<string, string[]> = {
+  contexte: ["comprehension_organisme"],
+  "parties-interessees": ["parties_interessees"],
+  perimetre: ["domaine_application"],
+  processus: ["systeme_management"],
+  politique: ["politique"],
+  organigramme: ["roles_responsabilites"],
+  collaborateurs: ["roles_responsabilites"],
+  "fiches-poste": ["roles_responsabilites"],
+  responsabilites: ["roles_responsabilites"],
+  risques: ["risques_opportunites"],
+  objectifs: ["objectifs_qualite"],
+  actions: ["plans_action"],
+  "plan-sm": ["plans_action"],
+  "aspects-environnementaux": ["aspects_environnementaux"],
+  dangers: ["duerp", "identification_dangers_sst"],
+  energie: ["revue_energetique"],
+  "securite-information": ["evaluation_risques_si"],
+  "situation-energetique": ["situation_energetique_reference"],
+  "collecte-energetique": ["collecte_donnees_energetiques"],
+  ipe: ["ipe"],
+  "objectifs-energetiques": ["objectifs_cibles_energetiques"],
+  equipements: ["ressources"],
+  competences: ["competences"],
+  sensibilisation: ["sensibilisation"],
+  communication: ["communication"],
+  documents: ["documents"],
+  "maitrise-operationnelle": ["planification_maitrise_operationnelle"],
+  exigences: ["exigences_produits_services"],
+  conception: ["conception_developpement_produits_services"],
+  fournisseurs: ["gestion_prestataires"],
+  realisation: ["production_prestation_service"],
+  liberation: ["liberation_produits_services"],
+  "sorties-non-conformes": ["maitrise_sorties_non_conformes"],
+  urgences: ["urgences_environnementales", "preparation_reponse_urgences_sst"],
+  incidents: ["enquetes_incidents", "surveillance_accidents"],
+  haccp: ["plan_haccp"],
+  "conception-energetique": ["conception_energetique"],
+  "achats-energie": ["achats_energie"],
+  "achats-equipements-energetiques": ["achats_equipements_energetiques"],
+  enquetes: ["satisfaction_client"],
+  "revue-processus": ["revue_processus"],
+  audits: ["audits_internes"],
+  auditeurs: ["audits_internes"],
+  "revue-direction": ["revue_direction"],
+  "surveillance-energetique": ["surveillance_performance_energetique"],
+  "conformite-energetique": ["conformite_energetique"],
+  "audit-energetique": ["audit_energetique"],
+  "non-conformites": ["non_conformites_actions"],
+  amelioration: ["amelioration_continue"],
+};
+
+/** Visibilité d'une rubrique : catalogue d'accès si disponible, sinon repli sur les normes actives. */
+export function isNavItemVisible(item: NavItem, activeNorms?: Set<string>, accessible?: Set<string>): boolean {
+  if (item.minNorms && activeNorms && activeNorms.size < item.minNorms) return false;
+  const codes = ACCESS_CODES[item.slug];
+  if (accessible && codes) return codes.some((code) => accessible.has(code));
+  return !item.norms || !activeNorms || item.norms.some((norm) => activeNorms.has(norm));
 }

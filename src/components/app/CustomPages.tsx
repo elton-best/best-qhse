@@ -1421,7 +1421,7 @@ export function NormsPage() {
       return;
     }
     if (selectedId === null || !norms.some((norm) => String(norm.id) === String(selectedId))) {
-      setSelectedId(norms[0].id);
+      setSelectedId(norms[0]!.id);
     }
   }, [norms, selectedId]);
 

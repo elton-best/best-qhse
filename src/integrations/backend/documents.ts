@@ -38,18 +38,18 @@ function objectOf(value: unknown): Record<string, unknown> {
 
 function relationValue(value: unknown): Record<string, unknown> {
   const raw = objectOf(value);
-  return raw.attributes && typeof raw.attributes === "object"
-    ? (raw.attributes as Record<string, unknown>)
+  return raw["attributes"] && typeof raw["attributes"] === "object"
+    ? (raw["attributes"] as Record<string, unknown>)
     : raw;
 }
 
 function collection(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload;
   const root = objectOf(payload);
-  if (Array.isArray(root.data)) return root.data;
-  if (root.data && typeof root.data === "object") {
-    const nested = objectOf(root.data);
-    if (Array.isArray(nested.data)) return nested.data;
+  if (Array.isArray(root["data"])) return root["data"];
+  if (root["data"] && typeof root["data"] === "object") {
+    const nested = objectOf(root["data"]);
+    if (Array.isArray(nested["data"])) return nested["data"];
   }
   return [];
 }
@@ -57,44 +57,44 @@ function collection(payload: unknown): unknown[] {
 function normalizeDocument(item: unknown): PendingDocument | null {
   const raw = objectOf(item);
   const attrs =
-    raw.attributes && typeof raw.attributes === "object"
-      ? (raw.attributes as Record<string, unknown>)
+    raw["attributes"] && typeof raw["attributes"] === "object"
+      ? (raw["attributes"] as Record<string, unknown>)
       : raw;
-  const id = raw.id ?? attrs.id;
+  const id = raw["id"] ?? attrs["id"];
   if (id == null) return null;
-  const relationships = objectOf(raw.relationships);
-  const author = relationValue(attrs.author ?? raw.author ?? relationships.author);
-  const approver = relationValue(attrs.approver ?? raw.approver ?? relationships.approver);
-  const verifier = relationValue(attrs.verifier ?? raw.verifier ?? relationships.verifier);
-  const process = relationValue(attrs.process ?? raw.process ?? relationships.process);
-  const site = relationValue(attrs.site ?? raw.site ?? relationships.site);
-  const source = [attrs.source_module, attrs.source_submodule, attrs.source_section]
+  const relationships = objectOf(raw["relationships"]);
+  const author = relationValue(attrs["author"] ?? raw["author"] ?? relationships["author"]);
+  const approver = relationValue(attrs["approver"] ?? raw["approver"] ?? relationships["approver"]);
+  const verifier = relationValue(attrs["verifier"] ?? raw["verifier"] ?? relationships["verifier"]);
+  const process = relationValue(attrs["process"] ?? raw["process"] ?? relationships["process"]);
+  const site = relationValue(attrs["site"] ?? raw["site"] ?? relationships["site"]);
+  const source = [attrs["source_module"], attrs["source_submodule"], attrs["source_section"]]
     .filter(Boolean)
     .join(" > ");
   return {
     id: String(id),
-    code: String(attrs.code ?? `DOC-${id}`),
-    title: String(attrs.title ?? attrs.name ?? "Document sans titre"),
-    workflow_status: String(attrs.workflow_status ?? attrs.status ?? ""),
-    status: String(attrs.status ?? ""),
-    version: String(attrs.version ?? "1.0"),
+    code: String(attrs["code"] ?? `DOC-${id}`),
+    title: String(attrs["title"] ?? attrs["name"] ?? "Document sans titre"),
+    workflow_status: String(attrs["workflow_status"] ?? attrs["status"] ?? ""),
+    status: String(attrs["status"] ?? ""),
+    version: String(attrs["version"] ?? "1.0"),
     source_label:
       source ||
       String(
-        attrs.module_type
-          ? `${attrs.module_type}${attrs.module_id ? ` #${attrs.module_id}` : ""}`
-          : (attrs.source_type ?? "—"),
+        attrs["module_type"]
+          ? `${attrs["module_type"]}${attrs["module_id"] ? ` #${attrs["module_id"]}` : ""}`
+          : (attrs["source_type"] ?? "—"),
       ),
     process_label: String(
-      process.code && process.title
-        ? `${process.code} — ${process.title}`
-        : (process.code ?? process.title ?? "—"),
+      process["code"] && process["title"]
+        ? `${process["code"]} — ${process["title"]}`
+        : (process["code"] ?? process["title"] ?? "—"),
     ),
-    author_name: String(author.name ?? author.email ?? "—"),
-    approver_name: String(approver.name ?? approver.email ?? "—"),
-    verifier_name: String(verifier.name ?? verifier.email ?? "—"),
-    created_at: attrs.created_at == null ? null : String(attrs.created_at),
-    metadata: objectOf(attrs.metadata),
+    author_name: String(author["name"] ?? author["email"] ?? "—"),
+    approver_name: String(approver["name"] ?? approver["email"] ?? "—"),
+    verifier_name: String(verifier["name"] ?? verifier["email"] ?? "—"),
+    created_at: attrs["created_at"] == null ? null : String(attrs["created_at"]),
+    metadata: objectOf(attrs["metadata"]),
   };
 }
 
@@ -204,29 +204,29 @@ export function workflowActionLabel(action: string): string {
 function historyEntry(item: unknown): WorkflowHistoryEntry | null {
   const raw = objectOf(item);
   const attrs =
-    raw.attributes && typeof raw.attributes === "object"
-      ? (raw.attributes as Record<string, unknown>)
+    raw["attributes"] && typeof raw["attributes"] === "object"
+      ? (raw["attributes"] as Record<string, unknown>)
       : raw;
-  const id = raw.id ?? attrs.id;
+  const id = raw["id"] ?? attrs["id"];
   if (id == null) return null;
-  const user = relationValue(attrs.user ?? raw.user);
-  const action = String(attrs.action ?? "");
+  const user = relationValue(attrs["user"] ?? raw["user"]);
+  const action = String(attrs["action"] ?? "");
   return {
     id: String(id),
     action,
     action_label: String(
-      attrs.action_label ?? WORKFLOW_ACTION_LABELS[action] ?? action,
+      attrs["action_label"] ?? WORKFLOW_ACTION_LABELS[action] ?? action,
     ),
-    from_status: attrs.from_status == null ? null : String(attrs.from_status),
-    to_status: attrs.to_status == null ? null : String(attrs.to_status),
-    comment: attrs.comment == null ? null : String(attrs.comment),
-    actor_name: String(user.name ?? user.email ?? "Système"),
+    from_status: attrs["from_status"] == null ? null : String(attrs["from_status"]),
+    to_status: attrs["to_status"] == null ? null : String(attrs["to_status"]),
+    comment: attrs["comment"] == null ? null : String(attrs["comment"]),
+    actor_name: String(user["name"] ?? user["email"] ?? "Système"),
     created_at:
-      attrs.action_at == null
-        ? attrs.created_at == null
+      attrs["action_at"] == null
+        ? attrs["created_at"] == null
           ? null
-          : String(attrs.created_at)
-        : String(attrs.action_at),
+          : String(attrs["created_at"])
+        : String(attrs["action_at"]),
   };
 }
 
@@ -235,7 +235,7 @@ export async function fetchWorkflowHistory(id: string) {
     `documents/${encodeURIComponent(id)}/workflow-history`,
   );
   const root = objectOf(payload);
-  const data = Array.isArray(root.data) ? root.data : collection(payload);
+  const data = Array.isArray(root["data"]) ? root["data"] : collection(payload);
   return data
     .map(historyEntry)
     .filter((item): item is WorkflowHistoryEntry => item !== null);

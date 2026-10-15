@@ -24,21 +24,21 @@ export type DocumentActionsProps = {
 };
 
 type DocumentType = { id: string; name: string; abbreviation: string };
-type Process = { id?: string; name: string; type?: string; abbreviation?: string };
+type Process = { id?: string | undefined; name: string; type?: string | undefined; abbreviation?: string | undefined };
 
 type Action = "draft" | "preview" | "download" | "verify";
 
 function documentInfo(payload: unknown) {
   const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
   const data =
-    root.data && typeof root.data === "object" ? (root.data as Record<string, unknown>) : root;
+    root["data"] && typeof root["data"] === "object" ? (root["data"] as Record<string, unknown>) : root;
   const attributes =
-    data.attributes && typeof data.attributes === "object"
-      ? (data.attributes as Record<string, unknown>)
+    data["attributes"] && typeof data["attributes"] === "object"
+      ? (data["attributes"] as Record<string, unknown>)
       : data;
   return {
-    id: data.id == null && attributes.id == null ? undefined : String(data.id ?? attributes.id),
-    code: String(attributes.code ?? ""),
+    id: data["id"] == null && attributes["id"] == null ? undefined : String(data["id"] ?? attributes["id"]),
+    code: String(attributes["code"] ?? ""),
   };
 }
 
@@ -74,10 +74,10 @@ export function DocumentActions({
     .map((resource) => {
       const item = flattenResource(resource);
       return {
-        id: item.id == null ? undefined : String(item.id),
-        name: String(item.title ?? item.name ?? ""),
-        type: processType(item.category ?? item.type),
-        abbreviation: String(item.abbreviation ?? item.code ?? ""),
+        id: item["id"] == null ? undefined : String(item["id"]),
+        name: String(item["title"] ?? item["name"] ?? ""),
+        type: processType(item["category"] ?? item["type"]),
+        abbreviation: String(item["abbreviation"] ?? item["code"] ?? ""),
       };
     })
     .filter((item) => item.name);
@@ -93,16 +93,16 @@ export function DocumentActions({
           response && typeof response === "object" ? (response as Record<string, unknown>) : {};
         const values = Array.isArray(response)
           ? response
-          : Array.isArray(root.data)
-            ? root.data
+          : Array.isArray(root["data"])
+            ? root["data"]
             : [];
         const next = values
           .map((item) => {
             const value = flattenResource(item);
             return {
-              id: String(value.id ?? ""),
-              name: String(value.name ?? value.title ?? ""),
-              abbreviation: String(value.abbreviation ?? ""),
+              id: String(value["id"] ?? ""),
+              name: String(value["name"] ?? value["title"] ?? ""),
+              abbreviation: String(value["abbreviation"] ?? ""),
             };
           })
           .filter((item) => item.id && item.name);
@@ -142,7 +142,7 @@ export function DocumentActions({
       return;
     }
     setAction(nextAction);
-    setTypeId((current) => current || types[0].id);
+    setTypeId((current) => current || (types[0]?.id ?? ""));
     setProcessId((current) => current || processes[0]?.id || "");
     setConfigOpen(true);
   };

@@ -7,7 +7,7 @@
  * proxy should expose the Laravel API under the same origin.
  */
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api/v1").replace(/\/$/, "");
+const API_BASE = (import.meta.env["VITE_API_BASE_URL"] || "/api/v1").replace(/\/$/, "");
 const TOKEN_KEY = "lq-backend-token";
 const EXPIRES_KEY = "lq-backend-token-expires";
 
@@ -201,8 +201,8 @@ function translateRuleMessage(field: string, message: string): string {
 function extractMessage(payload: unknown, fallback: string): string {
   if (payload && typeof payload === "object") {
     const p = payload as Record<string, unknown>;
-    if (p.errors && typeof p.errors === "object") {
-      const translated = Object.entries(p.errors as Record<string, unknown>).map(
+    if (p["errors"] && typeof p["errors"] === "object") {
+      const translated = Object.entries(p["errors"] as Record<string, unknown>).map(
         ([field, value]) => {
           const first = Array.isArray(value) ? value[0] : value;
           return translateRuleMessage(field, typeof first === "string" ? first : "");
@@ -210,7 +210,7 @@ function extractMessage(payload: unknown, fallback: string): string {
       );
       if (translated.length > 0) return translated.join(" ");
     }
-    if (typeof p.message === "string" && p.message) return p.message;
+    if (typeof p["message"] === "string" && p["message"]) return p["message"];
   }
   return fallback;
 }
@@ -243,13 +243,13 @@ async function refreshToken(): Promise<boolean> {
         !response.ok ||
         !payload ||
         typeof payload !== "object" ||
-        typeof (payload as Record<string, unknown>).token !== "string"
+        typeof (payload as Record<string, unknown>)["token"] !== "string"
       ) {
         saveToken(null);
         return false;
       }
       const p = payload as Record<string, unknown>;
-      saveToken(String(p.token), typeof p.expires_at === "string" ? p.expires_at : null);
+      saveToken(String(p["token"]), typeof p["expires_at"] === "string" ? p["expires_at"] : null);
       return true;
     } catch {
       return false;
@@ -288,9 +288,9 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
       payload,
       payload &&
         typeof payload === "object" &&
-        (payload as Record<string, unknown>).errors &&
-        typeof (payload as Record<string, unknown>).errors === "object"
-        ? ((payload as Record<string, unknown>).errors as Record<string, string[] | string>)
+        (payload as Record<string, unknown>)["errors"] &&
+        typeof (payload as Record<string, unknown>)["errors"] === "object"
+        ? ((payload as Record<string, unknown>)["errors"] as Record<string, string[] | string>)
         : {},
     );
   }
@@ -338,29 +338,29 @@ function unwrap<T>(payload: T | { data: T }): T {
 function userFromPayload(payload: unknown): BackendUser | null {
   if (!payload || typeof payload !== "object") return null;
   const p = payload as Record<string, unknown>;
-  const candidate = p.user ?? p.data ?? p;
+  const candidate = p["user"] ?? p["data"] ?? p;
   if (!candidate || typeof candidate !== "object") return null;
   const resource = candidate as Record<string, unknown>;
-  if (resource.attributes && typeof resource.attributes === "object") {
+  if (resource["attributes"] && typeof resource["attributes"] === "object") {
     const relationships =
-      resource.relationships && typeof resource.relationships === "object"
-        ? (resource.relationships as Record<string, unknown>)
+      resource["relationships"] && typeof resource["relationships"] === "object"
+        ? (resource["relationships"] as Record<string, unknown>)
         : {};
     const relation = (key: string) => {
       const wrapper =
         relationships[key] && typeof relationships[key] === "object"
           ? (relationships[key] as Record<string, unknown>)
           : {};
-      const value = wrapper.data;
+      const value = wrapper["data"];
       if (!value || typeof value !== "object") return null;
       const item = value as Record<string, unknown>;
-      return item.attributes && typeof item.attributes === "object"
-        ? { id: item.id, ...(item.attributes as Record<string, unknown>) }
+      return item["attributes"] && typeof item["attributes"] === "object"
+        ? { id: item["id"], ...(item["attributes"] as Record<string, unknown>) }
         : item;
     };
     return {
-      id: resource.id as string | number,
-      ...(resource.attributes as Record<string, unknown>),
+      id: resource["id"] as string | number,
+      ...(resource["attributes"] as Record<string, unknown>),
       enterprise: relation("enterprise"),
       site: relation("site"),
     } as BackendUser;
@@ -406,8 +406,8 @@ function profileFromUser(user: BackendUser): BackendProfile {
           : String(enterprise.id)
         : String(user.enterprise_id),
     site_id: user.site_id == null ? null : String(user.site_id),
-    permissions: Array.isArray(user.effective_permissions)
-      ? user.effective_permissions.map(String)
+    permissions: Array.isArray(user["effective_permissions"])
+      ? user["effective_permissions"].map(String)
       : [],
     raw: user,
   };
@@ -421,7 +421,7 @@ export const backendApi = {
         body: JSON.stringify({ email, password }),
       });
       if ("token" in result && result.token)
-        saveToken(result.token, typeof result.expires_at === "string" ? result.expires_at : null);
+        saveToken(result.token, typeof result["expires_at"] === "string" ? result["expires_at"] : null);
       return result;
     },
     async verifyMfa(token: string, code: string): Promise<LoginResult> {
@@ -430,7 +430,7 @@ export const backendApi = {
         body: JSON.stringify({ token, code }),
       });
       if ("token" in result && result.token)
-        saveToken(result.token, typeof result.expires_at === "string" ? result.expires_at : null);
+        saveToken(result.token, typeof result["expires_at"] === "string" ? result["expires_at"] : null);
       return result;
     },
     async resendMfa(token: string) {
@@ -509,7 +509,7 @@ export const backendApi = {
       const path = email ? "auth/resend-verification/public" : "auth/resend-verification";
       return request<{ message?: string; verification_sent?: boolean }>(path, {
         method: "POST",
-        body: email ? JSON.stringify({ email }) : undefined,
+        ...(email ? { body: JSON.stringify({ email }) } : {}),
       });
     },
     hasToken: getStoredToken,
@@ -523,8 +523,8 @@ export const backendApi = {
         throw new BackendApiError("Profil utilisateur introuvable.", 500, currentResult);
 
       const userPayload: Record<string, unknown> = {};
-      if (input.first_name !== undefined || input.last_name !== undefined) {
-        userPayload.name = [input.first_name, input.last_name]
+      if (input["first_name"] !== undefined || input["last_name"] !== undefined) {
+        userPayload["name"] = [input["first_name"], input["last_name"]]
           .filter((value) => typeof value === "string" && value.trim())
           .join(" ");
       }

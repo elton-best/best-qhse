@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Models\Enterprise;
 use App\Models\EnterpriseSubscription;
+use App\Models\Norm;
 use App\Models\Offer;
 use App\Models\Site;
 use App\Models\User;
@@ -71,6 +72,9 @@ class DemoCompanySeeder extends Seeder
                     'duration_months' => 12,
                 ],
             );
+
+            // Sans norme rattachée, le site n'a aucune couverture et l'accès est bloqué.
+            $offer->norms()->syncWithoutDetaching(Norm::query()->pluck('id')->all());
 
             EnterpriseSubscription::updateOrCreate(
                 ['ref' => 'SUB-DEMO-TRIAL'],

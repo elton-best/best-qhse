@@ -3,8 +3,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Bell, Clock, MapPin, Menu, Search, Stamp } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { backendApi } from "@/integrations/backend/client";
-import { useEnterpriseNorms } from "@/integrations/backend/norms";
+import { useAccessibleSubModules } from "@/integrations/backend/access";
+import { normFamily, useEnterpriseNorms } from "@/integrations/backend/norms";
 import { AppSidebar } from "@/components/app/AppSidebar";
+import { BackButton } from "@/components/app/BackButton";
 import { LqButton } from "@/components/lq/LqButton";
 import { getMyProfile } from "@/lib/profile.functions";
 import { dueOf, isOverdue, useRecords, type QRecord } from "@/hooks/use-records";
@@ -29,6 +31,7 @@ export const Route = createFileRoute("/_authenticated/app")({
   }),
   loader: async () => {
     const p = await getMyProfile();
+    if (p.user_type === "super_admin") throw redirect({ to: "/superadmin" });
     if (p.account_type === "individual") throw redirect({ to: "/client" });
     return p;
   },
@@ -61,8 +64,9 @@ function AppLayout() {
   const ws = useWorkspace(records, profile.created_at, profile.email ?? "");
   const sites = records.filter((r) => r.kind === "site" && r.status !== "Archivé");
   const backendActiveNorms = normCatalog
-    ? new Set(normCatalog.norms.map((norm) => norm.code))
+    ? new Set(normCatalog.norms.map((norm) => normFamily(norm.code)))
     : undefined;
+  const { data: accessibleSubModules } = useAccessibleSubModules(site || undefined);
 
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
@@ -133,6 +137,7 @@ function AppLayout() {
     company: profile.company_name ?? "",
     onSignOut: signOut,
     activeNorms: backendActiveNorms,
+    accessible: accessibleSubModules,
     counts: {
       taches: ws.tasks.length,
       verification: ws.verifyCount,
@@ -199,6 +204,7 @@ function AppLayout() {
           >
             <Menu className="h-5 w-5" />
           </button>
+          <BackButton fallback="/app" />
           <button
             onClick={() => setSearchOpen(true)}
             className="flex h-10 min-w-0 flex-1 items-center gap-3 rounded-full border border-input bg-background px-4 text-left text-sm text-muted-foreground hover:border-primary md:max-w-md"

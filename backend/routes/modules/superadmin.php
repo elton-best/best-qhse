@@ -7,6 +7,7 @@ use App\Modules\SuperAdmin\Controllers\SuperAdminSessionController;
 use App\Modules\SuperAdmin\Controllers\SuperAdminSearchController;
 use App\Modules\SuperAdmin\Controllers\SuperAdminUserController;
 use App\Modules\SuperAdmin\Controllers\SuperAdminNormController;
+use App\Modules\Enterprise\Controllers\SecurityAuditLogController;
 
 // Routes SuperAdmin
 Route::prefix('superadmin')->middleware(['auth:sanctum', 'superadmin', 'force.password'])->group(function () {
@@ -16,6 +17,10 @@ Route::prefix('superadmin')->middleware(['auth:sanctum', 'superadmin', 'force.pa
     Route::get('/sessions', [SuperAdminSessionController::class, 'index'])->middleware('permission:sessions.read');
     Route::get('/search', [SuperAdminSearchController::class, 'search'])->middleware('permission:search.read');
     Route::get('/roles', [SuperAdminUserController::class, 'getRoles'])->middleware('permission:roles.read');
+
+    // Journal de sécurité de toute la plateforme (filtrable par entreprise et par site)
+    Route::get('/audit-logs', [SecurityAuditLogController::class, 'index']);
+    Route::get('/audit-logs/stats', [SecurityAuditLogController::class, 'stats']);
 
     // Enterprises & KYC
     Route::get('/enterprises', [SuperAdminController::class, 'getEnterprises'])->middleware('permission:enterprises.read');

@@ -8,9 +8,9 @@ import { LqButton } from "@/components/lq/LqButton";
 import { authErrorMessage } from "@/lib/auth-errors";
 
 export const Route = createFileRoute("/auth/reset-password")({
-  validateSearch: (search: Record<string, unknown>): { token?: string; email?: string } => ({
-    token: typeof search.token === "string" ? search.token : undefined,
-    email: typeof search.email === "string" ? search.email : undefined,
+  validateSearch: (search: Record<string, unknown>): { token?: string | undefined; email?: string | undefined } => ({
+    token: typeof search["token"] === "string" ? search["token"] : undefined,
+    email: typeof search["email"] === "string" ? search["email"] : undefined,
   }),
   head: () => ({
     meta: [

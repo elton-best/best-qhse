@@ -2,7 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { ChevronDown, ChevronLeft, ChevronRight, LogOut } from "lucide-react";
 import { useState } from "react";
 import logoAsset from "@/assets/bestqhse-logo.png.asset.json";
-import { BOTTOM_ITEMS, CONFIG_GROUP, DASHBOARD_ICON, NAV_GROUPS, TOP_ITEMS, policyTitle, type NavGroup, type NavItem } from "./nav";
+import { BOTTOM_ITEMS, CONFIG_GROUP, DASHBOARD_ICON, NAV_GROUPS, TOP_ITEMS, isNavItemVisible, policyTitle, type NavGroup, type NavItem } from "./nav";
 
 type Props = {
   collapsed: boolean;
@@ -13,19 +13,21 @@ type Props = {
   onSignOut: () => void;
   onNavigate?: () => void;
   /** Active norm codes; items with `norms` are hidden unless one matches. */
-  activeNorms?: Set<string>;
+  activeNorms?: Set<string> | undefined;
+  /** Sous-modules accessibles (offre + normes choisies) ; prioritaire sur `activeNorms` quand il est connu. */
+  accessible?: Set<string> | undefined;
   /** Counters shown as badges, keyed by slug. */
   counts?: Record<string, number>;
 };
 
-export function AppSidebar({ collapsed, onToggle, name, email, company, onSignOut, onNavigate, activeNorms, counts = {} }: Props) {
+export function AppSidebar({ collapsed, onToggle, name, email, company, onSignOut, onNavigate, activeNorms, accessible, counts = {} }: Props) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const activeSlug = pathname.startsWith("/app/") ? pathname.slice(5) : "";
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
     Object.fromEntries([...NAV_GROUPS.map((g) => [g.id, true]), [CONFIG_GROUP.id, false]])
   );
   const lbl = (it: NavItem) => (it.slug === "politique" ? policyTitle(activeNorms) : it.label);
-  const visible = (it: NavItem) => !it.norms || !activeNorms || it.norms.some((n) => activeNorms.has(n));
+  const visible = (it: NavItem) => isNavItemVisible(it, activeNorms, accessible);
   const groups: NavGroup[] = [...NAV_GROUPS, CONFIG_GROUP]
     .map((g) => ({ ...g, items: g.items.filter(visible) }))
     .filter((g) => g.items.length > 0);
@@ -102,7 +104,7 @@ export function AppSidebar({ collapsed, onToggle, name, email, company, onSignOu
           {!collapsed && "Tableau de bord"}
         </Link>
 
-        <div className="space-y-0.5 pt-1">{TOP_ITEMS.map((it) => itemLink(it, false))}</div>
+        <div className="space-y-0.5 pt-1">{TOP_ITEMS.filter(visible).map((it) => itemLink(it, false))}</div>
         {!collapsed && <p className="px-3.5 pt-3 text-[10.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Normes & Système</p>}
 
         {groups.map((g) =>

@@ -20,8 +20,8 @@ describe("SWOT/PESTEL context contract", () => {
 
   it("serializes the React form to the Laravel payload", () => {
     const form = emptyIssuesForm();
-    form.internal.culture.favorable.push("Culture qualité");
-    form.external.legal.unfavorable.push("Nouvelle exigence");
+    form.internal["culture"]!.favorable.push("Culture qualité");
+    form.external["legal"]!.unfavorable.push("Nouvelle exigence");
     form.majorIssues.push("Maîtriser la conformité");
     form.synthesisInternal = "Synthèse interne";
     form.synthesisExternal = "Synthèse externe";
@@ -35,9 +35,9 @@ describe("SWOT/PESTEL context contract", () => {
       swot_strengths: "Synthèse interne",
       pestel_political: "Synthèse externe",
     });
-    expect(JSON.parse(String(payload.swot_weaknesses))).toEqual(form.internal);
-    expect(JSON.parse(String(payload.swot_opportunities))).toEqual(form.external);
-    expect(JSON.parse(String(payload.swot_threats))).toEqual(form.majorIssues);
+    expect(JSON.parse(String(payload["swot_weaknesses"]))).toEqual(form.internal);
+    expect(JSON.parse(String(payload["swot_opportunities"]))).toEqual(form.external);
+    expect(JSON.parse(String(payload["swot_threats"]))).toEqual(form.majorIssues);
   });
 
   it("hydrates JSON persisted by the former Vue screen", () => {
@@ -51,8 +51,8 @@ describe("SWOT/PESTEL context contract", () => {
       pestel_political: "Synthèse externe",
     });
 
-    expect(form.internal.culture.favorable).toEqual(["Valeur"]);
-    expect(form.external.economic.unfavorable).toEqual(["Inflation"]);
+    expect(form.internal["culture"]!.favorable).toEqual(["Valeur"]);
+    expect(form.external["economic"]!.unfavorable).toEqual(["Inflation"]);
     expect(form.majorIssues).toEqual(["Enjeu prioritaire"]);
     expect(form.synthesisInternal).toBe("Synthèse interne");
     expect(form.synthesisExternal).toBe("Synthèse externe");

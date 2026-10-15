@@ -40,7 +40,7 @@ const tone: Record<string, { icon: string; badge: string }> = {
 
 function KpiCard({ item }: { item: (typeof KPI)[number] }) {
   const Icon = item.icon;
-  const colors = tone[item.color];
+  const colors = tone[item.color] ?? tone["blue"]!;
   return <div className="rounded-2xl border border-[#e6ebf2] bg-white p-3.5 shadow-[0_8px_24px_-18px_rgba(15,23,42,.3)] sm:p-4"><span className={`grid h-8 w-8 place-items-center rounded-xl ${colors.icon}`}><Icon className="h-4 w-4" /></span><p className="mt-3 text-[10px] font-extrabold uppercase tracking-[0.1em] text-[#8490a1]">{item.label}</p><p className="mt-1 font-display text-2xl font-extrabold tracking-tight text-[#142033]">{item.value}</p><p className="mt-1 text-[10px] text-[#8490a1]">{item.note}</p></div>;
 }
 

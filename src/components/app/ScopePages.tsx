@@ -54,7 +54,7 @@ const STEP_META: ReadonlyArray<readonly [string, LucideIcon]> = [
 ];
 
 type ItemForm = { value: string };
-type ScopeProcess = { id?: string; name: string; type: string; abbreviation?: string };
+type ScopeProcess = { id?: string | undefined; name: string; type: string; abbreviation?: string | undefined };
 type NormExclusion = { chapters: string; justification: string };
 type ScopeForm = {
   version: string;
@@ -73,12 +73,12 @@ type ScopeForm = {
 };
 
 type NormChapter = {
-  id?: string | number;
+  id?: string | number | undefined;
   code: string;
   title: string;
-  subchapters?: NormChapter[];
+  subchapters?: NormChapter[] | undefined;
 };
-type NormOption = { id?: string | number; code: string; name: string; chapters?: NormChapter[] };
+type NormOption = { id?: string | number | undefined; code: string; name: string; chapters?: NormChapter[] | undefined };
 type DocumentTypeOption = { id: string; name: string; abbreviation: string };
 
 const emptyItem = (): ItemForm => ({ value: "" });
@@ -175,8 +175,8 @@ function toLines(value: unknown): ItemForm[] {
       .map((item) => ({
         value: String(
           typeof item === "object" && item !== null
-            ? ((item as Record<string, unknown>).name ??
-                (item as Record<string, unknown>).value ??
+            ? ((item as Record<string, unknown>)["name"] ??
+                (item as Record<string, unknown>)["value"] ??
                 "")
             : item,
         ),
@@ -210,20 +210,20 @@ function normalizeProcessType(value: unknown): string {
 }
 
 function processName(value: Record<string, unknown>): string {
-  return String(value.title ?? value.name ?? value.nom ?? "").trim();
+  return String(value["title"] ?? value["name"] ?? value["nom"] ?? "").trim();
 }
 
 function processFromResource(value: unknown): ScopeProcess | null {
   const resource = flattenResource(value);
   const name = processName(resource);
   if (!name) return null;
-  const id = resource.id == null ? undefined : String(resource.id);
+  const id = resource["id"] == null ? undefined : String(resource["id"]);
   return {
     id,
     name,
-    type: normalizeProcessType(resource.category ?? resource.type),
+    type: normalizeProcessType(resource["category"] ?? resource["type"]),
     abbreviation:
-      String(resource.abbreviation ?? resource.code ?? "")
+      String(resource["abbreviation"] ?? resource["code"] ?? "")
         .trim()
         .toUpperCase() || undefined,
   };
@@ -241,9 +241,9 @@ function sameProcess(left: ScopeProcess, right: ScopeProcess): boolean {
 }
 
 function scopeProcesses(scope: Record<string, unknown>, available: ScopeProcess[]): ScopeProcess[] {
-  const stored = Array.isArray(scope.processes) ? scope.processes : [];
-  const legacyIds = Array.isArray(scope.included_processes)
-    ? scope.included_processes.map(String)
+  const stored = Array.isArray(scope["processes"]) ? scope["processes"] : [];
+  const legacyIds = Array.isArray(scope["included_processes"])
+    ? scope["included_processes"].map(String)
     : [];
   const selected: ScopeProcess[] = [];
 
@@ -281,18 +281,18 @@ function useNorms(siteId: string) {
       const root =
         payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
       const data =
-        root.data && typeof root.data === "object" && !Array.isArray(root.data)
-          ? (root.data as Record<string, unknown>)
+        root["data"] && typeof root["data"] === "object" && !Array.isArray(root["data"])
+          ? (root["data"] as Record<string, unknown>)
           : {};
-      const values = root.norms ?? data.norms ?? [];
+      const values = root["norms"] ?? data["norms"] ?? [];
       const norms = Array.isArray(values)
         ? values
             .map((item) => {
               const value = flattenResource(item);
               return {
-                id: value.id == null ? undefined : String(value.id),
-                code: String(value.code ?? value.name ?? ""),
-                name: String(value.name ?? value.code ?? ""),
+                id: value["id"] == null ? undefined : String(value["id"]),
+                code: String(value["code"] ?? value["name"] ?? ""),
+                name: String(value["name"] ?? value["code"] ?? ""),
               };
             })
             .filter((item) => item.code)
@@ -309,25 +309,25 @@ function useNorms(siteId: string) {
               chaptersPayload && typeof chaptersPayload === "object"
                 ? (chaptersPayload as Record<string, unknown>)
                 : {};
-            const chapters = Array.isArray(chaptersRoot.data) ? chaptersRoot.data : [];
+            const chapters = Array.isArray(chaptersRoot["data"]) ? chaptersRoot["data"] : [];
             return {
               ...norm,
               chapters: chapters.map((chapter) => {
                 const item = flattenResource(chapter);
-                const subchapters = Array.isArray(item.subchapters)
-                  ? item.subchapters.map((subchapter) => {
+                const subchapters = Array.isArray(item["subchapters"])
+                  ? item["subchapters"].map((subchapter) => {
                       const child = flattenResource(subchapter);
                       return {
-                        id: child.id == null ? undefined : String(child.id),
-                        code: String(child.code ?? child.number ?? ""),
-                        title: String(child.title ?? child.name ?? ""),
+                        id: child["id"] == null ? undefined : String(child["id"]),
+                        code: String(child["code"] ?? child["number"] ?? ""),
+                        title: String(child["title"] ?? child["name"] ?? ""),
                       };
                     })
                   : [];
                 return {
-                  id: item.id == null ? undefined : String(item.id),
-                  code: String(item.code ?? item.number ?? ""),
-                  title: String(item.title ?? item.name ?? ""),
+                  id: item["id"] == null ? undefined : String(item["id"]),
+                  code: String(item["code"] ?? item["number"] ?? ""),
+                  title: String(item["title"] ?? item["name"] ?? ""),
                   subchapters,
                 };
               }),
@@ -412,7 +412,7 @@ export function ScopePage() {
   const existing = scopes[0] as Record<string, unknown> | undefined;
   const currentScopeId = isNewEntry
     ? undefined
-    : (savedScopeId ?? (existing?.id == null ? undefined : String(existing.id)));
+    : (savedScopeId ?? (existing?.["id"] == null ? undefined : String(existing["id"])));
   const processFamilyRank = (type: string) =>
     type === "management" ? 0 : type === "support" ? 2 : 1;
   const compareScopeProcesses = (left: ScopeProcess, right: ScopeProcess) =>
@@ -428,8 +428,8 @@ export function ScopePage() {
       return;
     }
 
-    const rawNormExclusions = parseObject(existing.norm_exclusions);
-    const justifications = parseObject(existing.norm_exclusions_justifications);
+    const rawNormExclusions = parseObject(existing["norm_exclusions"]);
+    const justifications = parseObject(existing["norm_exclusions_justifications"]);
     const normalized: Record<string, NormExclusion> = {};
     Object.entries(rawNormExclusions).forEach(([key, value]) => {
       normalized[key] = {
@@ -439,25 +439,25 @@ export function ScopePage() {
     });
 
     setForm({
-      version: String(existing.version ?? "1.0"),
-      objective: String(existing.document_objective ?? existing.objective ?? ""),
-      definition: String(existing.scope_definition ?? existing.scope ?? ""),
-      documents: toLines(existing.referenced_documents),
+      version: String(existing["version"] ?? "1.0"),
+      objective: String(existing["document_objective"] ?? existing["objective"] ?? ""),
+      definition: String(existing["scope_definition"] ?? existing["scope"] ?? ""),
+      documents: toLines(existing["referenced_documents"]),
       processes: scopeProcesses(existing, availableProcesses).sort(compareScopeProcesses),
-      products: toLines(existing.products_services),
-      units: toLines(existing.organizational_units),
-      locations: toLines(existing.locations),
-      exclusions: String(existing.scope_exclusions ?? existing.exclusions ?? ""),
-      exclusionsJustification: String(existing.exclusions_justification ?? ""),
-      isoExclusions: String(existing.iso_exclusions ?? ""),
-      isoExclusionsJustification: String(existing.iso_exclusions_justification ?? ""),
+      products: toLines(existing["products_services"]),
+      units: toLines(existing["organizational_units"]),
+      locations: toLines(existing["locations"]),
+      exclusions: String(existing["scope_exclusions"] ?? existing["exclusions"] ?? ""),
+      exclusionsJustification: String(existing["exclusions_justification"] ?? ""),
+      isoExclusions: String(existing["iso_exclusions"] ?? ""),
+      isoExclusionsJustification: String(existing["iso_exclusions_justification"] ?? ""),
       normExclusions: normalized,
     });
   }, [existing, processResources, isNewEntry]);
 
   useEffect(() => {
-    if (existing?.id != null) setSavedScopeId(String(existing.id));
-  }, [existing?.id]);
+    if (existing?.["id"] != null) setSavedScopeId(String(existing["id"]));
+  }, [existing?.["id"]]);
 
   useEffect(() => {
     let cancelled = false;
@@ -471,17 +471,17 @@ export function ScopePage() {
           ? payload
           : payload &&
               typeof payload === "object" &&
-              Array.isArray((payload as Record<string, unknown>).data)
-            ? ((payload as Record<string, unknown>).data as unknown[])
+              Array.isArray((payload as Record<string, unknown>)["data"])
+            ? ((payload as Record<string, unknown>)["data"] as unknown[])
             : [];
         if (cancelled) return;
         const options = values
           .map((item) => {
             const value = flattenResource(item);
             return {
-              id: String(value.id ?? ""),
-              name: String(value.name ?? value.title ?? ""),
-              abbreviation: String(value.abbreviation ?? ""),
+              id: String(value["id"] ?? ""),
+              name: String(value["name"] ?? value["title"] ?? ""),
+              abbreviation: String(value["abbreviation"] ?? ""),
             };
           })
           .filter((item) => item.id && item.name);
@@ -561,7 +561,7 @@ export function ScopePage() {
     }
     update("processes", [
       ...form.processes,
-      { ...manualProcess, name, abbreviation: manualProcess.abbreviation.trim().toUpperCase() },
+      { ...manualProcess, name, abbreviation: (manualProcess.abbreviation ?? "").trim().toUpperCase() },
     ]);
     setManualProcess({ name: "", type: "realization", abbreviation: "" });
   };
@@ -702,11 +702,11 @@ export function ScopePage() {
           ? (savedPayload as Record<string, unknown>)
           : {};
       const savedData =
-        savedRoot.data && typeof savedRoot.data === "object"
-          ? (savedRoot.data as Record<string, unknown>)
+        savedRoot["data"] && typeof savedRoot["data"] === "object"
+          ? (savedRoot["data"] as Record<string, unknown>)
           : savedRoot;
       const savedResource = flattenResource(savedData);
-      if (savedResource.id != null) setSavedScopeId(String(savedResource.id));
+      if (savedResource["id"] != null) setSavedScopeId(String(savedResource["id"]));
       setIsNewEntry(false);
       toast.success("Domaine d'application enregistré.");
       return true;
@@ -737,17 +737,17 @@ export function ScopePage() {
       values.findIndex((candidate) => sameProcess(candidate, process)) === index,
   );
 
-  const extractDocumentInfo = (payload: unknown): { id?: string; code: string } => {
+  const extractDocumentInfo = (payload: unknown): { id?: string | undefined; code: string } => {
     const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
     const data =
-      root.data && typeof root.data === "object" ? (root.data as Record<string, unknown>) : root;
+      root["data"] && typeof root["data"] === "object" ? (root["data"] as Record<string, unknown>) : root;
     const attributes =
-      data.attributes && typeof data.attributes === "object"
-        ? (data.attributes as Record<string, unknown>)
+      data["attributes"] && typeof data["attributes"] === "object"
+        ? (data["attributes"] as Record<string, unknown>)
         : data;
     return {
-      id: data.id == null && attributes.id == null ? undefined : String(data.id ?? attributes.id),
-      code: String(attributes.code ?? ""),
+      id: data["id"] == null && attributes["id"] == null ? undefined : String(data["id"] ?? attributes["id"]),
+      code: String(attributes["code"] ?? ""),
     };
   };
 
@@ -772,7 +772,7 @@ export function ScopePage() {
       return;
     }
     setGenerationAction(action);
-    setDocumentTypeId((current) => current || documentTypes[0].id);
+    setDocumentTypeId((current) => current || (documentTypes[0]?.id ?? ""));
     setGenerationProcess(
       (current) => current || generationProcesses[0]?.id || generationProcesses[0]?.name || "",
     );
@@ -819,11 +819,11 @@ export function ScopePage() {
     try {
       const payload: Record<string, unknown> = { document_type_catalog_id: Number(documentTypeId) };
       if (selectedProcess?.id) {
-        payload.process_id = Number(selectedProcess.id);
+        payload["process_id"] = Number(selectedProcess.id);
       } else if (selectedProcess) {
-        payload.process_name = selectedProcess.name;
-        payload.process_type = selectedProcess.type;
-        payload.process_abbreviation = selectedProcess.abbreviation ?? "";
+        payload["process_name"] = selectedProcess.name;
+        payload["process_type"] = selectedProcess.type;
+        payload["process_abbreviation"] = selectedProcess.abbreviation ?? "";
       }
       const response = await backendApi.request<unknown>(
         `application-scopes/${currentScopeId}/generate-draft`,
@@ -962,17 +962,17 @@ export function ScopePage() {
           </span>
           <span className="text-sm">
             <span className="font-bold">
-              Version {String(existing.version ?? form.version ?? "1.0")}
+              Version {String(existing["version"] ?? form.version ?? "1.0")}
             </span>
           </span>
           <span className={`text-sm ${muted}`}>
-            {Array.isArray(existing.applicable_norms)
-              ? existing.applicable_norms.length
+            {Array.isArray(existing["applicable_norms"])
+              ? existing["applicable_norms"].length
               : normOptions.length}{" "}
             norme(s) applicable(s)
           </span>
           <span className={`text-sm ${muted}`}>
-            {toLines(existing.locations).length} site(s) couvert(s)
+            {toLines(existing["locations"]).length} site(s) couvert(s)
           </span>
         </div>
       )}
@@ -1177,8 +1177,8 @@ export function ScopePage() {
                             <span className="font-display font-bold">{process.name}</span>
                             <span className="mt-1 block text-xs text-muted-foreground">
                               {String(
-                                processResources.find((item) => String(item.id) === process.id)
-                                  ?.purpose ?? "Finalité non renseignée",
+                                processResources.find((item) => String(item["id"]) === process.id)
+                                  ?.["purpose"] ?? "Finalité non renseignée",
                               )}
                             </span>
                           </span>

@@ -636,9 +636,9 @@ export function ContextOrganisationPage() {
     queryKey: ["organisation-entreprise"],
     queryFn: async () => {
       const me = await backendApi.request<Record<string, unknown>>("auth/me");
-      const user = (me.user ?? me) as Record<string, unknown>;
+      const user = (me["user"] ?? me) as Record<string, unknown>;
       const enterpriseId =
-        user.enterprise_id ?? (user.enterprise as Record<string, unknown> | undefined)?.id;
+        user["enterprise_id"] ?? (user["enterprise"] as Record<string, unknown> | undefined)?.["id"];
       if (enterpriseId === undefined || enterpriseId === null || enterpriseId === "")
         return {
           user,
@@ -647,13 +647,13 @@ export function ContextOrganisationPage() {
         };
       const raw = await backendApi.request<unknown>(`enterprises/${enterpriseId}`);
       const root = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-      const node = (root.data ?? root) as Record<string, unknown>;
-      const attributes = (node.attributes ?? node) as Record<string, unknown>;
-      const relationships = (node.relationships ?? {}) as Record<string, unknown>;
-      const sites = Array.isArray(relationships.sites)
-        ? (relationships.sites as Record<string, unknown>[])
+      const node = (root["data"] ?? root) as Record<string, unknown>;
+      const attributes = (node["attributes"] ?? node) as Record<string, unknown>;
+      const relationships = (node["relationships"] ?? {}) as Record<string, unknown>;
+      const sites = Array.isArray(relationships["sites"])
+        ? (relationships["sites"] as Record<string, unknown>[])
         : [];
-      return { user, enterprise: { id: node.id ?? enterpriseId, ...attributes }, sites };
+      return { user, enterprise: { id: node["id"] ?? enterpriseId, ...attributes }, sites };
     },
     staleTime: 60_000,
   });
@@ -661,8 +661,8 @@ export function ContextOrganisationPage() {
   const entrepriseSites = useMemo(
     () =>
       (entrepriseQuery.data?.sites ?? []).map((site) => {
-        const node = (site.attributes ?? site) as Record<string, unknown>;
-        return { id: String(site.id ?? node.id ?? ""), name: String(node.name ?? "Site") };
+        const node = (site["attributes"] ?? site) as Record<string, unknown>;
+        return { id: String(site["id"] ?? node["id"] ?? ""), name: String(node["name"] ?? "Site") };
       }),
     [entrepriseQuery.data],
   );
@@ -679,11 +679,11 @@ export function ContextOrganisationPage() {
     const criterion = issuesForm.external[key];
     return Boolean(criterion?.favorable.some(Boolean) || criterion?.unfavorable.some(Boolean));
   }).length;
-  const stakeholderHigh = stakeholders.filter((item) => item.relevance_degree === "high").length;
+  const stakeholderHigh = stakeholders.filter((item) => item["relevance_degree"] === "high").length;
   const scope = scopes[0] as Record<string, unknown> | undefined;
-  const scopeExclusions = scope ? hasText(scope.scope_exclusions ?? scope.exclusions) : false;
+  const scopeExclusions = scope ? hasText(scope["scope_exclusions"] ?? scope["exclusions"]) : false;
   const cartographyCategory = (item: Record<string, unknown>) => {
-    const value = String(item.category ?? item.type ?? "").toLowerCase();
+    const value = String(item["category"] ?? item["type"] ?? "").toLowerCase();
     if (["management", "pilotage"].includes(value)) return "management";
     if (["support", "soutien"].includes(value)) return "support";
     return "realization";
@@ -735,7 +735,7 @@ export function ContextOrganisationPage() {
   const saveForm = async (): Promise<boolean> => {
     try {
       await save.mutateAsync({
-        ...(existing?.id ? { id: String(existing.id) } : {}),
+        ...(existing?.["id"] ? { id: String(existing["id"]) } : {}),
         payload: { ...buildSwotPestelPayload(siteId, issuesForm), ...legacyPestel },
       });
       toast.success("Analyse du contexte enregistrée.");
@@ -1141,40 +1141,40 @@ function normalizeNeeds(value: unknown, legacy = ""): StakeholderNeedForm[] {
   const source = Array.isArray(value) ? value : [];
   const needs = source.map((need) => {
     const raw = need && typeof need === "object" ? (need as Record<string, unknown>) : {};
-    const requirements = Array.isArray(raw.requirements)
-      ? raw.requirements.map((requirement) => {
+    const requirements = Array.isArray(raw["requirements"])
+      ? raw["requirements"].map((requirement) => {
           const item =
             requirement && typeof requirement === "object"
               ? (requirement as Record<string, unknown>)
               : {};
-          const actions = Array.isArray(item.actions)
-            ? item.actions.map((action) => {
+          const actions = Array.isArray(item["actions"])
+            ? item["actions"].map((action) => {
                 const row =
                   action && typeof action === "object" ? (action as Record<string, unknown>) : {};
                 const responsibleId =
-                  typeof row.responsible_user_id === "number"
-                    ? row.responsible_user_id
-                    : Number(row.responsible_user_id);
+                  typeof row["responsible_user_id"] === "number"
+                    ? row["responsible_user_id"]
+                    : Number(row["responsible_user_id"]);
                 return {
-                  description: String(row.description ?? ""),
-                  deadline: String(row.deadline ?? ""),
+                  description: String(row["description"] ?? ""),
+                  deadline: String(row["deadline"] ?? ""),
                   responsible_user_id:
                     Number.isFinite(responsibleId) && responsibleId > 0 ? responsibleId : null,
-                  responsible_name: String(row.responsible_name ?? row.responsible ?? ""),
+                  responsible_name: String(row["responsible_name"] ?? row["responsible"] ?? ""),
                 };
               })
             : [];
-          const rawType = String(item.type ?? "legal");
+          const rawType = String(item["type"] ?? "legal");
           return {
-            description: String(item.description ?? ""),
+            description: String(item["description"] ?? ""),
             type: REQUIREMENT_TYPE_VALUES.has(rawType) ? rawType : "legal",
             actions,
           };
         })
       : [];
     return {
-      description: String(raw.description ?? ""),
-      priority: String(raw.priority ?? "medium"),
+      description: String(raw["description"] ?? ""),
+      priority: String(raw["priority"] ?? "medium"),
       requirements,
     };
   });
@@ -1229,17 +1229,17 @@ export function StakeholdersPage() {
           string,
           unknown
         >;
-        const list = Array.isArray(root.data) ? root.data : [];
+        const list = Array.isArray(root["data"]) ? root["data"] : [];
         setCollaborators(
           list
             .map((user) => {
               const row = (user && typeof user === "object" ? user : {}) as Record<string, unknown>;
               const fullName =
-                String(row.full_name ?? "").trim() ||
-                `${String(row.last_name ?? "").trim()} ${String(row.first_name ?? "").trim()}`.trim();
+                String(row["full_name"] ?? "").trim() ||
+                `${String(row["last_name"] ?? "").trim()} ${String(row["first_name"] ?? "").trim()}`.trim();
               return {
-                id: Number(row.id),
-                label: fullName || String(row.name ?? row.email ?? "Collaborateur"),
+                id: Number(row["id"]),
+                label: fullName || String(row["name"] ?? row["email"] ?? "Collaborateur"),
               };
             })
             .filter((option) => Number.isFinite(option.id) && option.id > 0),
@@ -1255,13 +1255,13 @@ export function StakeholdersPage() {
   const visible = useMemo(() => {
     const search = query.trim().toLowerCase();
     return data.filter((item) => {
-      if (typeFilter && String(item.type ?? "") !== typeFilter) return false;
-      if (relevanceFilter && String(item.relevance_degree ?? "") !== relevanceFilter) return false;
+      if (typeFilter && String(item["type"] ?? "") !== typeFilter) return false;
+      if (relevanceFilter && String(item["relevance_degree"] ?? "") !== relevanceFilter) return false;
       if (!search) return true;
       const haystack = [
-        String(item.name ?? ""),
-        String(item.needs_expectations ?? ""),
-        String(item.contact_person ?? ""),
+        String(item["name"] ?? ""),
+        String(item["needs_expectations"] ?? ""),
+        String(item["contact_person"] ?? ""),
       ]
         .join(" ")
         .toLowerCase();
@@ -1283,16 +1283,16 @@ export function StakeholdersPage() {
     setShowForm(true);
   };
   const startEdit = (item: Record<string, unknown>) => {
-    const legacy = String(item.needs_expectations ?? "");
-    setEditingId(String(item.id));
+    const legacy = String(item["needs_expectations"] ?? "");
+    setEditingId(String(item["id"]));
     setForm({
-      name: String(item.name ?? ""),
-      type: String(item.type ?? "other"),
-      relevance_degree: String(item.relevance_degree ?? "medium"),
-      contact_person: String(item.contact_person ?? ""),
-      contact_email: String(item.contact_email ?? ""),
+      name: String(item["name"] ?? ""),
+      type: String(item["type"] ?? "other"),
+      relevance_degree: String(item["relevance_degree"] ?? "medium"),
+      contact_person: String(item["contact_person"] ?? ""),
+      contact_email: String(item["contact_email"] ?? ""),
       needs_expectations: legacy,
-      needs: normalizeNeeds(item.needs, legacy),
+      needs: normalizeNeeds(item["needs"], legacy),
     });
     setShowForm(true);
   };
@@ -1403,11 +1403,11 @@ export function StakeholdersPage() {
     }
   };
   const actionRows = visible.flatMap((stakeholder) =>
-    normalizeNeeds(stakeholder.needs, String(stakeholder.needs_expectations ?? "")).flatMap(
+    normalizeNeeds(stakeholder["needs"], String(stakeholder["needs_expectations"] ?? "")).flatMap(
       (need) =>
         need.requirements.flatMap((requirement) =>
           requirement.actions.map((action) => ({
-            stakeholder: String(stakeholder.name ?? ""),
+            stakeholder: String(stakeholder["name"] ?? ""),
             need: need.description,
             requirement: requirement.description,
             responsible: actionResponsibleLabel(action, collaborators),
@@ -1451,14 +1451,14 @@ export function StakeholdersPage() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat value={data.length} label="Parties identifiées" />
         <Stat
-          value={data.filter((item) => item.relevance_degree === "high").length}
+          value={data.filter((item) => item["relevance_degree"] === "high").length}
           label="Priorité élevée"
           tone="text-rose-600"
         />
         <Stat
           value={data.reduce(
             (count, item) =>
-              count + normalizeNeeds(item.needs, String(item.needs_expectations ?? "")).length,
+              count + normalizeNeeds(item["needs"], String(item["needs_expectations"] ?? "")).length,
             0,
           )}
           label="Besoins"
@@ -1893,7 +1893,7 @@ export function StakeholdersPage() {
           >
             {visible.map((item) => (
               <div
-                key={String(item.id)}
+                key={String(item["id"])}
                 className={
                   view === "grid"
                     ? `${card} p-4`
@@ -1905,32 +1905,32 @@ export function StakeholdersPage() {
                     <Users className="h-4 w-4" />
                   </div>
                   <div className="min-w-0">
-                    <p className="truncate font-semibold">{String(item.name ?? "Sans nom")}</p>
+                    <p className="truncate font-semibold">{String(item["name"] ?? "Sans nom")}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {STAKEHOLDER_TYPES.find(([value]) => value === item.type)?.[1] ??
-                        String(item.type ?? "")}
-                      {item.contact_person ? ` · ${String(item.contact_person)}` : ""}
+                      {STAKEHOLDER_TYPES.find(([value]) => value === item["type"])?.[1] ??
+                        String(item["type"] ?? "")}
+                      {item["contact_person"] ? ` · ${String(item["contact_person"])}` : ""}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span
-                    className={`rounded-full px-2 py-1 text-[11px] font-bold ${item.relevance_degree === "high" ? "bg-rose-100 text-rose-700" : item.relevance_degree === "low" ? "bg-slate-100 text-slate-600" : "bg-amber-100 text-amber-700"}`}
+                    className={`rounded-full px-2 py-1 text-[11px] font-bold ${item["relevance_degree"] === "high" ? "bg-rose-100 text-rose-700" : item["relevance_degree"] === "low" ? "bg-slate-100 text-slate-600" : "bg-amber-100 text-amber-700"}`}
                   >
-                    {RELEVANCE.find(([value]) => value === item.relevance_degree)?.[1] ?? "Moyenne"}
+                    {RELEVANCE.find(([value]) => value === item["relevance_degree"])?.[1] ?? "Moyenne"}
                   </span>
                   <span className="rounded-full bg-primary-soft px-2 py-1 text-[11px] font-bold text-primary">
-                    {normalizeNeeds(item.needs, String(item.needs_expectations ?? "")).length}{" "}
+                    {normalizeNeeds(item["needs"], String(item["needs_expectations"] ?? "")).length}{" "}
                     besoin(s)
                   </span>
                 </div>
                 {view === "grid" && (
                   <div className="mt-4 w-full space-y-2 text-sm">
                     <p className="line-clamp-3 whitespace-pre-line text-muted-foreground">
-                      {String(item.needs_expectations ?? "Aucune attente décrite.")}
+                      {String(item["needs_expectations"] ?? "Aucune attente décrite.")}
                     </p>
                     <p className="text-xs font-semibold text-muted-foreground">
-                      {normalizeNeeds(item.needs, String(item.needs_expectations ?? "")).reduce(
+                      {normalizeNeeds(item["needs"], String(item["needs_expectations"] ?? "")).reduce(
                         (count, need) => count + need.requirements.length,
                         0,
                       )}{" "}
@@ -1948,7 +1948,7 @@ export function StakeholdersPage() {
                   </button>
                   <button
                     className="rounded-lg p-2 text-muted-foreground hover:bg-background hover:text-destructive"
-                    onClick={() => void destroy(String(item.id))}
+                    onClick={() => void destroy(String(item["id"]))}
                     aria-label="Supprimer"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -2017,16 +2017,16 @@ export function ApplicationScopePage() {
   useEffect(() => {
     if (existing)
       setForm({
-        version: String(existing.version ?? "1.0"),
-        objective: String(existing.objective ?? existing.document_objective ?? ""),
-        scope: String(existing.scope ?? ""),
-        scope_definition: String(existing.scope_definition ?? ""),
-        products_services: joinLines(existing.products_services),
-        organizational_units: joinLines(existing.organizational_units),
-        locations: joinLines(existing.locations),
-        scope_exclusions: String(existing.scope_exclusions ?? existing.exclusions ?? ""),
+        version: String(existing["version"] ?? "1.0"),
+        objective: String(existing["objective"] ?? existing["document_objective"] ?? ""),
+        scope: String(existing["scope"] ?? ""),
+        scope_definition: String(existing["scope_definition"] ?? ""),
+        products_services: joinLines(existing["products_services"]),
+        organizational_units: joinLines(existing["organizational_units"]),
+        locations: joinLines(existing["locations"]),
+        scope_exclusions: String(existing["scope_exclusions"] ?? existing["exclusions"] ?? ""),
         exclusions_justification: String(
-          existing.exclusions_justification ?? existing.iso_exclusions_justification ?? "",
+          existing["exclusions_justification"] ?? existing["iso_exclusions_justification"] ?? "",
         ),
       });
   }, [existing]);
@@ -2041,7 +2041,7 @@ export function ApplicationScopePage() {
   const saveForm = async () => {
     try {
       await save.mutateAsync({
-        ...(existing?.id ? { id: String(existing.id) } : {}),
+        ...(existing?.["id"] ? { id: String(existing["id"]) } : {}),
         payload: {
           site_id: Number(siteId),
           is_current: true,
@@ -2056,7 +2056,7 @@ export function ApplicationScopePage() {
           scope_exclusions: form.scope_exclusions,
           exclusions: form.scope_exclusions,
           exclusions_justification: form.exclusions_justification,
-          included_processes: processes.map((item) => item.id).filter(Boolean),
+          included_processes: processes.map((item) => item["id"]).filter(Boolean),
         },
       });
       toast.success("Domaine d'application enregistré.");
@@ -2089,7 +2089,7 @@ export function ApplicationScopePage() {
     },
   ];
   const category = (item: Record<string, unknown>) => {
-    const value = String(item.category ?? item.type ?? "").toLowerCase();
+    const value = String(item["category"] ?? item["type"] ?? "").toLowerCase();
     if (["management", "pilotage"].includes(value)) return "management";
     if (["support", "soutien"].includes(value)) return "support";
     return "realization";
@@ -2282,16 +2282,16 @@ export function ApplicationScopePage() {
                     ) : (
                       items.map((item) => (
                         <div
-                          key={String(item.id)}
+                          key={String(item["id"])}
                           className="rounded-xl bg-white/75 p-3 text-sm font-semibold text-foreground"
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <span>{String(item.title ?? item.name ?? "Processus sans nom")}</span>
+                            <span>{String(item["title"] ?? item["name"] ?? "Processus sans nom")}</span>
                             <ChevronRight className="h-4 w-4 shrink-0 opacity-60" />
                           </div>
-                          {String(item.purpose ?? "") && (
+                          {String(item["purpose"] ?? "") && (
                             <p className="mt-1 line-clamp-2 text-xs font-normal opacity-75">
-                              {String(item.purpose)}
+                              {String(item["purpose"])}
                             </p>
                           )}
                         </div>
@@ -2332,7 +2332,7 @@ export function ManagementSystemPage() {
     },
   ];
   const category = (item: Record<string, unknown>) => {
-    const value = String(item.category ?? item.type ?? "").toLowerCase();
+    const value = String(item["category"] ?? item["type"] ?? "").toLowerCase();
     if (["management", "pilotage"].includes(value)) return "management";
     if (["support", "soutien"].includes(value)) return "support";
     return "realization";
@@ -2403,42 +2403,42 @@ export function ManagementSystemPage() {
                   <div className="grid gap-4 p-4 md:grid-cols-2 lg:grid-cols-3">
                     {items.map((item) => (
                       <article
-                        key={String(item.id)}
+                        key={String(item["id"])}
                         className="rounded-xl border border-border bg-background p-4"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="font-mono text-[11px] font-bold uppercase text-primary">
-                              {String(item.code ?? "PROCESSUS")}
+                              {String(item["code"] ?? "PROCESSUS")}
                             </p>
                             <h3 className="mt-1 font-display font-bold">
                               <Link
                                 to="/app/$section"
                                 params={{ section: "processus" }}
-                                search={{ open: String(item.id) }}
+                                search={{ open: String(item["id"]) }}
                                 className="hover:text-primary"
                               >
-                                {String(item.title ?? item.name ?? "Processus sans nom")}
+                                {String(item["title"] ?? item["name"] ?? "Processus sans nom")}
                               </Link>
                             </h3>
                           </div>
                           <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
                         </div>
-                        {item.purpose && (
+                        {Boolean(item["purpose"]) && (
                           <p className="mt-3 text-sm text-muted-foreground">
-                            {String(item.purpose)}
+                            {String(item["purpose"])}
                           </p>
                         )}
                         <div className="mt-4 grid gap-2 text-xs text-muted-foreground">
                           <div className="rounded-lg bg-card p-2">
                             <span className="font-bold text-foreground">Entrées : </span>
-                            {lines(item.sequences).length
-                              ? lines(item.sequences).join(", ")
+                            {lines(item["sequences"]).length
+                              ? lines(item["sequences"]).join(", ")
                               : "À documenter"}
                           </div>
                           <div className="rounded-lg bg-card p-2">
                             <span className="font-bold text-foreground">Statut : </span>
-                            {String(item.status ?? "draft")}
+                            {String(item["status"] ?? "draft")}
                           </div>
                         </div>
                       </article>

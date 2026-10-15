@@ -169,36 +169,36 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function flatten(item: unknown): Record<string, unknown> {
   const raw = asObject(item);
-  if (raw.attributes && typeof raw.attributes === "object") {
-    const relationships = asObject(raw.relationships);
+  if (raw["attributes"] && typeof raw["attributes"] === "object") {
+    const relationships = asObject(raw["relationships"]);
     const relationValues: Record<string, unknown> = {};
     Object.entries(relationships).forEach(([key, value]) => {
       const rel = asObject(value);
-      const relData = rel.data;
+      const relData = rel["data"];
       if (Array.isArray(relData)) relationValues[key] = relData;
       else if (relData && typeof relData === "object") relationValues[key] = relData;
     });
-    return { id: raw.id, ...asObject(raw.attributes), ...relationValues };
+    return { id: raw["id"], ...asObject(raw["attributes"]), ...relationValues };
   }
   return raw;
 }
 
 function collection(payload: unknown): unknown[] {
   const root = asObject(payload);
-  const data = root.data;
+  const data = root["data"];
   if (Array.isArray(data)) return data;
-  if (data && typeof data === "object" && Array.isArray((data as Record<string, unknown>).data))
-    return (data as Record<string, unknown>).data as unknown[];
+  if (data && typeof data === "object" && Array.isArray((data as Record<string, unknown>)["data"]))
+    return (data as Record<string, unknown>)["data"] as unknown[];
   return Array.isArray(payload) ? payload : [];
 }
 
 function uiStatus(kind: string, source: Record<string, unknown>): string {
-  if (kind === "site" && typeof source.is_active === "boolean")
-    return source.is_active ? "Actif" : "Suspendu";
+  if (kind === "site" && typeof source["is_active"] === "boolean")
+    return source["is_active"] ? "Actif" : "Suspendu";
   const value = String(
     kind === "document"
-      ? source.workflow_status ?? source.status ?? source.state ?? ""
-      : source.status ?? source.state ?? "",
+      ? source["workflow_status"] ?? source["status"] ?? source["state"] ?? ""
+      : source["status"] ?? source["state"] ?? "",
   );
   return UI_STATUS[kind]?.[value] ?? value;
 }
@@ -210,15 +210,15 @@ function backendStatus(kind: string, value: string): string {
 function toRecord(kind: string, item: unknown): QRecord {
   const source = flatten(item);
   const config = KINDS[kind];
-  const id = String(source.id ?? source.uuid ?? `${kind}-${Math.random().toString(36).slice(2)}`);
+  const id = String(source["id"] ?? source["uuid"] ?? `${kind}-${Math.random().toString(36).slice(2)}`);
   const reference = String(
-    source.reference ?? source.ref ?? source.code ?? `${config?.prefix ?? "REF"}-${id}`,
+    source["reference"] ?? source["ref"] ?? source["code"] ?? `${config?.prefix ?? "REF"}-${id}`,
   );
   const title = String(
-    source.title ??
-      source.name ??
-      source.label ??
-      source.description ??
+    source["title"] ??
+      source["name"] ??
+      source["label"] ??
+      source["description"] ??
       `${config?.singular ?? kind} ${reference}`,
   );
   const status = uiStatus(kind, source) || config?.statuses[0]?.value || "";
@@ -237,7 +237,7 @@ function toRecord(kind: string, item: unknown): QRecord {
     updated_at: _updated,
     ...data
   } = source;
-  if (kind === "site" && data.address === undefined) data.address = source.location;
+  if (kind === "site" && data["address"] === undefined) data["address"] = source["location"];
   return {
     id,
     kind,
@@ -245,8 +245,8 @@ function toRecord(kind: string, item: unknown): QRecord {
     title,
     status,
     data,
-    created_at: String(source.created_at ?? now),
-    updated_at: String(source.updated_at ?? source.created_at ?? now),
+    created_at: String(source["created_at"] ?? now),
+    updated_at: String(source["updated_at"] ?? source["created_at"] ?? now),
   };
 }
 
@@ -269,24 +269,24 @@ function sanitizePayload(
     "target_company_id",
   ].forEach((key) => delete payload[key]);
   if (kind === "site") {
-    payload.name = title;
-    payload.location = payload.location ?? payload.address ?? title;
-    payload.city = payload.city ?? "À renseigner";
-    payload.is_active = status !== "Suspendu" && status !== "Archivé";
-    delete payload.title;
+    payload["name"] = title;
+    payload["location"] = payload["location"] ?? payload["address"] ?? title;
+    payload["city"] = payload["city"] ?? "À renseigner";
+    payload["is_active"] = status !== "Suspendu" && status !== "Archivé";
+    delete payload["title"];
   }
   if (kind === "collaborator") {
     const names = title.trim().split(/\s+/);
-    payload.first_name = payload.first_name ?? names[0] ?? title;
-    payload.last_name = payload.last_name ?? names.slice(1).join(" ") ?? names[0] ?? title;
-    payload.name = title;
-    payload.job_title = payload.job_title ?? payload.role ?? "Collaborateur";
-    delete payload.title;
+    payload["first_name"] = payload["first_name"] ?? names[0] ?? title;
+    payload["last_name"] = payload["last_name"] ?? names.slice(1).join(" ") ?? names[0] ?? title;
+    payload["name"] = title;
+    payload["job_title"] = payload["job_title"] ?? payload["role"] ?? "Collaborateur";
+    delete payload["title"];
   }
   if (kind === "process") {
-    payload.title = title;
-    payload.name = title;
-    payload.site_id = payload.site_id ?? undefined;
+    payload["title"] = title;
+    payload["name"] = title;
+    payload["site_id"] = payload["site_id"] ?? undefined;
   }
   if (kind === "action") {
     // Le backend Laravel exige site_id, process_id, type, description (min 10),
@@ -298,32 +298,32 @@ function sanitizePayload(
       Haute: "high",
       Urgente: "critical",
     };
-    if (payload.site_id == null && typeof window !== "undefined") {
+    if (payload["site_id"] == null && typeof window !== "undefined") {
       const currentSite = window.localStorage.getItem("lq-site");
-      if (currentSite) payload.site_id = currentSite;
+      if (currentSite) payload["site_id"] = currentSite;
     }
-    if (payload.responsible_id == null && payload.pilot_id != null) {
-      payload.responsible_id = payload.pilot_id;
+    if (payload["responsible_id"] == null && payload["pilot_id"] != null) {
+      payload["responsible_id"] = payload["pilot_id"];
     }
-    if (payload.deadline == null && payload.due_date != null) {
-      payload.deadline = payload.due_date;
+    if (payload["deadline"] == null && payload["due_date"] != null) {
+      payload["deadline"] = payload["due_date"];
     }
-    if (payload.type == null) payload.type = "corrective";
-    if (typeof payload.priority === "string" && PRIORITY_FR[payload.priority]) {
-      payload.priority = PRIORITY_FR[payload.priority];
+    if (payload["type"] == null) payload["type"] = "corrective";
+    if (typeof payload["priority"] === "string" && PRIORITY_FR[payload["priority"]]) {
+      payload["priority"] = PRIORITY_FR[payload["priority"]];
     }
-    delete payload.pilot_id;
-    delete payload.due_date;
+    delete payload["pilot_id"];
+    delete payload["due_date"];
   }
   if (kind === "indicator") {
-    payload.name = payload.name ?? title;
-    payload.code =
-      payload.code ??
+    payload["name"] = payload["name"] ?? title;
+    payload["code"] =
+      payload["code"] ??
       title
         .toUpperCase()
         .replace(/[^A-Z0-9]+/g, "_")
         .slice(0, 50);
-    delete payload.title;
+    delete payload["title"];
   }
   return payload;
 }
@@ -344,7 +344,7 @@ export async function fetchBackendRecords(): Promise<QRecord[]> {
     (r): r is PromiseRejectedResult =>
       r.status === "rejected" && !isIgnorableResourceError(r.reason),
   );
-  if (errors.length && errors.every((e) => e.reason?.status === 401)) throw errors[0].reason;
+  if (errors.length && errors.every((e) => e.reason?.status === 401)) throw errors[0]?.reason;
   return results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
 }
 
@@ -467,12 +467,12 @@ export function useSaveRecord() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
-      id?: string;
+      id?: string | undefined;
       kind: string;
       title: string;
       status: string;
       data: QRecord["data"];
-      previous?: QRecord;
+      previous?: QRecord | undefined;
       silent?: boolean;
     }) => {
       const endpoint = BACKEND_RESOURCES[input.kind];
@@ -490,7 +490,7 @@ export function useSaveRecord() {
             profile.email,
             input.id ? "Modification" : "Création",
             input.id && input.previous?.status !== input.status
-              ? { from: input.previous.status, to: input.status }
+              ? { from: input.previous?.status ?? "", to: input.status }
               : { to: input.status },
           ),
         ],
@@ -537,7 +537,7 @@ export function useTransition() {
       const data: Record<string, unknown> = { ...record.data };
       if (t.date && date) data[t.date.key] = date;
       if (t.number && number !== undefined) data[t.number.key] = number;
-      if (t.bumpVersion) data.version = bump(data.version);
+      if (t.bumpVersion) data["version"] = bump(data["version"]);
       const extra = [
         comment,
         t.date && date ? `${t.date.label} : ${new Date(date).toLocaleDateString("fr-FR")}` : "",
@@ -545,7 +545,7 @@ export function useTransition() {
       ]
         .filter(Boolean)
         .join(" — ");
-      data._history = [
+      data["_history"] = [
         ...historyOf(record),
         entry((await backendApi.auth.me()).email, t.label, {
           from: record.status,

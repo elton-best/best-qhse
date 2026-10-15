@@ -740,23 +740,23 @@ export function useInbox() {
       const payload = await backendApi.request<unknown>("complaints?per_page=100");
       const root =
         payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-      const items = Array.isArray(root.data) ? root.data : Array.isArray(payload) ? payload : [];
+      const items = Array.isArray(root["data"]) ? root["data"] : Array.isArray(payload) ? payload : [];
       return items.map((item) => {
         const source = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
         const attrs =
-          source.attributes && typeof source.attributes === "object"
-            ? (source.attributes as Record<string, unknown>)
+          source["attributes"] && typeof source["attributes"] === "object"
+            ? (source["attributes"] as Record<string, unknown>)
             : source;
         return {
-          id: String(source.id ?? attrs.id),
-          reference: String(attrs.reference ?? attrs.ref ?? `PLT-${source.id ?? ""}`),
-          title: String(attrs.title ?? "Plainte client"),
-          status: inboxStatus(attrs.status),
-          created_at: String(attrs.created_at ?? new Date().toISOString()),
+          id: String(source["id"] ?? attrs["id"]),
+          reference: String(attrs["reference"] ?? attrs["ref"] ?? `PLT-${source["id"] ?? ""}`),
+          title: String(attrs["title"] ?? "Plainte client"),
+          status: inboxStatus(attrs["status"]),
+          created_at: String(attrs["created_at"] ?? new Date().toISOString()),
           data: {
             ...attrs,
             company:
-              (attrs.site as Record<string, unknown> | undefined)?.name ?? attrs.client_company,
+              (attrs["site"] as Record<string, unknown> | undefined)?.["name"] ?? attrs["client_company"],
           },
         } as Complaint;
       });

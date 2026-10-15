@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hse\Models;
 
+use App\Traits\BelongsToEnterprise;
 use App\Traits\HasAuditFields;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -12,7 +13,7 @@ use App\Modules\Enterprise\Models\User;
 
 class EmergencyProcedure extends Model
 {
-    use HasFactory, SoftDeletes, HasAuditFields;
+    use BelongsToEnterprise, HasFactory, SoftDeletes, HasAuditFields;
 
     protected $fillable = [
         'enterprise_id',
@@ -32,6 +33,10 @@ class EmergencyProcedure extends Model
         'next_drill_date',
         'drill_report',
         'document_path',
+        'aspect_id',
+        'hazard_nature',
+        'probable_scale',
+        'neighbour_risk',
     ];
 
     protected $casts = [

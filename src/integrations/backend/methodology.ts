@@ -21,7 +21,7 @@ export type MethodologyGuide = {
 function dataOf<T>(payload: unknown): T {
   const root =
     payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-  return ((root.data ?? payload) as T);
+  return ((root["data"] ?? payload) as T);
 }
 
 export async function fetchMethodologyGuides() {

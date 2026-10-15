@@ -37,6 +37,13 @@ class User extends Authenticatable
 {
     use HasFactory, Notifiable, HasApiTokens, SoftDeletes, HasAuditFields, HasReference, HasRoles;
 
+    /**
+     * Guard Spatie explicite : le modèle vit dans un module, alors que
+     * `auth.providers.users.model` référence l'alias `App\Models\User`
+     * (comparaison stricte de classes par Spatie).
+     */
+    protected string $guard_name = 'web';
+
     public const TYPE_SUPER_ADMIN = 'super_admin';
     public const TYPE_COMPANY = 'company';
     public const TYPE_CLIENT_B = 'clientb';

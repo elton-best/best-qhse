@@ -43,7 +43,7 @@ function IndividualSignupPage() {
     try {
       const username = `${firstName}.${lastName}`.toLowerCase().replace(/[^a-z0-9.]+/g, "");
       await backendApi.auth.registerClient({
-        username: username || email.split("@")[0],
+        username: username || (email.split("@")[0] ?? "user"),
         email,
         password,
         password_confirmation: password,

@@ -30,3 +30,7 @@ node_modules
 
 .dev-*.log
 .tanstack/
+
+# Build output
+.output/
+.wrangler/

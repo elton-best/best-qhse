@@ -16,18 +16,18 @@ function objectOf(value: unknown): Record<string, unknown> {
 function collection(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload;
   const root = objectOf(payload);
-  if (Array.isArray(root.data)) return root.data;
-  const data = objectOf(root.data);
-  return Array.isArray(data.data) ? data.data : [];
+  if (Array.isArray(root["data"])) return root["data"];
+  const data = objectOf(root["data"]);
+  return Array.isArray(data["data"]) ? data["data"] : [];
 }
 
 export function flattenResource(item: unknown): Record<string, unknown> {
   const raw = objectOf(item);
   const attributes =
-    raw.attributes && typeof raw.attributes === "object"
-      ? (raw.attributes as Record<string, unknown>)
+    raw["attributes"] && typeof raw["attributes"] === "object"
+      ? (raw["attributes"] as Record<string, unknown>)
       : raw;
-  return { ...attributes, id: raw.id ?? attributes.id };
+  return { ...attributes, id: raw["id"] ?? attributes["id"] };
 }
 
 async function fetchResources(endpoint: string, params: Record<string, string | undefined>) {
@@ -187,12 +187,12 @@ export async function fetchProcesses(siteId: string) {
 
 const CARTOGRAPHY_SKIP = new Set(["categories", "document", "all_processes", "interactions"]);
 
-export async function fetchCartography(siteId: string) {
+export async function fetchCartography(siteId: string): Promise<Record<string, unknown>[]> {
   const payload = await backendApi.request<unknown>(
     `processes-cartography?site_id=${encodeURIComponent(siteId)}`,
   );
   const root = objectOf(payload);
-  const data = objectOf(root.data);
+  const data = objectOf(root["data"]);
   // Le backend expose `categories` (management/realization/support, sans doublons)
   // en plus des listes par famille (`pilotage`, `operationnel`, …) et des agrégats
   // (`all_processes`, `interactions`) : ne retenir qu'une seule source.
@@ -256,7 +256,7 @@ export function useContextMutations(siteId: string) {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: [...CONTEXT_KEY, siteId] });
   return {
     save: useMutation({
-      mutationFn: async (input: { id?: string; payload: Record<string, unknown> }) => {
+      mutationFn: async (input: { id?: string | undefined; payload: Record<string, unknown> }) => {
         const path = input.id ? `contexts/${input.id}` : "contexts";
         const defaults = { type: SWOT_PESTEL_TYPE, ...(siteId ? { site_id: Number(siteId) } : {}) };
         return backendApi.request(path, {
@@ -279,7 +279,7 @@ export function useStakeholderMutations(siteId: string) {
     queryClient.invalidateQueries({ queryKey: [...STAKEHOLDERS_KEY, siteId] });
   return {
     save: useMutation({
-      mutationFn: async (input: { id?: string; payload: Record<string, unknown> }) => {
+      mutationFn: async (input: { id?: string | undefined; payload: Record<string, unknown> }) => {
         const path = input.id ? `stakeholders/${input.id}` : "stakeholders";
         return backendApi.request(path, {
           method: input.id ? "PUT" : "POST",
@@ -300,7 +300,7 @@ export function useScopeMutations(siteId: string) {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: [...SCOPE_KEY, siteId] });
   return {
     save: useMutation({
-      mutationFn: async (input: { id?: string; payload: Record<string, unknown> }) => {
+      mutationFn: async (input: { id?: string | undefined; payload: Record<string, unknown> }) => {
         const path = input.id ? `application-scopes/${input.id}` : "application-scopes";
         return backendApi.request(path, {
           method: input.id ? "PUT" : "POST",

@@ -8,18 +8,18 @@ export const PROCESSES_KEY = ["organisation-processes"] as const;
 function resource(payload: unknown) {
   if (!payload || typeof payload !== "object") return {};
   const root = payload as Record<string, unknown>;
-  const item = (root.data && typeof root.data === "object" && !Array.isArray(root.data)
-    ? root.data
+  const item = (root["data"] && typeof root["data"] === "object" && !Array.isArray(root["data"])
+    ? root["data"]
     : payload) as Record<string, unknown>;
-  const attributes = item.attributes && typeof item.attributes === "object"
-    ? item.attributes as Record<string, unknown>
+  const attributes = item["attributes"] && typeof item["attributes"] === "object"
+    ? item["attributes"] as Record<string, unknown>
     : item;
   const result: Record<string, unknown> = {
     ...attributes,
-    id: item.id ?? attributes.id,
+    id: item["id"] ?? attributes["id"],
   };
-  const relationships = item.relationships && typeof item.relationships === "object"
-    ? item.relationships as Record<string, unknown>
+  const relationships = item["relationships"] && typeof item["relationships"] === "object"
+    ? item["relationships"] as Record<string, unknown>
     : {};
   Object.entries(relationships).forEach(([key, value]) => {
     const relation = value && typeof value === "object" && !Array.isArray(value)
@@ -67,7 +67,7 @@ export function normalizeProcessSequences(value: unknown) {
         return candidate.map((entry) => {
           if (entry && typeof entry === "object") {
             const object = entry as Record<string, unknown>;
-            return String(object.name ?? object.title ?? object.label ?? object.code ?? object.id ?? "").trim();
+            return String(object["name"] ?? object["title"] ?? object["label"] ?? object["code"] ?? object["id"] ?? "").trim();
           }
           return String(entry ?? "").trim();
         }).filter(Boolean);
@@ -79,17 +79,17 @@ export function normalizeProcessSequences(value: unknown) {
       return [];
     };
     return {
-      id: source.id == null ? undefined : String(source.id),
-      sequence_order: Number(source.sequence_order ?? source.order ?? index + 1),
-      input_description: String(source.input_description ?? source.inputDescription ?? source.inputs ?? ""),
-      activity_description: String(source.activity_description ?? source.activityDescription ?? source.activities ?? ""),
-      output_description: String(source.output_description ?? source.outputDescription ?? source.outputs ?? ""),
-      sub_activities: list(source.sub_activities ?? source.subActivities),
-      supplier_processes: list(source.supplier_processes ?? source.supplierProcesses),
-      client_processes: list(source.client_processes ?? source.clientProcesses),
-      responsible_user_id: source.responsible_user_id == null ? undefined : String(source.responsible_user_id),
-      duration_minutes: source.duration_minutes == null ? undefined : Number(source.duration_minutes),
-      documents: Array.isArray(source.documents) ? source.documents : [],
+      id: source["id"] == null ? undefined : String(source["id"]),
+      sequence_order: Number(source["sequence_order"] ?? source["order"] ?? index + 1),
+      input_description: String(source["input_description"] ?? source["inputDescription"] ?? source["inputs"] ?? ""),
+      activity_description: String(source["activity_description"] ?? source["activityDescription"] ?? source["activities"] ?? ""),
+      output_description: String(source["output_description"] ?? source["outputDescription"] ?? source["outputs"] ?? ""),
+      sub_activities: list(source["sub_activities"] ?? source["subActivities"]),
+      supplier_processes: list(source["supplier_processes"] ?? source["supplierProcesses"]),
+      client_processes: list(source["client_processes"] ?? source["clientProcesses"]),
+      responsible_user_id: source["responsible_user_id"] == null ? undefined : String(source["responsible_user_id"]),
+      duration_minutes: source["duration_minutes"] == null ? undefined : Number(source["duration_minutes"]),
+      documents: Array.isArray(source["documents"]) ? source["documents"] : [],
     };
   });
 }
@@ -133,7 +133,7 @@ export function useProcessMutations(siteId: string) {
   };
   return {
     save: useMutation({
-      mutationFn: (input: { id?: string; payload: Record<string, unknown> }) => backendApi.request(input.id ? `processes/${input.id}` : "processes", { method: input.id ? "PUT" : "POST", body: JSON.stringify(input.payload) }),
+      mutationFn: (input: { id?: string | undefined; payload: Record<string, unknown> }) => backendApi.request(input.id ? `processes/${input.id}` : "processes", { method: input.id ? "PUT" : "POST", body: JSON.stringify(input.payload) }),
       onSuccess: invalidate,
     }),
     remove: useMutation({ mutationFn: (id: string) => backendApi.request(`processes/${id}`, { method: "DELETE" }), onSuccess: invalidate }),
@@ -147,7 +147,7 @@ export async function fetchProcessReviews(processId: string) {
   const payload = await backendApi.request<unknown>(`processes/${processId}/reviews`);
   const root =
     payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-  const data = root.data ?? payload;
+  const data = root["data"] ?? payload;
   if (Array.isArray(data)) return data.map(flattenResource);
   return [];
 }
@@ -258,25 +258,25 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function cartographyList(value: unknown): CartographyProcess[] {
   if (!Array.isArray(value)) return [];
-  return value.map((item) => ({ ...resource(item), id: (asRecord(resource(item)).id ?? "") as string | number }) as CartographyProcess);
+  return value.map((item) => ({ ...resource(item), id: (asRecord(resource(item))["id"] ?? "") as string | number }) as CartographyProcess);
 }
 
 function parseCartography(payload: unknown): CartographyData {
   const root = asRecord(payload);
-  const data = asRecord(root.data ?? payload);
-  const all = cartographyList(data.all_processes);
-  const interactions = Array.isArray(data.interactions)
-    ? (data.interactions as CartographyInteraction[])
+  const data = asRecord(root["data"] ?? payload);
+  const all = cartographyList(data["all_processes"]);
+  const interactions = Array.isArray(data["interactions"])
+    ? (data["interactions"] as CartographyInteraction[])
     : [];
   const byLane = (lane: string) =>
     all.filter((item) => String(item.normalized_category ?? "").toLowerCase() === lane);
-  const doc = asRecord(data.document);
-  const hasDoc = doc.id !== undefined && doc.id !== "";
+  const doc = asRecord(data["document"]);
+  const hasDoc = doc["id"] !== undefined && doc["id"] !== "";
   return {
-    enterprise_name: String(data.enterprise_name ?? "Système de Management de la Qualité"),
-    site_name: String(data.site_name ?? ""),
-    total_count: Number(data.total_count ?? all.length),
-    document: hasDoc ? ({ ...doc, id: doc.id as string | number } as CartographyDocument) : null,
+    enterprise_name: String(data["enterprise_name"] ?? "Système de Management de la Qualité"),
+    site_name: String(data["site_name"] ?? ""),
+    total_count: Number(data["total_count"] ?? all.length),
+    document: hasDoc ? ({ ...doc, id: doc["id"] as string | number } as CartographyDocument) : null,
     processes: all,
     interactions,
     management: byLane("management"),
@@ -341,11 +341,11 @@ export async function fetchIsoCoverageMatrix(siteId: string, norme = "9001") {
     `iso-coverage-matrix?site_id=${encodeURIComponent(siteId)}&norme=${encodeURIComponent(norme)}`,
   );
   const root = asRecord(payload);
-  const data = root.data ?? [];
+  const data = root["data"] ?? [];
   return {
     rows: (Array.isArray(data) ? data : []) as IsoCoverageRow[],
-    norme: String(root.norme ?? norme),
-    total: Number(root.total ?? (Array.isArray(data) ? data.length : 0)),
+    norme: String(root["norme"] ?? norme),
+    total: Number(root["total"] ?? (Array.isArray(data) ? data.length : 0)),
   };
 }
 

@@ -104,7 +104,7 @@ function CompanySignupPage() {
     setBusy(true);
     try {
       const username =
-        `${firstName}.${lastName}`.toLowerCase().replace(/[^a-z0-9.]+/g, "") || email.split("@")[0];
+        `${firstName}.${lastName}`.toLowerCase().replace(/[^a-z0-9.]+/g, "") || (email.split("@")[0] ?? "user");
       const payload = new FormData();
       const values: Record<string, string> = {
         enterprise_name: companyName,

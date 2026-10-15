@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { backendApi } from "@/integrations/backend/client";
 import { getMyProfile, updateMyProfile } from "@/lib/profile.functions";
 import logoAsset from "@/assets/bestqhse-logo.png.asset.json";
+import { BackButton } from "@/components/app/BackButton";
 
 type Section = "dashboard" | "plaintes" | "notifications" | "satisfaction" | "profil" | "aide";
 const SECTIONS: { id: Section; label: string; icon: typeof User }[] = [
@@ -43,7 +44,11 @@ export const Route = createFileRoute("/_authenticated/client")({
       },
     ],
   }),
-  loader: () => getMyProfile(),
+  loader: async () => {
+    const profile = await getMyProfile();
+    if (profile.user_type === "super_admin") throw redirect({ to: "/superadmin" });
+    return profile;
+  },
   component: ClientSpace,
   errorComponent: () => (
     <p className="p-8 text-sm text-muted-foreground">Impossible de charger votre espace.</p>
@@ -117,7 +122,7 @@ const priorityFr = (v: unknown) => PRIORITY_FR[String(v ?? "")] ?? String(v ?? "
 
 function listFrom(payload: unknown): Record<string, unknown>[] {
   const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-  const data = root.data;
+  const data = root["data"];
   return (Array.isArray(data) ? data : Array.isArray(payload) ? payload : []) as Record<
     string,
     unknown
@@ -125,50 +130,50 @@ function listFrom(payload: unknown): Record<string, unknown>[] {
 }
 function normalizeRec(item: Record<string, unknown>, kind: string): Rec {
   const attrs =
-    item.attributes && typeof item.attributes === "object"
-      ? (item.attributes as Record<string, unknown>)
+    item["attributes"] && typeof item["attributes"] === "object"
+      ? (item["attributes"] as Record<string, unknown>)
       : item;
   const rels =
-    item.relationships && typeof item.relationships === "object"
-      ? (item.relationships as Record<string, unknown>)
+    item["relationships"] && typeof item["relationships"] === "object"
+      ? (item["relationships"] as Record<string, unknown>)
       : {};
-  const relSite = (rels.site as Record<string, unknown> | undefined)?.data as
+  const relSite = (rels["site"] as Record<string, unknown> | undefined)?.["data"] as
     Record<string, unknown> | undefined;
   const siteAttrs =
-    relSite?.attributes && typeof relSite.attributes === "object"
-      ? (relSite.attributes as Record<string, unknown>)
+    relSite?.["attributes"] && typeof relSite["attributes"] === "object"
+      ? (relSite["attributes"] as Record<string, unknown>)
       : undefined;
   const status =
     kind === "client_survey" &&
-    ((Array.isArray(attrs.responses) && attrs.responses.length > 0) || attrs.total_score != null)
+    ((Array.isArray(attrs["responses"]) && attrs["responses"].length > 0) || attrs["total_score"] != null)
       ? "Résolue"
-      : clientStatus(attrs.status);
+      : clientStatus(attrs["status"]);
   const siteName =
-    (attrs.site as Record<string, unknown> | undefined)?.name ??
-    siteAttrs?.name ??
-    attrs.client_company ??
-    attrs.site_name;
+    (attrs["site"] as Record<string, unknown> | undefined)?.["name"] ??
+    siteAttrs?.["name"] ??
+    attrs["client_company"] ??
+    attrs["site_name"];
   return {
-    id: String(item.id ?? attrs.id),
+    id: String(item["id"] ?? attrs["id"]),
     kind,
-    reference: String(attrs.reference ?? attrs.ref ?? `${kind}-${item.id ?? ""}`),
-    title: String(attrs.title ?? attrs.subject ?? attrs.name ?? "Sans titre"),
+    reference: String(attrs["reference"] ?? attrs["ref"] ?? `${kind}-${item["id"] ?? ""}`),
+    title: String(attrs["title"] ?? attrs["subject"] ?? attrs["name"] ?? "Sans titre"),
     status,
     data: {
       ...attrs,
-      category_fr: categoryFr(attrs.category),
-      priority_fr: priorityFr(attrs.priority),
-      description: attrs.description ?? attrs.message,
+      category_fr: categoryFr(attrs["category"]),
+      priority_fr: priorityFr(attrs["priority"]),
+      description: attrs["description"] ?? attrs["message"],
       company:
         siteName != null
           ? String(siteName)
-          : attrs.client_company != null
-            ? String(attrs.client_company)
+          : attrs["client_company"] != null
+            ? String(attrs["client_company"])
             : undefined,
       site_name: siteName != null ? String(siteName) : undefined,
     },
-    created_at: String(attrs.created_at ?? new Date().toISOString()),
-    updated_at: String(attrs.updated_at ?? attrs.created_at ?? new Date().toISOString()),
+    created_at: String(attrs["created_at"] ?? new Date().toISOString()),
+    updated_at: String(attrs["updated_at"] ?? attrs["created_at"] ?? new Date().toISOString()),
   };
 }
 
@@ -213,7 +218,7 @@ function useCreate() {
           body: JSON.stringify({
             type: "assistance_request",
             subject: v.title,
-            message: String(v.data.message ?? ""),
+            message: String(v.data["message"] ?? ""),
           }),
         });
       }
@@ -225,20 +230,20 @@ function useCreate() {
         body: JSON.stringify({
           site_id: v.target ? Number(v.target) : undefined,
           title: v.title,
-          description: String(v.data.description ?? ""),
-          category: v.data.category,
-          priority: v.data.priority ?? "medium",
-          customer_name: v.data.customer_name,
-          customer_email: v.data.customer_email,
-          customer_phone: v.data.customer_phone,
-          customer_address: v.data.customer_address,
-          client_name: v.data.customer_name ?? v.data.client_name,
-          client_email: v.data.customer_email ?? v.data.client_email,
-          client_phone: v.data.customer_phone,
-          client_company: v.data.company ?? v.data.client_company,
-          wants_email_response: v.data.wants_email_response ?? true,
-          wants_mail: v.data.wants_email_response ?? true,
-          expected_solution: v.data.expected_solution,
+          description: String(v.data["description"] ?? ""),
+          category: v.data["category"],
+          priority: v.data["priority"] ?? "medium",
+          customer_name: v.data["customer_name"],
+          customer_email: v.data["customer_email"],
+          customer_phone: v.data["customer_phone"],
+          customer_address: v.data["customer_address"],
+          client_name: v.data["customer_name"] ?? v.data["client_name"],
+          client_email: v.data["customer_email"] ?? v.data["client_email"],
+          client_phone: v.data["customer_phone"],
+          client_company: v.data["company"] ?? v.data["client_company"],
+          wants_email_response: v.data["wants_email_response"] ?? true,
+          wants_mail: v.data["wants_email_response"] ?? true,
+          expected_solution: v.data["expected_solution"],
         }),
       });
     },
@@ -262,8 +267,8 @@ function useUpdate() {
     }) => {
       if (v.remove) return backendApi.request(`complaints/${v.id}`, { method: "DELETE" });
       if (v.kind === "client_survey") {
-        const score = Number(v.data.score ?? 0);
-        const responses = Array.isArray(v.data.responses) ? [...v.data.responses, score] : [score];
+        const score = Number(v.data["score"] ?? 0);
+        const responses = Array.isArray(v.data["responses"]) ? [...v.data["responses"], score] : [score];
         return backendApi.request(`satisfaction-surveys/${v.id}`, {
           method: "PUT",
           body: JSON.stringify({
@@ -277,19 +282,19 @@ function useUpdate() {
       // Plainte : seuls title/description/category/priority + satisfaction (1-5) sont
       // persistés côté serveur (voir ComplaintController). Pas de history/unread/rating fantômes.
       const payload: Record<string, unknown> = {};
-      if (v.data.title !== undefined) payload.title = v.data.title;
-      if (v.data.description !== undefined) payload.description = v.data.description;
-      if (v.data.category !== undefined) payload.category = v.data.category;
-      if (v.data.priority !== undefined) payload.priority = v.data.priority;
-      if (v.data.wants_email_response !== undefined)
-        payload.wants_email_response = v.data.wants_email_response;
-      if (v.data.expected_solution !== undefined)
-        payload.expected_solution = v.data.expected_solution;
-      if (v.data.customer_address !== undefined) payload.customer_address = v.data.customer_address;
-      if (v.data.satisfaction_rating !== undefined)
-        payload.satisfaction_rating = v.data.satisfaction_rating;
-      if (v.data.satisfaction_comment !== undefined)
-        payload.satisfaction_comment = v.data.satisfaction_comment;
+      if (v.data["title"] !== undefined) payload["title"] = v.data["title"];
+      if (v.data["description"] !== undefined) payload["description"] = v.data["description"];
+      if (v.data["category"] !== undefined) payload["category"] = v.data["category"];
+      if (v.data["priority"] !== undefined) payload["priority"] = v.data["priority"];
+      if (v.data["wants_email_response"] !== undefined)
+        payload["wants_email_response"] = v.data["wants_email_response"];
+      if (v.data["expected_solution"] !== undefined)
+        payload["expected_solution"] = v.data["expected_solution"];
+      if (v.data["customer_address"] !== undefined) payload["customer_address"] = v.data["customer_address"];
+      if (v.data["satisfaction_rating"] !== undefined)
+        payload["satisfaction_rating"] = v.data["satisfaction_rating"];
+      if (v.data["satisfaction_comment"] !== undefined)
+        payload["satisfaction_comment"] = v.data["satisfaction_comment"];
       return backendApi.request(`complaints/${v.id}`, {
         method: "PUT",
         body: JSON.stringify(payload),
@@ -406,6 +411,7 @@ function ClientSpace() {
           >
             <Menu className="h-5 w-5" />
           </button>
+          <BackButton fallback="/client" />
           <h1 className="font-display text-lg font-bold text-foreground">
             {SECTIONS.find((x) => x.id === s)?.label}
           </h1>
@@ -549,15 +555,15 @@ function Complaints({ complaints }: { complaints: Rec[] }) {
         const payload = await backendApi.request<unknown>(path);
         return listFrom(payload).map((item) => {
           const attrs =
-            item.attributes && typeof item.attributes === "object"
-              ? (item.attributes as Record<string, unknown>)
+            item["attributes"] && typeof item["attributes"] === "object"
+              ? (item["attributes"] as Record<string, unknown>)
               : (item as Record<string, unknown>);
           const label =
-            (item as Record<string, unknown>).label ??
-            attrs.label ??
-            `${String(attrs.name ?? "Site")}${attrs.city ? ` - ${String(attrs.city)}` : attrs.location ? ` - ${String(attrs.location)}` : ""}`;
+            (item as Record<string, unknown>)["label"] ??
+            attrs["label"] ??
+            `${String(attrs["name"] ?? "Site")}${attrs["city"] ? ` - ${String(attrs["city"])}` : attrs["location"] ? ` - ${String(attrs["location"])}` : ""}`;
           return {
-            id: String(item.id ?? attrs.id),
+            id: String(item["id"] ?? attrs["id"]),
             name: String(label),
           };
         });
@@ -565,12 +571,12 @@ function Complaints({ complaints }: { complaints: Rec[] }) {
         const payload = await backendApi.request<unknown>("sites?per_page=100");
         return listFrom(payload).map((item) => {
           const attrs =
-            item.attributes && typeof item.attributes === "object"
-              ? (item.attributes as Record<string, unknown>)
+            item["attributes"] && typeof item["attributes"] === "object"
+              ? (item["attributes"] as Record<string, unknown>)
               : (item as Record<string, unknown>);
           return {
-            id: String(item.id ?? attrs.id),
-            name: String(attrs.name ?? attrs.location ?? "Site"),
+            id: String(item["id"] ?? attrs["id"]),
+            name: String(attrs["name"] ?? attrs["location"] ?? "Site"),
           };
         });
       }

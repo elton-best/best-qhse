@@ -923,6 +923,8 @@ class UserController extends Controller
                 'data' => new UserResource($user->load(['enterprise', 'site'])),
                 'message' => 'Profile updated successfully'
             ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,

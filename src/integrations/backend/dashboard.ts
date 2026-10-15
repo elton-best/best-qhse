@@ -116,8 +116,8 @@ function normalizeStats(value: Partial<DashboardStats> | undefined): DashboardSt
 
 function normalizeDashboard(payload: DashboardResponse): DashboardPayload {
   const data = payload.data && typeof payload.data === "object" ? payload.data : payload;
-  const charts = data.charts ?? {};
-  const rawDistribution = charts.distribution ?? {};
+  const charts: Partial<DashboardPayload["charts"]> = data.charts ?? {};
+  const rawDistribution: Partial<DashboardPayload["charts"]["distribution"]> = charts.distribution ?? {};
   return {
     stats: normalizeStats(data.stats),
     leadership: {
@@ -157,7 +157,7 @@ function normalizeDashboard(payload: DashboardResponse): DashboardPayload {
           created_at: String(item.created_at ?? ""),
         }))
       : [],
-    scope: data.scope,
+    ...(data.scope ? { scope: data.scope } : {}),
   };
 }
 
@@ -202,8 +202,8 @@ function normalizeCollaboratorActions(payload: CollaboratorResponse): Collaborat
 }
 
 export async function fetchDashboardStats(params?: {
-  site_id?: string;
-  scope?: "enterprise" | "site";
+  site_id?: string | undefined;
+  scope?: "enterprise" | "site" | undefined;
 }) {
   const query = new URLSearchParams();
   if (params?.site_id) query.set("site_id", params.site_id);
@@ -214,10 +214,10 @@ export async function fetchDashboardStats(params?: {
 }
 
 export async function fetchCollaboratorActions(params?: {
-  site_id?: string;
-  scope?: "enterprise" | "site";
-  include_closed?: boolean;
-  per_page?: number;
+  site_id?: string | undefined;
+  scope?: "enterprise" | "site" | undefined;
+  include_closed?: boolean | undefined;
+  per_page?: number | undefined;
 }) {
   const query = new URLSearchParams();
   if (params?.site_id) query.set("site_id", params.site_id);
@@ -232,7 +232,7 @@ export async function fetchCollaboratorActions(params?: {
   return normalizeCollaboratorActions(payload);
 }
 
-export function useDashboardStats(params?: { site_id?: string; scope?: "enterprise" | "site" }) {
+export function useDashboardStats(params?: { site_id?: string | undefined; scope?: "enterprise" | "site" | undefined }) {
   return useQuery({
     queryKey: [...DASHBOARD_STATS_KEY, params ?? {}],
     queryFn: () => fetchDashboardStats(params),
@@ -242,10 +242,10 @@ export function useDashboardStats(params?: { site_id?: string; scope?: "enterpri
 }
 
 export function useCollaboratorActions(params?: {
-  site_id?: string;
-  scope?: "enterprise" | "site";
-  include_closed?: boolean;
-  per_page?: number;
+  site_id?: string | undefined;
+  scope?: "enterprise" | "site" | undefined;
+  include_closed?: boolean | undefined;
+  per_page?: number | undefined;
 }) {
   return useQuery({
     queryKey: [...COLLABORATOR_ACTIONS_KEY, params ?? {}],

@@ -33,6 +33,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'force.company'                => \App\Http\Middleware\ForceCompanySetup::class,
             'check.subscription'           => \App\Http\Middleware\CheckSubscriptionStatus::class,
             'check.module'                 => \App\Http\Middleware\CheckSubModuleAccess::class,
+            'module.subscribed'            => \App\Http\Middleware\EnsureSubModuleSubscribed::class,
             'ensure.ownership'             => \App\Http\Middleware\EnsureEnterpriseOwnership::class,
             'mfa.stepup'                   => \App\Http\Middleware\EnsureMfaStepUp::class,
             'security.audit'               => \App\Http\Middleware\SecurityAuditMiddleware::class,

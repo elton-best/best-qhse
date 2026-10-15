@@ -5,6 +5,7 @@ namespace App\Modules\Hse\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\Ipe;
 use App\Models\IpeValeur;
+use App\Models\Site;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
@@ -44,7 +45,15 @@ class IpeController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $data = $request->all();
+        $siteBelongsToEnterprise = Site::query()
+            ->whereKey($request->input('site_id'))
+            ->where('enterprise_id', $request->user()->enterprise_id)
+            ->exists();
+        if (! $siteBelongsToEnterprise) {
+            return response()->json(['errors' => ['site_id' => ['Site non autorisé pour votre entreprise.']]], 422);
+        }
+
+        $data = $validator->validated();
         $data['enterprise_id'] = $request->user()->enterprise_id;
 
         $ipe = Ipe::create($data);
@@ -63,6 +72,12 @@ class IpeController extends Controller
         $ipe = Ipe::findOrFail($id);
 
         $validator = Validator::make($request->all(), [
+            'nom' => 'sometimes|string|max:255',
+            'description' => 'nullable|string',
+            'formule_calcul' => 'sometimes|string|max:255',
+            'unite' => 'sometimes|string|max:50',
+            'date_reference' => 'nullable|date',
+            'periodicite' => 'sometimes|in:journalier,hebdomadaire,mensuel,trimestriel,annuel',
             'valeur_reference' => 'nullable|numeric',
             'objectif_cible' => 'nullable|numeric',
             'actif' => 'sometimes|boolean',
@@ -72,7 +87,7 @@ class IpeController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $ipe->update($request->all());
+        $ipe->update($validator->validated());
 
         return response()->json($ipe->load('site'));
     }
@@ -100,8 +115,8 @@ class IpeController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $data = $request->all();
-        $data['ipe_id'] = $id;
+        $data = $validator->validated();
+        $data['ipe_id'] = $ipe->id;
 
         if ($ipe->valeur_reference) {
             $data['ecart_reference'] = $data['valeur'] - $ipe->valeur_reference;
@@ -118,6 +133,7 @@ class IpeController extends Controller
 
     public function valeurs(Request $request, $id)
     {
+        Ipe::findOrFail($id);
         $valeurs = IpeValeur::where('ipe_id', $id)
             ->orderBy('periode_debut', 'desc')
             ->get();
@@ -127,6 +143,7 @@ class IpeController extends Controller
 
     public function tendance(Request $request, $id)
     {
+        Ipe::findOrFail($id);
         $valeurs = IpeValeur::where('ipe_id', $id)
             ->orderBy('periode_debut')
             ->get()

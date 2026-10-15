@@ -19,10 +19,10 @@ export const EMERGENCY_KEY = ["emergency-procedures"] as const;
 function listOf(payload: unknown): Record<string, unknown>[] {
   const root =
     payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-  const data = root.data ?? payload;
+  const data = root["data"] ?? payload;
   if (Array.isArray(data)) return data.map(flattenResource);
   if (data && typeof data === "object") {
-    const nested = (data as Record<string, unknown>).data;
+    const nested = (data as Record<string, unknown>)["data"];
     if (Array.isArray(nested)) return nested.map(flattenResource);
   }
   return [];
@@ -31,7 +31,7 @@ function listOf(payload: unknown): Record<string, unknown>[] {
 function dataOf<T>(payload: unknown): T {
   const root =
     payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-  return ((root.data ?? payload) as T);
+  return ((root["data"] ?? payload) as T);
 }
 
 // --- Familles de risques DUERP ---
@@ -275,12 +275,12 @@ export async function fetchHabilitations(params?: { per_page?: number; status?: 
   const payload = await backendApi.request<unknown>(`habilitations?${query.toString()}`);
   const root =
     payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-  const data = (root.data ?? payload) as unknown;
+  const data = (root["data"] ?? payload) as unknown;
   // Laravel paginate: { data: [...] } — collection directe sinon
   const items = Array.isArray(data)
     ? data
-    : Array.isArray((data as Record<string, unknown>)?.data)
-      ? ((data as Record<string, unknown>).data as unknown[])
+    : Array.isArray((data as Record<string, unknown>)?.["data"])
+      ? ((data as Record<string, unknown>)["data"] as unknown[])
       : [];
   return items.map(flattenResource);
 }

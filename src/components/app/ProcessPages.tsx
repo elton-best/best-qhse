@@ -27,6 +27,7 @@ import {
   Users,
   X,
   Zap,
+  type LucideIcon,
 } from "lucide-react";
 import { useCurrentSite } from "@/hooks/use-workspace";
 import {
@@ -90,7 +91,7 @@ const EMPTY_FORM = {
   sequences: [] as SequenceForm[],
 };
 type SequenceForm = {
-  id?: string;
+  id?: string | undefined;
   sequence_order: number;
   input_description: string;
   activity_description: string;
@@ -98,9 +99,9 @@ type SequenceForm = {
   sub_activities: string[];
   supplier_processes: string[];
   client_processes: string[];
-  responsible_user_id?: string;
-  duration_minutes?: number;
-  documents?: Record<string, unknown>[];
+  responsible_user_id?: string | undefined;
+  duration_minutes?: number | undefined;
+  documents?: Record<string, unknown>[] | undefined;
 };
 type ProcessForm = Omit<typeof EMPTY_FORM, "sequences"> & { sequences: SequenceForm[] };
 
@@ -154,7 +155,7 @@ function asArray(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload;
   if (payload && typeof payload === "object") {
     const root = payload as Record<string, unknown>;
-    if (Array.isArray(root.data)) return root.data;
+    if (Array.isArray(root["data"])) return root["data"];
   }
   return [];
 }
@@ -169,8 +170,8 @@ function useProcessLookups(siteId: string) {
       return asArray(payload).map((item) => {
         const value = flattenResource(item);
         return {
-          id: String(value.id),
-          name: String(value.full_name ?? value.name ?? value.email ?? "Collaborateur"),
+          id: String(value["id"]),
+          name: String(value["full_name"] ?? value["name"] ?? value["email"] ?? "Collaborateur"),
         };
       });
     },
@@ -184,14 +185,14 @@ function useProcessLookups(siteId: string) {
       const root =
         payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
       return asArray(
-        root.norms ??
-          (root.data && typeof root.data === "object"
-            ? (root.data as Record<string, unknown>).norms
+        root["norms"] ??
+          (root["data"] && typeof root["data"] === "object"
+            ? (root["data"] as Record<string, unknown>)["norms"]
             : []),
       )
         .map((item) => {
           const value = flattenResource(item);
-          return String(value.code ?? value.name ?? "");
+          return String(value["code"] ?? value["name"] ?? "");
         })
         .filter(Boolean);
     },
@@ -207,7 +208,7 @@ function useProcessLookups(siteId: string) {
 }
 
 function laneOf(item: Record<string, unknown>) {
-  const value = String(item.normalized_category ?? item.category ?? item.type ?? "").toLowerCase();
+  const value = String(item["normalized_category"] ?? item["category"] ?? item["type"] ?? "").toLowerCase();
   if (["management", "pilotage", "mesure_amelioration", "direction"].includes(value))
     return "management";
   if (["support", "soutien", "ressource", "ressources"].includes(value)) return "support";
@@ -221,14 +222,14 @@ function matchesQuery(item: Record<string, unknown>, query: string) {
   const needle = query.toLowerCase().trim();
   if (!needle) return true;
   const haystack = [
-    item.title ?? item.name,
-    item.code,
-    item.pilot_name,
-    item.responsible_display,
-    item.department,
-    item.activities_summary,
-    item.inputs_summary,
-    item.outputs_summary,
+    item["title"] ?? item["name"],
+    item["code"],
+    item["pilot_name"],
+    item["responsible_display"],
+    item["department"],
+    item["activities_summary"],
+    item["inputs_summary"],
+    item["outputs_summary"],
   ]
     .map((value) => String(value ?? ""))
     .join(" ")
@@ -478,15 +479,15 @@ export function ProcessManagementPage() {
                             <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
                           </div>
                           <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">
-                            {String(item.finalite ?? item.purpose ?? "Finalité à documenter")}
+                            {String(item["finalite"] ?? item["purpose"] ?? "Finalité à documenter")}
                           </p>
                           <p className="mt-2 text-xs text-muted-foreground">
                             Pilote :{" "}
                             <span className="font-bold text-foreground">
-                              {String(item.pilot_name ?? item.responsible_display ?? "Non assigné")}
+                              {String(item["pilot_name"] ?? item["responsible_display"] ?? "Non assigné")}
                             </span>{" "}
-                            · {String(item.indicators_count ?? 0)} indicateur(s) ·{" "}
-                            {String(item.risks_count ?? 0)} risque(s)
+                            · {String(item["indicators_count"] ?? 0)} indicateur(s) ·{" "}
+                            {String(item["risks_count"] ?? 0)} risque(s)
                           </p>
                           <div className="mt-4 flex flex-wrap justify-between gap-2 border-t border-black/5 pt-3">
                             <Link
@@ -694,13 +695,13 @@ export function ProcessManagementPage() {
                       </span>
                     </td>
                     <td className="max-w-[320px] px-3 py-2 text-muted-foreground">
-                      {String(item.activities_summary ?? item.purpose ?? "—")}
+                      {String(item["activities_summary"] ?? item["purpose"] ?? "—")}
                     </td>
                     <td className="max-w-[220px] px-3 py-2 text-muted-foreground">
-                      {String(item.observation ?? "—") || "—"}
+                      {String(item["observation"] ?? "—") || "—"}
                     </td>
                     <td className="px-3 py-2">
-                      {String(item.responsible_display ?? item.pilot_name ?? "Non assigné")}
+                      {String(item["responsible_display"] ?? item["pilot_name"] ?? "Non assigné")}
                     </td>
                   </tr>
                 ))}
@@ -892,16 +893,16 @@ export function ProcessEditorPage({ processId }: { processId?: string }) {
     if (!existing) return;
     setForm({
       ...initialForm(siteId),
-      title: String(existing.title ?? existing.name ?? ""),
-      purpose: String(existing.purpose ?? existing.finalite ?? ""),
-      type: String(existing.category ?? existing.type ?? ""),
-      pilot_id: existing.pilot_id ? String(existing.pilot_id) : "",
-      copilot_id: existing.copilot_id ? String(existing.copilot_id) : "",
-      aspect_qualite: Boolean(existing.aspect_qualite),
-      aspect_environnement: Boolean(existing.aspect_environnement),
-      aspect_sante_securite: Boolean(existing.aspect_sante_securite),
-      normes_iso: Array.isArray(existing.normes_iso) ? existing.normes_iso.map(String) : [],
-      sequences: normalizeProcessSequences(existing.sequences),
+      title: String(existing["title"] ?? existing["name"] ?? ""),
+      purpose: String(existing["purpose"] ?? existing["finalite"] ?? ""),
+      type: String(existing["category"] ?? existing["type"] ?? ""),
+      pilot_id: existing["pilot_id"] ? String(existing["pilot_id"]) : "",
+      copilot_id: existing["copilot_id"] ? String(existing["copilot_id"]) : "",
+      aspect_qualite: Boolean(existing["aspect_qualite"]),
+      aspect_environnement: Boolean(existing["aspect_environnement"]),
+      aspect_sante_securite: Boolean(existing["aspect_sante_securite"]),
+      normes_iso: Array.isArray(existing["normes_iso"]) ? existing["normes_iso"].map(String) : [],
+      sequences: normalizeProcessSequences(existing["sequences"]),
     });
   }, [existing, siteId]);
   if (!siteId)
@@ -974,7 +975,7 @@ export function ProcessEditorPage({ processId }: { processId?: string }) {
           aspect_sante_securite: form.aspect_sante_securite,
           normes_iso: form.normes_iso,
           sequences: form.sequences,
-          status: existing?.status ?? "draft",
+          status: existing?.["status"] ?? "draft",
         },
       });
       toast.success(editing ? "Processus mis à jour." : "Processus créé.");
@@ -1114,7 +1115,7 @@ export function ProcessEditorPage({ processId }: { processId?: string }) {
                 </p>
               </div>
               <div className="grid gap-4 md:grid-cols-3">
-                {[
+                {([
                   [
                     "aspect_qualite",
                     "Qualité",
@@ -1136,7 +1137,7 @@ export function ProcessEditorPage({ processId }: { processId?: string }) {
                     CircleAlert,
                     "border-destructive bg-destructive/10",
                   ],
-                ].map(([key, label, code, Icon, activeClass]) => {
+                ] as [string, string, string, LucideIcon, string][]).map(([key, label, code, Icon, activeClass]) => {
                   const active = Boolean(form[key as keyof ProcessForm]);
                   return (
                     <button
@@ -1428,8 +1429,8 @@ export function ProcessSequencesPage({ processId }: { processId: string }) {
       ).map((item) => {
         const value = flattenResource(item);
         return {
-          id: String(value.id),
-          name: String(value.full_name ?? value.name ?? value.email ?? "Collaborateur"),
+          id: String(value["id"]),
+          name: String(value["full_name"] ?? value["name"] ?? value["email"] ?? "Collaborateur"),
         };
       }),
     enabled: Boolean(siteId),
@@ -1437,7 +1438,7 @@ export function ProcessSequencesPage({ processId }: { processId: string }) {
   });
 
   useEffect(() => {
-    if (process) setSequences(normalizeProcessSequences(process.sequences));
+    if (process) setSequences(normalizeProcessSequences(process["sequences"]));
   }, [process]);
 
   const update = (index: number, key: keyof SequenceForm, value: unknown) =>
@@ -1452,7 +1453,11 @@ export function ProcessSequencesPage({ processId }: { processId: string }) {
       const target = index + direction;
       if (target < 0 || target >= current.length) return current;
       const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
+      const moved = next[index];
+      const swapped = next[target];
+      if (!moved || !swapped) return current;
+      next[index] = swapped;
+      next[target] = moved;
       return next.map((item, itemIndex) => ({ ...item, sequence_order: itemIndex + 1 }));
     });
   const remove = async (index: number) => {
@@ -1496,7 +1501,7 @@ export function ProcessSequencesPage({ processId }: { processId: string }) {
             : null,
           duration_minutes: sequence.duration_minutes ? Number(sequence.duration_minutes) : null,
           document_ids: (sequence.documents ?? [])
-            .map((document) => Number(document.id))
+            .map((document) => Number(document["id"]))
             .filter(Boolean),
         };
         if (sequence.id) await updateProcessSequence(processId, sequence.id, payload);
@@ -1535,7 +1540,7 @@ export function ProcessSequencesPage({ processId }: { processId: string }) {
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-8">
       <Header
-        title={`Séquences — ${String(process?.title ?? process?.name ?? "Processus")}`}
+        title={`Séquences — ${String(process?.["title"] ?? process?.["name"] ?? "Processus")}`}
         description="Cette page est dédiée aux séquences. Les informations générales du processus sont enregistrées séparément."
       >
         <button
@@ -1732,10 +1737,10 @@ export function ProcessSequencesPage({ processId }: { processId: string }) {
                   <span className="text-xs font-bold text-muted-foreground">Documents :</span>
                   {(sequence.documents ?? []).map((document) => (
                     <span
-                      key={String(document.id)}
+                      key={String(document["id"])}
                       className="rounded-full bg-primary-soft px-2 py-1 text-xs font-semibold text-primary"
                     >
-                      {String(document.title ?? document.code ?? document.id)}
+                      {String(document["title"] ?? document["code"] ?? document["id"])}
                     </span>
                   ))}
                 </div>

@@ -20,6 +20,7 @@ import {
   Wrench,
   X,
   Zap,
+  ArrowRight,
 } from "lucide-react";
 import { backendApi } from "@/integrations/backend/client";
 import { normalizeProcessSequences, useProcess } from "@/integrations/backend/processes";
@@ -42,18 +43,18 @@ type ResourceGroups = Record<
   ResourceItem[]
 >;
 type Objective = {
-  id?: string;
+  id?: string | undefined;
   title: string;
   description: string;
-  indicator_id?: string;
+  indicator_id?: string | undefined;
   indicator_name: string;
   target_value: string;
   target_date: string;
-  status?: string;
-  achievement_percentage?: number;
+  status?: string | undefined;
+  achievement_percentage?: number | undefined;
 };
 type Risk = {
-  id?: string;
+  id?: string | undefined;
   type: "risque" | "opportunite";
   title: string;
   description: string;
@@ -110,7 +111,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 function asArray(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   const root = asRecord(value);
-  if (Array.isArray(root.data)) return root.data;
+  if (Array.isArray(root["data"])) return root["data"];
   return [];
 }
 
@@ -119,7 +120,7 @@ function stringList(value: unknown): string[] {
     return value
       .map((item) =>
         item && typeof item === "object"
-          ? String(asRecord(item).name ?? asRecord(item).title ?? asRecord(item).label ?? "")
+          ? String(asRecord(item)["name"] ?? asRecord(item)["title"] ?? asRecord(item)["label"] ?? "")
           : String(item ?? ""),
       )
       .map((item) => item.trim())
@@ -139,8 +140,8 @@ function stringList(value: unknown): string[] {
 
 function currentIndicatorValue(indicator: Indicator): string {
   const values = asArray(indicator.values);
-  const latest = values[0] && typeof values[0] === "object" ? asRecord(values[0]).value : undefined;
-  return String(indicator.current_value ?? latest ?? "N/A");
+  const latest = values[0] && typeof values[0] === "object" ? asRecord(values[0])["value"] : undefined;
+  return String(indicator["current_value"] ?? latest ?? "N/A");
 }
 
 function resourceGroups(value: unknown): ResourceGroups {
@@ -148,21 +149,21 @@ function resourceGroups(value: unknown): ResourceGroups {
   const make = (candidate: unknown): ResourceItem[] =>
     stringList(candidate).map((name) => ({ name }));
   return {
-    human: Array.isArray(root.human) ? root.human.map(resourceItem) : make(root.human),
-    technological: Array.isArray(root.technological)
-      ? root.technological.map(resourceItem)
-      : make(root.technological),
-    material: Array.isArray(root.material) ? root.material.map(resourceItem) : make(root.material),
-    documentary: Array.isArray(root.documentary)
-      ? root.documentary.map(resourceItem)
-      : make(root.documentary),
+    human: Array.isArray(root["human"]) ? root["human"].map(resourceItem) : make(root["human"]),
+    technological: Array.isArray(root["technological"])
+      ? root["technological"].map(resourceItem)
+      : make(root["technological"]),
+    material: Array.isArray(root["material"]) ? root["material"].map(resourceItem) : make(root["material"]),
+    documentary: Array.isArray(root["documentary"])
+      ? root["documentary"].map(resourceItem)
+      : make(root["documentary"]),
   };
 }
 
 function resourceItem(value: unknown): ResourceItem {
   if (value && typeof value === "object") {
     const row = asRecord(value);
-    return { ...row, name: String(row.name ?? row.title ?? "").trim() } as ResourceItem;
+    return { ...row, name: String(row["name"] ?? row["title"] ?? "").trim() } as ResourceItem;
   }
   return { name: String(value ?? "").trim() };
 }
@@ -182,9 +183,9 @@ function emptyRisk(type: Risk["type"]): Risk {
     actions_prevues: "",
   };
 }
-function emptySequence() {
+function emptySequence(sequence_order = 1) {
   return {
-    sequence_order: 1,
+    sequence_order,
     input_description: "",
     activity_description: "",
     output_description: "",
@@ -598,10 +599,10 @@ export function ProcessFullPage({
         ),
       ).map((item) => {
         const row = asRecord(item);
-        const attrs = asRecord(row.attributes ?? row);
+        const attrs = asRecord(row["attributes"] ?? row);
         return {
-          id: String(row.id ?? attrs.id),
-          name: String(attrs.full_name ?? attrs.name ?? attrs.email ?? "Collaborateur"),
+          id: String(row["id"] ?? attrs["id"]),
+          name: String(attrs["full_name"] ?? attrs["name"] ?? attrs["email"] ?? "Collaborateur"),
         };
       }),
     enabled: Boolean(siteId),
@@ -611,10 +612,10 @@ export function ProcessFullPage({
     queryKey: ["process-full-norms"],
     queryFn: async () => {
       const root = asRecord(await backendApi.request<unknown>("access/catalog"));
-      return asArray(root.norms ?? asRecord(root.data).norms)
+      return asArray(root["norms"] ?? asRecord(root["data"])["norms"])
         .map((item) => {
           const row = asRecord(item);
-          return String(row.code ?? row.name ?? "");
+          return String(row["code"] ?? row["name"] ?? "");
         })
         .filter(Boolean);
     },
@@ -667,75 +668,75 @@ export function ProcessFullPage({
   useEffect(() => {
     if (!existing) return;
     setForm({
-      title: String(existing.title ?? existing.name ?? ""),
-      category: String(existing.category ?? existing.type ?? "pilotage"),
-      purpose: String(existing.purpose ?? existing.finalite ?? ""),
-      observation: String(existing.observation ?? ""),
-      interfaces: stringList(existing.interfaces),
-      pilot_id: existing.pilot_id ? String(existing.pilot_id) : "",
-      copilot_ids: Array.isArray(existing.copilot_ids)
-        ? existing.copilot_ids.map(String)
-        : existing.copilot_id
-          ? [String(existing.copilot_id)]
+      title: String(existing["title"] ?? existing["name"] ?? ""),
+      category: String(existing["category"] ?? existing["type"] ?? "pilotage"),
+      purpose: String(existing["purpose"] ?? existing["finalite"] ?? ""),
+      observation: String(existing["observation"] ?? ""),
+      interfaces: stringList(existing["interfaces"]),
+      pilot_id: existing["pilot_id"] ? String(existing["pilot_id"]) : "",
+      copilot_ids: Array.isArray(existing["copilot_ids"])
+        ? existing["copilot_ids"].map(String)
+        : existing["copilot_id"]
+          ? [String(existing["copilot_id"])]
           : [],
-      aspect_qualite: Boolean(existing.aspect_qualite),
-      aspect_environnement: Boolean(existing.aspect_environnement),
-      aspect_sante_securite: Boolean(existing.aspect_sante_securite),
-      normes_iso: Array.isArray(existing.normes_iso) ? existing.normes_iso.map(String) : [],
+      aspect_qualite: Boolean(existing["aspect_qualite"]),
+      aspect_environnement: Boolean(existing["aspect_environnement"]),
+      aspect_sante_securite: Boolean(existing["aspect_sante_securite"]),
+      normes_iso: Array.isArray(existing["normes_iso"]) ? existing["normes_iso"].map(String) : [],
     });
-    const loadedSequences = normalizeProcessSequences(existing.sequences);
+    const loadedSequences = normalizeProcessSequences(existing["sequences"]);
     setSequences(loadedSequences.length > 0 ? loadedSequences : [emptySequence()]);
-    setResources(resourceGroups(existing.ressources ?? existing.resources));
+    setResources(resourceGroups(existing["ressources"] ?? existing["resources"]));
     setObjectives(
-      asArray(existing.objectives).map((item) => {
+      asArray(existing["objectives"]).map((item) => {
         const row = asRecord(item);
-        const indicator = asRecord(row.indicator);
+        const indicator = asRecord(row["indicator"]);
         return {
-          id: row.id == null ? undefined : String(row.id),
-          title: String(row.title ?? ""),
-          description: String(row.description ?? ""),
-          indicator_id: row.indicator_id == null ? undefined : String(row.indicator_id),
-          indicator_name: String(row.indicator_name ?? indicator.name ?? ""),
-          target_value: String(row.target_value ?? ""),
-          target_date: String(row.target_date ?? ""),
-          status: String(row.status ?? "not_started"),
-          achievement_percentage: Number(row.achievement_percentage ?? 0),
+          id: row["id"] == null ? undefined : String(row["id"]),
+          title: String(row["title"] ?? ""),
+          description: String(row["description"] ?? ""),
+          indicator_id: row["indicator_id"] == null ? undefined : String(row["indicator_id"]),
+          indicator_name: String(row["indicator_name"] ?? indicator["name"] ?? ""),
+          target_value: String(row["target_value"] ?? ""),
+          target_date: String(row["target_date"] ?? ""),
+          status: String(row["status"] ?? "not_started"),
+          achievement_percentage: Number(row["achievement_percentage"] ?? 0),
         };
       }),
     );
     setRisks(
-      asArray(existing.risks_opportunities ?? existing.risks).map((item) => {
+      asArray(existing["risks_opportunities"] ?? existing["risks"]).map((item) => {
         const row = asRecord(item);
-        const type = String(row.type ?? "risque")
+        const type = String(row["type"] ?? "risque")
           .toLowerCase()
           .includes("opportun")
           ? "opportunite"
           : "risque";
         return {
-          id: row.id == null ? undefined : String(row.id),
+          id: row["id"] == null ? undefined : String(row["id"]),
           type,
-          title: String(row.title ?? ""),
-          description: String(row.description ?? row.title ?? ""),
-          normes_iso: stringList(row.normes_iso ?? row.norms),
-          probabilite: Number(row.probabilite ?? 3),
-          gravite: Number(row.gravite ?? 3),
-          strategie: String(row.strategie ?? (type === "risque" ? "reduire" : "exploiter")),
-          actions_prevues: String(row.actions_prevues ?? ""),
+          title: String(row["title"] ?? ""),
+          description: String(row["description"] ?? row["title"] ?? ""),
+          normes_iso: stringList(row["normes_iso"] ?? row["norms"]),
+          probabilite: Number(row["probabilite"] ?? 3),
+          gravite: Number(row["gravite"] ?? 3),
+          strategie: String(row["strategie"] ?? (type === "risque" ? "reduire" : "exploiter")),
+          actions_prevues: String(row["actions_prevues"] ?? ""),
         };
       }),
     );
     setIndicators(
-      asArray(existing.indicators).map((item) => {
+      asArray(existing["indicators"]).map((item) => {
         const row = asRecord(item);
         return {
           ...row,
-          id: String(row.id),
-          name: String(row.name ?? ""),
-          type: String(row.type ?? "performance"),
-          category: String(row.category ?? "global"),
-          unit: String(row.unit ?? "%"),
-          target_value: row.target_value as number | string,
-          description: String(row.description ?? ""),
+          id: String(row["id"]),
+          name: String(row["name"] ?? ""),
+          type: String(row["type"] ?? "performance"),
+          category: String(row["category"] ?? "global"),
+          unit: String(row["unit"] ?? "%"),
+          target_value: row["target_value"] as number | string,
+          description: String(row["description"] ?? ""),
         };
       }),
     );
@@ -745,7 +746,7 @@ export function ProcessFullPage({
     if (!processId || activeTab !== "versions") return;
     void backendApi
       .request<unknown>(`processes/${processId}/versions`)
-      .then((payload) => setVersions(asArray(payload)))
+      .then((payload) => setVersions(asArray(payload).map(asRecord)))
       .catch(() => toast.error("Impossible de charger l'historique des versions."));
   }, [processId, activeTab]);
 
@@ -773,8 +774,8 @@ export function ProcessFullPage({
 
   const persistChildren = async (id: string, isUpdate: boolean) => {
     const originalObjectiveIds = new Set(
-      asArray(existing?.objectives)
-        .map((item) => String(asRecord(item).id))
+      asArray(existing?.["objectives"])
+        .map((item) => String(asRecord(item)["id"]))
         .filter(Boolean),
     );
     for (const objectiveId of originalObjectiveIds)
@@ -803,8 +804,8 @@ export function ProcessFullPage({
         });
     }
     const originalRiskIds = new Set(
-      asArray(existing?.risks_opportunities ?? existing?.risks)
-        .map((item) => String(asRecord(item).id))
+      asArray(existing?.["risks_opportunities"] ?? existing?.["risks"])
+        .map((item) => String(asRecord(item)["id"]))
         .filter(Boolean),
     );
     for (const riskId of originalRiskIds)
@@ -916,7 +917,7 @@ export function ProcessFullPage({
           supplier_processes: stringList(sequence.supplier_processes),
           client_processes: stringList(sequence.client_processes),
           document_ids: (sequence.documents ?? [])
-            .map((document: Record<string, unknown>) => Number(document.id))
+            .map((document: Record<string, unknown>) => Number(document["id"]))
             .filter(Boolean),
         })),
       };
@@ -925,8 +926,8 @@ export function ProcessFullPage({
         { method: processId ? "PUT" : "POST", body: JSON.stringify(payload) },
       );
       const root = asRecord(response);
-      const data = asRecord(root.data);
-      const id = String(data.id ?? asRecord(data.attributes).id ?? root.id ?? processId ?? "");
+      const data = asRecord(root["data"]);
+      const id = String(data["id"] ?? asRecord(data["attributes"])["id"] ?? root["id"] ?? processId ?? "");
       if (!id) throw new Error("Le processus n'a pas retourné d'identifiant.");
       await persistChildren(id, Boolean(processId));
       await persistIndicators(id, !processId);
@@ -997,14 +998,14 @@ export function ProcessFullPage({
           }),
         },
       );
-      const row = asRecord(asRecord(response).data);
+      const row = asRecord(asRecord(response)["data"]);
       const normalized = {
         ...row,
-        id: String(row.id),
-        name: String(row.name),
-        type: String(row.type),
-        category: String(row.category),
-        unit: String(row.unit),
+        id: String(row["id"]),
+        name: String(row["name"]),
+        type: String(row["type"]),
+        category: String(row["category"]),
+        unit: String(row["unit"]),
       } as Indicator;
       setIndicators((current) =>
         editingIndicatorId
@@ -1083,7 +1084,7 @@ export function ProcessFullPage({
       });
       setVersionDescription("");
       const response = await backendApi.request<unknown>(`processes/${processId}/versions`);
-      setVersions(asArray(response));
+      setVersions(asArray(response).map(asRecord));
       toast.success("Version créée.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Impossible de créer la version.");
@@ -1096,7 +1097,7 @@ export function ProcessFullPage({
         method: "POST",
       });
       const response = await backendApi.request<unknown>(`processes/${processId}/versions`);
-      setVersions(asArray(response));
+      setVersions(asArray(response).map(asRecord));
       toast.success(action === "verify" ? "Version vérifiée." : "Version approuvée.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Action sur la version impossible.");
@@ -1191,7 +1192,7 @@ export function ProcessFullPage({
       </div>
     );
   if (processId && tab === "sequences") return <ProcessSequencesPage processId={processId} />;
-  const status = String(existing?.status ?? "draft");
+  const status = String(existing?.["status"] ?? "draft");
   const processNames = (usersQuery.data ?? []).map((user) => user.name);
   const tabLabel = tabs.find(([value]) => value === tab)?.[1] ?? "Général";
   const creationIndex = creationTabs.findIndex(([value]) => value === tab);
@@ -1407,11 +1408,11 @@ export function ProcessFullPage({
             </div>
           </div>
           <div className="mt-6 grid gap-3 md:grid-cols-3">
-            {[
+            {([
               ["aspect_qualite", "Qualité"],
               ["aspect_environnement", "Environnement"],
               ["aspect_sante_securite", "Santé & sécurité"],
-            ].map(([key, label]) => (
+            ] as [string, string][]).map(([key, label]) => (
               <label
                 key={key}
                 className="flex items-center gap-2 rounded-xl border border-border p-3 text-sm font-semibold"
@@ -1887,31 +1888,31 @@ export function ProcessFullPage({
           <div className="mt-5 space-y-2">
             {versions.map((version, index) => (
               <div
-                key={String(version.id ?? index)}
+                key={String(version["id"] ?? index)}
                 className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-background p-4"
               >
                 <div>
-                  <p className="font-bold">Version {String(version.version_number ?? "—")}</p>
+                  <p className="font-bold">Version {String(version["version_number"] ?? "—")}</p>
                   <p className="text-sm text-muted-foreground">
-                    {String(version.changes_description ?? "")}
+                    {String(version["changes_description"] ?? "")}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="rounded-full bg-primary-soft px-3 py-1 text-xs font-bold text-primary">
-                    {String(version.status ?? "draft")}
+                    {String(version["status"] ?? "draft")}
                   </span>
-                  {String(version.status) === "draft" && (
+                  {String(version["status"]) === "draft" && (
                     <button
                       className={secondary}
-                      onClick={() => void versionAction(String(version.id), "verify")}
+                      onClick={() => void versionAction(String(version["id"]), "verify")}
                     >
                       Vérifier
                     </button>
                   )}
-                  {String(version.status) === "verified" && (
+                  {String(version["status"]) === "verified" && (
                     <button
                       className={primary}
-                      onClick={() => void versionAction(String(version.id), "approve")}
+                      onClick={() => void versionAction(String(version["id"]), "approve")}
                     >
                       Approuver
                     </button>
