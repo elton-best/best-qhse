@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Achat d'énergie.
  */
-class EnergyPurchaseController extends EnergyRecordController
+class EnergyPurchaseController extends ManagedRecordController
 {
     protected function modelClass(): string
     {

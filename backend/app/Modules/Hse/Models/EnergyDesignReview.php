@@ -5,7 +5,7 @@ namespace App\Modules\Hse\Models;
 /**
  * Conception énergétique (ISO 50001 §8.3).
  */
-class EnergyDesignReview extends EnergyRecord
+class EnergyDesignReview extends ManagedRecord
 {
     protected static string $referencePrefix = 'CEN';
 

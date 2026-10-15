@@ -42,7 +42,6 @@ import {
   DesignPage,
   FournisseursPage,
   NonconformingPage,
-  ObligationsPage,
   OperationalControlPage,
   ProceduresPage,
   RealisationOverviewPage,
@@ -62,6 +61,8 @@ import {
   IpePage,
 } from "@/components/app/energy";
 import { AesPage, IntegratedSystemPage } from "@/components/app/aes";
+import { ComplianceRegisterPage } from "@/components/app/compliance";
+import { EmergencyPage } from "@/components/app/emergency";
 import { HabilitationsPage } from "@/components/app/HabilitationsPage";
 import { SitesPage } from "@/components/app/SitesPage";
 import {
@@ -124,6 +125,7 @@ const CUSTOM = [
   "liberation",
   "sorties-non-conformes",
   "aspects-environnementaux",
+  "urgences",
   "systeme-integre",
   "situation-energetique",
   "collecte-energetique",
@@ -271,7 +273,7 @@ function SectionPage() {
     case "exigences":
       return <RequirementsPage />;
     case "obligations":
-      return <ObligationsPage />;
+      return <ComplianceRegisterPage />;
     case "conception":
       return <DesignPage />;
     case "fournisseurs":
@@ -285,6 +287,8 @@ function SectionPage() {
       return <NonconformingPage />;
     case "aspects-environnementaux":
       return <AesPage />;
+    case "urgences":
+      return <EmergencyPage />;
     case "systeme-integre":
       return <IntegratedSystemPage />;
     case "situation-energetique":

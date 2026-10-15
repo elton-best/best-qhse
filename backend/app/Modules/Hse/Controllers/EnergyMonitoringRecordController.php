@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Relevé de surveillance énergétique.
  */
-class EnergyMonitoringRecordController extends EnergyRecordController
+class EnergyMonitoringRecordController extends ManagedRecordController
 {
     protected function modelClass(): string
     {

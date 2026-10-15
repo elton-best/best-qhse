@@ -45,7 +45,7 @@ class ManagementSystemOverviewController extends Controller
                     'aes_significant' => $count('environmental_aspects', fn ($q) => $q->where('status', '!=', 'archived')->where('is_significant', true)),
                     'aes_to_reassess' => $count('environmental_aspects', fn ($q) => $q->where('needs_reassessment', true)->where('status', '!=', 'archived')),
                     'emergency_procedures' => $count('emergency_procedures'),
-                    'obligations_non_compliant' => $count('obligations_conformite_environnementales', fn ($q) => $q->where('statut_conformite', 'non_conforme')),
+                    'obligations_non_compliant' => $count('compliance_obligation_texts', fn ($q) => $q->where('is_applicable', true)->where('compliance_status', 'non_compliant')),
                 ],
                 'ISO 50001' => [
                     'ipe' => $count('ipe'),

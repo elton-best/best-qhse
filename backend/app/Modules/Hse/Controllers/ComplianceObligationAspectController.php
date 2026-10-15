@@ -4,12 +4,16 @@ namespace App\Modules\Hse\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\ComplianceObligationAspect;
+use App\Modules\Hse\Controllers\Concerns\ScopesToUserTenant;
 use Illuminate\Http\Request;
 
 class ComplianceObligationAspectController extends Controller
 {
+    use ScopesToUserTenant;
+
     public function index(Request $request)
     {
+        $this->assertTenant($request);
         $query = ComplianceObligationAspect::query()->with(['norms:id,code,name']);
 
         if ($request->filled('site_id')) {
@@ -17,7 +21,7 @@ class ComplianceObligationAspectController extends Controller
         }
 
         if ($request->filled('q')) {
-            $term = '%' . trim((string) $request->q) . '%';
+            $term = '%'.trim((string) $request->q).'%';
             $query->where('name', 'ilike', $term);
         }
 
@@ -40,16 +44,18 @@ class ComplianceObligationAspectController extends Controller
 
     public function store(Request $request)
     {
+        $this->assertTenant($request);
         $validated = $request->validate([
-            'site_id' => 'required|exists:sites,id',
+            'site_id' => 'nullable|integer',
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'norm_ids' => 'nullable|array',
             'norm_ids.*' => 'exists:norms,id',
         ]);
 
+        $site = $this->resolveSite($request, isset($validated['site_id']) ? (int) $validated['site_id'] : null);
         $aspect = ComplianceObligationAspect::create([
-            'site_id' => (int) $validated['site_id'],
+            'site_id' => $site->id,
             'name' => trim((string) $validated['name']),
             'description' => $validated['description'] ?? null,
         ]);
@@ -68,6 +74,7 @@ class ComplianceObligationAspectController extends Controller
 
     public function update(Request $request, int $id)
     {
+        $this->assertTenant($request);
         $aspect = ComplianceObligationAspect::findOrFail($id);
 
         $validated = $request->validate([

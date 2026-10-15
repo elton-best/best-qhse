@@ -11,12 +11,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
- * Base des enregistrements du système de management de l'énergie (ISO 50001).
+ * Base des enregistrements d'un système de management (ISO 50001, ISO 14001…) : référence, entreprise, site, responsable.
  *
  * Le cloisonnement par entreprise est garanti par le scope global
  * `BelongsToEnterprise` ; `enterprise_id` est toujours déduit du site côté serveur.
  */
-abstract class EnergyRecord extends Model
+abstract class ManagedRecord extends Model
 {
     use BelongsToEnterprise, HasAuditFields, HasReference, SoftDeletes;
 

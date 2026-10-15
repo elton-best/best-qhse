@@ -3,147 +3,105 @@
 namespace App\Modules\Hse\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hse\Controllers\Concerns\ScopesToUserTenant;
 use App\Modules\Hse\Models\EmergencyProcedure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 
+/**
+ * Scénarios de situations d'urgence et plans de réponse (ISO 14001:2026 §8.2, M13-01 et M13-02).
+ */
 class EmergencyProcedureController extends Controller
 {
-    /**
-     * Liste des situations d'urgence et procédures (REQ-8.2-01).
-     */
+    use ScopesToUserTenant;
+
+    private const RELATIONS = ['site:id,name', 'responsible:id,name,email', 'aspect:id,aspect_number,aspect,impact'];
+
+    /** Statuts qui supposent un plan de réponse défini : « prêt », puis « testé ». */
+    private const READY_STATUSES = ['operationnel', 'teste'];
+
     public function index(Request $request): JsonResponse
     {
-        $user = Auth::user();
-        if (!$user) {
-            return response()->json(['message' => 'Non authentifié.'], 401);
+        $this->assertTenant($request);
+        $query = EmergencyProcedure::query()->with(self::RELATIONS)->withCount(['exercises', 'events']);
+
+        foreach (['site_id', 'emergency_type', 'status'] as $filter) {
+            if ($request->filled($filter)) {
+                $query->where($filter, $request->query($filter));
+            }
         }
-
-        $query = EmergencyProcedure::query()
-            ->where('enterprise_id', $user->enterprise_id)
-            ->with(['site:id,name', 'responsible:id,name,email']);
-
-        if ($request->filled('site_id')) {
-            $query->where('site_id', $request->query('site_id'));
+        if ($request->filled('search')) {
+            $term = '%'.trim((string) $request->query('search')).'%';
+            $query->where(fn ($inner) => $inner->where('title', 'ilike', $term)->orWhere('emergency_type', 'ilike', $term)->orWhere('hazard_nature', 'ilike', $term));
         }
-
-        if ($request->filled('emergency_type')) {
-            $query->where('emergency_type', $request->query('emergency_type'));
-        }
-
-        if ($request->filled('status')) {
-            $query->where('status', $request->query('status'));
-        }
-
-        $items = $query->orderBy('deadline', 'asc')->paginate($request->integer('per_page', 20));
 
         return response()->json([
             'success' => true,
-            'data' => $items,
+            'data' => $query->orderByRaw("case status when 'a_reviser' then 0 when 'planifie' then 1 else 2 end")->orderBy('next_drill_date')->paginate(min($request->integer('per_page', 50), 200)),
         ]);
     }
 
-    /**
-     * Création d'une situation d'urgence (REQ-8.2-01).
-     * Colonnes requises : Situation d'urgence — Mesures de préparation/réponse — Responsable — Délai.
-     */
     public function store(Request $request): JsonResponse
     {
-        $user = Auth::user();
-        if (!$user) {
-            return response()->json(['message' => 'Non authentifié.'], 401);
-        }
+        $this->assertTenant($request);
+        $validated = $request->validate($this->rules(false));
+        $site = $this->resolveSite($request, isset($validated['site_id']) ? (int) $validated['site_id'] : null);
+        $this->assertOwnedByEnterprise(['responsible_id' => ['table' => 'users', 'column' => 'enterprise_id']], $validated, (int) $site->enterprise_id);
 
-        $validated = $request->validate([
-            'site_id' => 'nullable|exists:sites,id',
-            'emergency_type' => 'required|string|max:100', // incendie, deversement, explosion, malaise, etc.
-            'title' => 'required|string|max:255', // Libellé de la situation d'urgence
-            'measures' => 'required|string', // Mesures de préparation et de réponse
-            'responsible_id' => 'required|exists:users,id', // Responsable
-            'deadline' => 'required|date', // Délai / Échéance de mise en place / révision
-            'status' => 'nullable|in:planifie,operationnel,teste,a_reviser',
-            'procedure_steps' => 'nullable|array',
-            'emergency_contacts' => 'nullable|array',
-            'required_equipment' => 'nullable|array',
-            'training_required' => 'nullable|boolean',
-            'next_drill_date' => 'nullable|date',
-        ]);
+        $validated['status'] = $validated['status'] ?? 'planifie';
+        $this->assertReadyWhenOperational($validated, null);
 
-        $validated['enterprise_id'] = $user->enterprise_id;
-        $validated['created_by'] = $user->id;
-        $validated['status'] = $validated['status'] ?? 'operationnel';
-
-        $procedure = EmergencyProcedure::create($validated);
+        $procedure = EmergencyProcedure::create($validated + ['site_id' => $site->id, 'enterprise_id' => $site->enterprise_id]);
 
         return response()->json([
             'success' => true,
             'message' => 'Situation d\'urgence enregistrée avec succès.',
-            'data' => $procedure->load(['site:id,name', 'responsible:id,name']),
+            'data' => $procedure->load(self::RELATIONS),
         ], 201);
     }
 
-    /**
-     * Affichage d'une situation d'urgence.
-     */
-    public function show(int $id): JsonResponse
+    public function show(Request $request, int $id): JsonResponse
     {
-        $user = Auth::user();
-        $procedure = EmergencyProcedure::where('enterprise_id', $user->enterprise_id)
-            ->with(['site:id,name', 'responsible:id,name,email'])
-            ->findOrFail($id);
+        $this->assertTenant($request);
 
         return response()->json([
             'success' => true,
-            'data' => $procedure,
+            'data' => EmergencyProcedure::query()->with(self::RELATIONS)->with(['contacts', 'exercises' => fn ($q) => $q->orderByDesc('planned_date')])->findOrFail($id),
         ]);
     }
 
-    /**
-     * Mise à jour d'une situation d'urgence.
-     */
     public function update(Request $request, int $id): JsonResponse
     {
-        $user = Auth::user();
-        $procedure = EmergencyProcedure::where('enterprise_id', $user->enterprise_id)->findOrFail($id);
+        $this->assertTenant($request);
+        $procedure = EmergencyProcedure::query()->findOrFail($id);
+        $validated = $request->validate($this->rules(true));
+        $this->assertOwnedByEnterprise(['responsible_id' => ['table' => 'users', 'column' => 'enterprise_id']], $validated, (int) $procedure->enterprise_id);
+        $this->assertReadyWhenOperational($validated, $procedure);
 
-        $validated = $request->validate([
-            'site_id' => 'nullable|exists:sites,id',
-            'emergency_type' => 'sometimes|required|string|max:100',
-            'title' => 'sometimes|required|string|max:255',
-            'measures' => 'sometimes|required|string',
-            'responsible_id' => 'sometimes|required|exists:users,id',
-            'deadline' => 'sometimes|required|date',
-            'status' => 'nullable|in:planifie,operationnel,teste,a_reviser',
-            'procedure_steps' => 'nullable|array',
-            'emergency_contacts' => 'nullable|array',
-            'required_equipment' => 'nullable|array',
-            'training_required' => 'nullable|boolean',
-            'last_drill_date' => 'nullable|date',
-            'next_drill_date' => 'nullable|date',
-            'drill_report' => 'nullable|string',
-        ]);
-
-        $validated['updated_by'] = $user->id;
+        if (array_key_exists('status', $validated) && $validated['status'] !== 'a_reviser' && $procedure->status === 'a_reviser') {
+            $validated['last_reviewed_at'] = today();
+            $validated['review_reason'] = null;
+        }
         $procedure->update($validated);
 
         return response()->json([
             'success' => true,
             'message' => 'Situation d\'urgence mise à jour.',
-            'data' => $procedure->fresh(['site:id,name', 'responsible:id,name']),
+            'data' => $procedure->fresh(self::RELATIONS),
         ]);
     }
 
     /**
-     * Enregistrement d'un exercice ou simulation (REQ-8.2-02 Reco Expert).
+     * Enregistrement direct d'un exercice (historique) : conservé pour compatibilité ; le suivi complet
+     * passe par les exercices (`emergency-exercises`).
      */
     public function recordDrill(Request $request, int $id): JsonResponse
     {
-        $user = Auth::user();
-        $procedure = EmergencyProcedure::where('enterprise_id', $user->enterprise_id)->findOrFail($id);
+        $this->assertTenant($request);
+        $procedure = EmergencyProcedure::query()->findOrFail($id);
 
         $validated = $request->validate([
-            'drill_date' => 'required|date',
+            'drill_date' => 'required|date|before_or_equal:today',
             'drill_report' => 'required|string',
             'next_drill_date' => 'nullable|date|after:drill_date',
         ]);
@@ -153,29 +111,79 @@ class EmergencyProcedureController extends Controller
             'drill_report' => $validated['drill_report'],
             'next_drill_date' => $validated['next_drill_date'] ?? null,
             'status' => 'teste',
-            'updated_by' => $user->id,
         ]);
 
         return response()->json([
             'success' => true,
             'message' => 'Exercice de simulation enregistré avec succès.',
-            'data' => $procedure->fresh(['site:id,name', 'responsible:id,name']),
+            'data' => $procedure->fresh(self::RELATIONS),
         ]);
+    }
+
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        $this->assertTenant($request);
+        $procedure = EmergencyProcedure::query()->findOrFail($id);
+        abort_if($procedure->events()->exists(), 422, 'Ce scénario est lié à des situations d\'urgence réelles : archivez-le plutôt que de le supprimer.');
+        $procedure->delete();
+
+        return response()->json(['success' => true, 'message' => 'Situation d\'urgence supprimée.']);
     }
 
     /**
-     * Suppression d'une situation d'urgence.
+     * @return array<string, mixed>
      */
-    public function destroy(int $id): JsonResponse
+    private function rules(bool $sometimes): array
     {
-        $user = Auth::user();
-        $procedure = EmergencyProcedure::where('enterprise_id', $user->enterprise_id)->findOrFail($id);
-        $procedure->delete();
+        $required = $sometimes ? 'sometimes|required' : 'required';
+        $optional = $sometimes ? 'sometimes|nullable' : 'nullable';
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Situation d\'urgence supprimée.',
-        ]);
+        return [
+            'site_id' => 'nullable|integer',
+            'emergency_type' => "{$required}|string|max:100",
+            'title' => "{$required}|string|max:255",
+            'measures' => "{$optional}|string",
+            'responsible_id' => "{$optional}|integer",
+            'deadline' => "{$optional}|date",
+            'status' => "{$optional}|in:planifie,operationnel,teste,a_reviser",
+            'hazard_nature' => "{$optional}|string|max:255",
+            'probable_scale' => "{$optional}|string|max:255",
+            'neighbour_risk' => "{$optional}|string",
+            'prevention_actions' => "{$optional}|string",
+            'mitigation_actions' => "{$optional}|string",
+            'internal_communication' => "{$optional}|string",
+            'external_communication' => "{$optional}|string",
+            'evacuation_routes' => "{$optional}|string",
+            'assembly_points' => "{$optional}|string",
+            'procedure_steps' => "{$optional}|array",
+            'required_equipment' => "{$optional}|array",
+            'training_required' => "{$optional}|boolean",
+            'next_drill_date' => "{$optional}|date",
+            'next_review_date' => "{$optional}|date",
+            'review_reason' => "{$optional}|string|max:255",
+        ];
+    }
+
+    /**
+     * Un scénario ne devient « prêt » ou « testé » que si son plan de réponse est défini : mesures et responsable.
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    private function assertReadyWhenOperational(array $validated, ?EmergencyProcedure $existing): void
+    {
+        $status = $validated['status'] ?? $existing?->status;
+        if (! in_array($status, self::READY_STATUSES, true)) {
+            return;
+        }
+
+        $measures = array_key_exists('measures', $validated) ? $validated['measures'] : $existing?->measures;
+        $responsible = array_key_exists('responsible_id', $validated) ? $validated['responsible_id'] : $existing?->responsible_id;
+        $missing = array_filter([blank($measures) ? 'measures' : null, blank($responsible) ? 'responsible_id' : null]);
+        if ($missing !== []) {
+            abort(response()->json([
+                'message' => 'Le plan de réponse est incomplet : renseignez les mesures de préparation et de réponse et un responsable avant de déclarer le scénario prêt.',
+                'errors' => array_fill_keys($missing, ['Obligatoire pour un scénario prêt.']),
+            ], 422));
+        }
     }
 }
-

@@ -5,7 +5,7 @@ namespace App\Modules\Hse\Models;
 /**
  * Évaluation de la conformité énergétique (ISO 50001 §9.1.2).
  */
-class EnergyComplianceEvaluation extends EnergyRecord
+class EnergyComplianceEvaluation extends ManagedRecord
 {
     protected static string $referencePrefix = 'CEV';
 

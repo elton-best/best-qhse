@@ -178,6 +178,7 @@ export const ACCESS_CODES: Record<string, string[]> = {
   actions: ["plans_action"],
   "plan-sm": ["plans_action"],
   "aspects-environnementaux": ["aspects_environnementaux"],
+  obligations: ["obligations_conformite"],
   dangers: ["duerp", "identification_dangers_sst"],
   energie: ["revue_energetique"],
   "securite-information": ["evaluation_risques_si"],

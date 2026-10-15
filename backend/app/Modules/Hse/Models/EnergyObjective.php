@@ -5,7 +5,7 @@ namespace App\Modules\Hse\Models;
 /**
  * Objectifs et cibles énergétiques, plans d'action (ISO 50001 §6.2).
  */
-class EnergyObjective extends EnergyRecord
+class EnergyObjective extends ManagedRecord
 {
     protected static string $referencePrefix = 'OBE';
 

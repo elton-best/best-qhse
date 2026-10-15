@@ -17,7 +17,7 @@ class EnsureSubModuleSubscribed
 {
     public function __construct(private readonly SiteContextService $siteContext) {}
 
-    public function handle(Request $request, Closure $next, string $subModuleCode): Response
+    public function handle(Request $request, Closure $next, string ...$subModuleCodes): Response
     {
         $user = $request->user();
         if (! $user) {
@@ -32,16 +32,17 @@ class EnsureSubModuleSubscribed
             return response()->json(['success' => false, 'code' => 'SITE_NOT_FOUND', 'message' => 'Site introuvable ou non autorisé.'], 403);
         }
 
-        $subModule = SubModule::query()->where('code', $subModuleCode)->first();
+        // Plusieurs codes = « l'un ou l'autre » (ex. urgences environnementales ou SST).
+        $subModules = SubModule::query()->whereIn('code', $subModuleCodes)->get();
         $subscriptions = $site->getActiveSubscriptions();
-        $included = $subModule && $subscriptions->contains(fn ($subscription) => $subscription->canAccessSubModule($subModule->id));
+        $included = $subModules->contains(fn ($subModule) => $subscriptions->contains(fn ($subscription) => $subscription->canAccessSubModule($subModule->id)));
 
         if (! $included) {
             return response()->json([
                 'success' => false,
                 'code' => 'MODULE_NOT_IN_OFFER',
                 'message' => "Ce module n'est pas inclus dans votre offre ou dans les normes choisies pour ce site.",
-                'module' => $subModuleCode,
+                'module' => implode('|', $subModuleCodes),
             ], 403);
         }
 

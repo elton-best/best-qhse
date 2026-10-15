@@ -4,7 +4,7 @@ namespace App\Modules\Hse\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Hse\Controllers\Concerns\ScopesToUserTenant;
-use App\Modules\Hse\Models\EnergyRecord;
+use App\Modules\Hse\Models\ManagedRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,7 +16,7 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
- * Socle des sections du système de management de l'énergie (ISO 50001).
+ * Socle des registres d'un système de management (énergie ISO 50001, urgences ISO 14001…).
  *
  * Garanties communes :
  * - le périmètre (entreprise, site) est déduit de l'utilisateur authentifié et
@@ -25,7 +25,7 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  *   appartenir à la même entreprise que l'enregistrement ;
  * - CRUD paginé + modèle, export et import XLSX.
  */
-abstract class EnergyRecordController extends Controller
+abstract class ManagedRecordController extends Controller
 {
     use ScopesToUserTenant;
 
@@ -36,11 +36,12 @@ abstract class EnergyRecordController extends Controller
         'ipe_id' => ['table' => 'ipe', 'column' => 'enterprise_id'],
         'equipment_id' => ['table' => 'equipements', 'column' => 'enterprise_id'],
         'provider_partner_id' => ['table' => 'provider_partners', 'column' => 'enterprise_id'],
+        'procedure_id' => ['table' => 'emergency_procedures', 'column' => 'enterprise_id'],
     ];
 
     private const MAX_IMPORT_ROWS = 1000;
 
-    /** @return class-string<EnergyRecord> */
+    /** @return class-string<ManagedRecord> */
     abstract protected function modelClass(): string;
 
     /** Libellé singulier affiché dans les messages. */
@@ -104,7 +105,7 @@ abstract class EnergyRecordController extends Controller
             }
         }
         if ($request->filled('search')) {
-            $term = '%' . trim((string) $request->input('search')) . '%';
+            $term = '%'.trim((string) $request->input('search')).'%';
             $query->where(function ($inner) use ($term) {
                 foreach ($this->searchable() as $column) {
                     $inner->orWhere($column, 'ilike', $term);
@@ -161,18 +162,18 @@ abstract class EnergyRecordController extends Controller
         $class = $this->modelClass();
         $class::query()->findOrFail($id)->delete();
 
-        return response()->json(['message' => $this->label() . ' supprimé(e).']);
+        return response()->json(['message' => $this->label().' supprimé(e).']);
     }
 
     public function downloadTemplate(): BinaryFileResponse
     {
-        $spreadsheet = new Spreadsheet();
+        $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Modele import');
-        $sheet->setCellValue('A1', "MODELE D'IMPORT - " . mb_strtoupper($this->label()));
+        $sheet->setCellValue('A1', "MODELE D'IMPORT - ".mb_strtoupper($this->label()));
         $sheet->fromArray(array_map(fn (array $column) => $column[1], $this->columns()), null, 'A3');
 
-        return $this->spreadsheetResponse($spreadsheet, 'modele_import_' . $this->slug() . '.xlsx');
+        return $this->spreadsheetResponse($spreadsheet, 'modele_import_'.$this->slug().'.xlsx');
     }
 
     public function exportXlsx(Request $request): BinaryFileResponse
@@ -184,7 +185,7 @@ abstract class EnergyRecordController extends Controller
             $query->where('site_id', $request->integer('site_id'));
         }
 
-        $spreadsheet = new Spreadsheet();
+        $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Export');
         $sheet->fromArray(array_merge(['Ref'], array_map(fn (array $c) => $c[1], $this->columns())), null, 'A1');
@@ -200,10 +201,10 @@ abstract class EnergyRecordController extends Controller
                     default => $record->{$attribute},
                 };
             }
-            $sheet->fromArray($values, null, 'A' . $row++);
+            $sheet->fromArray($values, null, 'A'.$row++);
         }
 
-        return $this->spreadsheetResponse($spreadsheet, $this->slug() . '_' . now()->format('Ymd_His') . '.xlsx');
+        return $this->spreadsheetResponse($spreadsheet, $this->slug().'_'.now()->format('Ymd_His').'.xlsx');
     }
 
     public function importXlsx(Request $request): JsonResponse
@@ -249,7 +250,7 @@ abstract class EnergyRecordController extends Controller
 
             $validator = Validator::make($payload, $this->rules());
             if ($validator->fails()) {
-                $errors[] = "Ligne {$line} : " . $validator->errors()->first();
+                $errors[] = "Ligne {$line} : ".$validator->errors()->first();
 
                 continue;
             }
@@ -339,7 +340,7 @@ abstract class EnergyRecordController extends Controller
         foreach ($spreadsheet->getActiveSheet()->getColumnIterator() as $column) {
             $spreadsheet->getActiveSheet()->getColumnDimension($column->getColumnIndex())->setAutoSize(true);
         }
-        $path = tempnam(sys_get_temp_dir(), 'enr_') . '.xlsx';
+        $path = tempnam(sys_get_temp_dir(), 'enr_').'.xlsx';
         (new Xlsx($spreadsheet))->save($path);
 
         return response()->download($path, $filename)->deleteFileAfterSend(true);

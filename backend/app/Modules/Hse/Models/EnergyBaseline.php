@@ -5,7 +5,7 @@ namespace App\Modules\Hse\Models;
 /**
  * Situation énergétique de référence (ISO 50001 §6.5).
  */
-class EnergyBaseline extends EnergyRecord
+class EnergyBaseline extends ManagedRecord
 {
     protected static string $referencePrefix = 'SER';
 

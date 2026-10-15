@@ -29,7 +29,7 @@ class ModuleSubscriptionAccessTest extends TestCase
 
     private const PERMISSIONS = [
         'planification.aspects_environnementaux.read', 'planification.situation_energetique_reference.read',
-        'planification.ipe.read', 'energie.ipe.read',
+        'planification.ipe.read', 'energie.ipe.read', 'environnement.urgences.read', 'environnement.obligations.read',
     ];
 
     protected function setUp(): void
@@ -49,9 +49,9 @@ class ModuleSubscriptionAccessTest extends TestCase
             'name' => 'Planification', 'code' => 'planification', 'iso_point' => '6', 'is_common' => false,
             'created_at' => now(), 'updated_at' => now(),
         ]);
-        foreach (['aspects_environnementaux', 'situation_energetique_reference', 'ipe'] as $code) {
+        foreach (['aspects_environnementaux', 'situation_energetique_reference', 'ipe', 'urgences_environnementales', 'preparation_reponse_urgences_sst', 'obligations_conformite'] as $code) {
             DB::table('sub_modules')->insert([
-                'module_id' => $moduleId, 'name' => $code, 'code' => $code, 'is_common' => false,
+                'module_id' => $moduleId, 'name' => $code, 'code' => $code, 'is_common' => $code === 'obligations_conformite',
                 'created_at' => now(), 'updated_at' => now(),
             ]);
         }
@@ -63,7 +63,7 @@ class ModuleSubscriptionAccessTest extends TestCase
     private function catalogNorm(string $code): Norm
     {
         return Norm::query()->where('code', $code)->first() ?? tap(Norm::factory()->create(['code' => $code, 'name' => $code, 'status' => 'published']), function (Norm $norm) {
-            $links = ['ISO-14001' => ['aspects_environnementaux'], 'ISO-50001' => ['situation_energetique_reference', 'ipe']][$norm->code] ?? [];
+            $links = ['ISO-14001' => ['aspects_environnementaux', 'urgences_environnementales'], 'ISO-45001' => ['preparation_reponse_urgences_sst'], 'ISO-50001' => ['situation_energetique_reference', 'ipe']][$norm->code] ?? [];
             foreach ($links as $subModule) {
                 DB::table('norm_sub_module')->insert([
                     'norm_id' => $norm->id, 'sub_module_id' => DB::table('sub_modules')->where('code', $subModule)->value('id'),
@@ -152,7 +152,23 @@ class ModuleSubscriptionAccessTest extends TestCase
         $without = $this->enterpriseWithNorms(['ISO-9001']);
 
         $this->actingAs($without, 'sanctum')
-            ->getJson('/api/v1/environmental-aspects?site_id=' . $with->site_id)
+            ->getJson('/api/v1/environmental-aspects?site_id='.$with->site_id)
             ->assertForbidden();
+    }
+
+    public function test_emergency_modules_open_with_either_the_environment_or_the_ohs_norm(): void
+    {
+        $this->actingAs($this->enterpriseWithNorms(['ISO-14001']), 'sanctum')->getJson('/api/v1/emergency-procedures')->assertOk();
+        $this->actingAs($this->enterpriseWithNorms(['ISO-45001']), 'sanctum')->getJson('/api/v1/emergency-procedures')->assertOk();
+        $this->actingAs($this->enterpriseWithNorms(['ISO-9001']), 'sanctum')->getJson('/api/v1/emergency-procedures')
+            ->assertForbidden()->assertJsonPath('code', 'MODULE_NOT_IN_OFFER')
+            ->assertJsonPath('module', 'urgences_environnementales|preparation_reponse_urgences_sst');
+    }
+
+    public function test_the_compliance_register_is_common_to_every_norm(): void
+    {
+        foreach (['ISO-9001', 'ISO-14001', 'ISO-50001'] as $norm) {
+            $this->actingAs($this->enterpriseWithNorms([$norm]), 'sanctum')->getJson('/api/v1/compliance-obligations')->assertOk();
+        }
     }
 }

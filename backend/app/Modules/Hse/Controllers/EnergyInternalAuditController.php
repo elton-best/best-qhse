@@ -7,7 +7,7 @@ use App\Modules\Hse\Models\EnergyInternalAudit;
 /**
  * Audit énergétique interne.
  */
-class EnergyInternalAuditController extends EnergyRecordController
+class EnergyInternalAuditController extends ManagedRecordController
 {
     protected function modelClass(): string
     {

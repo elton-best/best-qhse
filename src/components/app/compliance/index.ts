@@ -1,0 +1,1 @@
+export { ComplianceRegisterPage } from "./ComplianceRegisterPage";

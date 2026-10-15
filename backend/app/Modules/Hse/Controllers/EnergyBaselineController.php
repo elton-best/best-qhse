@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Situation énergétique de référence.
  */
-class EnergyBaselineController extends EnergyRecordController
+class EnergyBaselineController extends ManagedRecordController
 {
     protected function modelClass(): string
     {

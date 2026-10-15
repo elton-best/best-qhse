@@ -1,13 +1,13 @@
 <?php
 
+use App\Jobs\CheckExpiredCertifications;
+use App\Jobs\CheckExpiredSignatureWorkflows;
+use App\Jobs\CleanupExpiredCodeReservations;
+use App\Jobs\SendAuditReminders;
+use App\Services\NotificationReminderService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
-use App\Services\NotificationReminderService;
-use App\Jobs\CheckExpiredCertifications;
-use App\Jobs\CheckExpiredSignatureWorkflows;
-use App\Jobs\SendAuditReminders;
-use App\Jobs\CleanupExpiredCodeReservations;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -29,6 +29,8 @@ Schedule::command('communications:check-reminders')->dailyAt('08:00');
 Schedule::command('maintenances:check-reminders')->dailyAt('08:15');
 Schedule::command('formations:check-reminders')->dailyAt('08:30');
 Schedule::command('risks:check-reassessments')->monthlyOn(1, '09:00');
+Schedule::command('compliance:alert-expirations')->dailyAt('07:30');
+Schedule::command('emergency:check-reminders')->dailyAt('07:45');
 
 // Nouveaux jobs - Documents personnalisés
 Schedule::job(new CheckExpiredCertifications)->daily();

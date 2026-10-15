@@ -48,6 +48,7 @@ class NormativeCatalogMatrixSeeder extends Seeder
             'revue_processus',
             'non_conformites_actions',
             'amelioration_continue',
+            'obligations_conformite',
         ];
 
         $commonSectionCodes = [
@@ -66,8 +67,8 @@ class NormativeCatalogMatrixSeeder extends Seeder
         DB::table('sub_module_sections')->whereIn('code', $commonSectionCodes)->update(['is_common' => true]);
 
         $this->command?->info('✅ Matrice catalogue normalisée');
-        $this->command?->info('   - Modules communs: ' . count($commonModuleCodes));
-        $this->command?->info('   - Sous-modules communs: ' . count($commonSubModuleCodes));
-        $this->command?->info('   - Sections communes: ' . count($commonSectionCodes));
+        $this->command?->info('   - Modules communs: '.count($commonModuleCodes));
+        $this->command?->info('   - Sous-modules communs: '.count($commonSubModuleCodes));
+        $this->command?->info('   - Sections communes: '.count($commonSectionCodes));
     }
 }

@@ -7,7 +7,7 @@ use App\Modules\Hse\Models\EnergyComplianceEvaluation;
 /**
  * Évaluation de conformité énergétique.
  */
-class EnergyComplianceEvaluationController extends EnergyRecordController
+class EnergyComplianceEvaluationController extends ManagedRecordController
 {
     protected function modelClass(): string
     {

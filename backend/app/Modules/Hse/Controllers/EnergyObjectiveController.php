@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Objectif ou cible énergétique.
  */
-class EnergyObjectiveController extends EnergyRecordController
+class EnergyObjectiveController extends ManagedRecordController
 {
     protected function modelClass(): string
     {

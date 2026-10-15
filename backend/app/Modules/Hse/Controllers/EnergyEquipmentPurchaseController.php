@@ -7,7 +7,7 @@ use App\Modules\Hse\Models\EnergyEquipmentPurchase;
 /**
  * Achat d'équipement énergétique.
  */
-class EnergyEquipmentPurchaseController extends EnergyRecordController
+class EnergyEquipmentPurchaseController extends ManagedRecordController
 {
     protected function modelClass(): string
     {

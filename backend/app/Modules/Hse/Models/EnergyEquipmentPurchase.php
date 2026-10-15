@@ -2,10 +2,13 @@
 
 namespace App\Modules\Hse\Models;
 
+use App\Models\Equipement;
+use App\Models\ProviderPartner;
+
 /**
  * Achats d'équipements à impact énergétique (ISO 50001 §8.4).
  */
-class EnergyEquipmentPurchase extends EnergyRecord
+class EnergyEquipmentPurchase extends ManagedRecord
 {
     protected static string $referencePrefix = 'AEQ';
 
@@ -30,11 +33,11 @@ class EnergyEquipmentPurchase extends EnergyRecord
 
     public function equipment()
     {
-        return $this->belongsTo(\App\Models\Equipement::class, 'equipment_id');
+        return $this->belongsTo(Equipement::class, 'equipment_id');
     }
 
     public function providerPartner()
     {
-        return $this->belongsTo(\App\Models\ProviderPartner::class);
+        return $this->belongsTo(ProviderPartner::class);
     }
 }

@@ -2,10 +2,12 @@
 
 namespace App\Modules\Hse\Models;
 
+use App\Models\ProviderPartner;
+
 /**
  * Achats d'énergie (ISO 50001 §8.4).
  */
-class EnergyPurchase extends EnergyRecord
+class EnergyPurchase extends ManagedRecord
 {
     protected static string $referencePrefix = 'AEN';
 
@@ -32,6 +34,6 @@ class EnergyPurchase extends EnergyRecord
 
     public function providerPartner()
     {
-        return $this->belongsTo(\App\Models\ProviderPartner::class);
+        return $this->belongsTo(ProviderPartner::class);
     }
 }

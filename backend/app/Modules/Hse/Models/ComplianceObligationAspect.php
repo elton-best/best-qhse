@@ -2,6 +2,9 @@
 
 namespace App\Modules\Hse\Models;
 
+use App\Modules\Enterprise\Models\Site;
+use App\Modules\Leadership\Models\Norm;
+use App\Traits\BelongsToEnterprise;
 use App\Traits\HasAuditFields;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -9,12 +12,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use App\Modules\Enterprise\Models\Site;
-use App\Modules\Leadership\Models\Norm;
 
 class ComplianceObligationAspect extends Model
 {
-    use HasFactory, SoftDeletes, HasAuditFields;
+    use BelongsToEnterprise, HasAuditFields, HasFactory, SoftDeletes;
 
     protected $fillable = [
         'site_id',
@@ -42,4 +43,3 @@ class ComplianceObligationAspect extends Model
         return $this->hasMany(ComplianceObligationText::class, 'aspect_id');
     }
 }
-

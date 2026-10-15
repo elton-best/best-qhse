@@ -11,7 +11,7 @@ class AllISOStandardsSeeder extends Seeder
     {
         // Supprimer les anciennes offres ISO 9001
         DB::table('offers')->whereIn('ref', ['OFF-ISO9001-BASIC', 'OFF-ISO9001-COMPLETE'])->delete();
-        
+
         $this->command->info('🚀 Création des sous-modules spécifiques par norme...');
 
         // Récupérer les normes
@@ -101,7 +101,7 @@ class AllISOStandardsSeeder extends Seeder
         $revueProcessusId = DB::table('sub_modules')->where('code', 'revue_processus')->value('id');
         if ($revueProcessusId) {
             foreach ([$iso9001, $iso14001, $iso45001, $iso27001, $iso22000, $iso50001] as $norm) {
-                if (!$norm) {
+                if (! $norm) {
                     continue;
                 }
 
@@ -109,6 +109,35 @@ class AllISOStandardsSeeder extends Seeder
                     ['norm_id' => (int) $norm->id, 'sub_module_id' => (int) $revueProcessusId],
                     ['created_at' => now(), 'updated_at' => now()]
                 );
+            }
+        }
+
+        // Registre des obligations de conformité (ISO 14001 §6.1.3 / §9.1.2) : sous-module commun à toutes les normes.
+        $planificationId = DB::table('modules')->where('code', 'planification')->value('id');
+        if ($planificationId) {
+            DB::table('sub_modules')->updateOrInsert(
+                ['code' => 'obligations_conformite'],
+                [
+                    'module_id' => $planificationId,
+                    'name' => 'Obligations de conformité',
+                    'description' => 'Registre des obligations de conformité et évaluation périodique.',
+                    'icon' => 'scale',
+                    'route' => 'obligations',
+                    'order' => 40,
+                    'is_active' => true,
+                    'is_common' => true,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ],
+            );
+            $obligationsId = DB::table('sub_modules')->where('code', 'obligations_conformite')->value('id');
+            foreach ([$iso9001, $iso14001, $iso45001, $iso27001, $iso22000, $iso50001] as $norm) {
+                if ($norm && $obligationsId) {
+                    DB::table('norm_sub_module')->updateOrInsert(
+                        ['norm_id' => (int) $norm->id, 'sub_module_id' => (int) $obligationsId],
+                        ['created_at' => now(), 'updated_at' => now()],
+                    );
+                }
             }
         }
 
@@ -126,7 +155,7 @@ class AllISOStandardsSeeder extends Seeder
             // Module Planification
             ['module_id' => $planification->id, 'code' => 'aspects_environnementaux', 'name' => 'Aspects environnementaux significatifs', 'route' => '/company/iso/planning/aspects-environmentaux', 'icon' => 'mdi-leaf', 'order' => 10],
             ['module_id' => $planification->id, 'code' => 'revue_environnementale', 'name' => 'Revue environnementale', 'route' => '/company/iso/planning/environmental-review', 'icon' => 'mdi-earth', 'order' => 12],
-            
+
             // Module Réalisation
             ['module_id' => $realisation->id, 'code' => 'maitrise_operationnelle_env', 'name' => 'Maîtrise opérationnelle environnementale', 'route' => '/company/iso/operations/environmental-control', 'icon' => 'mdi-shield-check', 'order' => 10],
             ['module_id' => $realisation->id, 'code' => 'urgences_environnementales', 'name' => 'Préparation et réponse aux urgences', 'route' => '/company/iso/operations/emergency-preparedness', 'icon' => 'mdi-alert', 'order' => 11],
@@ -164,13 +193,13 @@ class AllISOStandardsSeeder extends Seeder
             ['module_id' => $planification->id, 'code' => 'duerp', 'name' => 'DUERP', 'route' => '/company/iso/planning/duerp', 'icon' => 'mdi-shield-alert', 'order' => 10],
             ['module_id' => $planification->id, 'code' => 'identification_dangers_sst', 'name' => 'Identification des dangers SST', 'route' => '/company/iso/planning/hazard-identification', 'icon' => 'mdi-hazard-lights', 'order' => 11],
             ['module_id' => $planification->id, 'code' => 'exigences_legales_sst', 'name' => 'Exigences légales SST', 'route' => '/company/iso/planning/legal-requirements', 'icon' => 'mdi-scale-balance', 'order' => 12],
-            
+
             // Module Réalisation
             ['module_id' => $realisation->id, 'code' => 'elimination_risques_sst', 'name' => 'Élimination des dangers et réduction des risques', 'route' => '/company/iso/operations/risk-elimination', 'icon' => 'mdi-shield-remove', 'order' => 10],
             ['module_id' => $realisation->id, 'code' => 'gestion_changement_sst', 'name' => 'Gestion du changement SST', 'route' => '/company/iso/operations/change-management', 'icon' => 'mdi-swap-horizontal', 'order' => 11],
             ['module_id' => $realisation->id, 'code' => 'achats_sous_traitance_sst', 'name' => 'Achats et sous-traitance SST', 'route' => '/company/iso/operations/procurement', 'icon' => 'mdi-cart', 'order' => 12],
             ['module_id' => $realisation->id, 'code' => 'preparation_reponse_urgences_sst', 'name' => 'Préparation et réponse aux situations d\'urgence', 'route' => '/company/iso/operations/emergency-preparedness', 'icon' => 'mdi-alert', 'order' => 13],
-            
+
             // Module Évaluation
             ['module_id' => $evaluation->id, 'code' => 'surveillance_accidents', 'name' => 'Surveillance des accidents du travail', 'route' => '/company/iso/performance/accident-monitoring', 'icon' => 'mdi-ambulance', 'order' => 10],
             ['module_id' => $evaluation->id, 'code' => 'enquetes_incidents', 'name' => 'Enquêtes sur les incidents', 'route' => '/company/iso/performance/incident-investigation', 'icon' => 'mdi-magnify', 'order' => 11],
@@ -195,14 +224,14 @@ class AllISOStandardsSeeder extends Seeder
             ['module_id' => $planification->id, 'code' => 'evaluation_risques_si', 'name' => 'Évaluation des risques de sécurité de l\'information', 'route' => '/company/iso/planning/information-security-risks', 'icon' => 'mdi-security', 'order' => 10],
             ['module_id' => $planification->id, 'code' => 'traitement_risques_si', 'name' => 'Traitement des risques SI', 'route' => '/company/iso/planning/risk-treatment', 'icon' => 'mdi-shield-lock', 'order' => 11],
             ['module_id' => $planification->id, 'code' => 'declaration_applicabilite', 'name' => 'Déclaration d\'applicabilité (SoA)', 'route' => '/company/iso/planning/statement-applicability', 'icon' => 'mdi-file-document-check', 'order' => 12],
-            
+
             // Module Réalisation
             ['module_id' => $realisation->id, 'code' => 'inventaire_actifs', 'name' => 'Inventaire des actifs informationnels', 'route' => '/company/iso/operations/asset-inventory', 'icon' => 'mdi-database', 'order' => 10],
             ['module_id' => $realisation->id, 'code' => 'controles_acces', 'name' => 'Contrôles d\'accès', 'route' => '/company/iso/operations/access-controls', 'icon' => 'mdi-key', 'order' => 11],
             ['module_id' => $realisation->id, 'code' => 'cryptographie', 'name' => 'Cryptographie', 'route' => '/company/iso/operations/cryptography', 'icon' => 'mdi-lock', 'order' => 12],
             ['module_id' => $realisation->id, 'code' => 'securite_physique', 'name' => 'Sécurité physique', 'route' => '/company/iso/operations/physical-security', 'icon' => 'mdi-office-building-cog', 'order' => 13],
             ['module_id' => $realisation->id, 'code' => 'pca_pra', 'name' => 'Plan de continuité d\'activité (PCA/PRA)', 'route' => '/company/iso/operations/business-continuity', 'icon' => 'mdi-backup-restore', 'order' => 14],
-            
+
             // Module Évaluation
             ['module_id' => $evaluation->id, 'code' => 'gestion_incidents_si', 'name' => 'Gestion des incidents de sécurité', 'route' => '/company/iso/performance/security-incidents', 'icon' => 'mdi-alert-octagon', 'order' => 10],
             ['module_id' => $evaluation->id, 'code' => 'conformite_rgpd', 'name' => 'Conformité RGPD', 'route' => '/company/iso/performance/gdpr-compliance', 'icon' => 'mdi-shield-account', 'order' => 11],
@@ -228,13 +257,13 @@ class AllISOStandardsSeeder extends Seeder
             ['module_id' => $planification->id, 'code' => 'points_critiques_ccp', 'name' => 'Points critiques de contrôle (CCP)', 'route' => '/company/iso/planning/critical-control-points', 'icon' => 'mdi-target-variant', 'order' => 11],
             ['module_id' => $planification->id, 'code' => 'programmes_prerequis', 'name' => 'Programmes prérequis (PRP)', 'route' => '/company/iso/planning/prerequisite-programs', 'icon' => 'mdi-checkbox-marked-circle', 'order' => 12],
             ['module_id' => $planification->id, 'code' => 'plan_haccp', 'name' => 'Plan HACCP', 'route' => '/company/iso/planning/haccp-plan', 'icon' => 'mdi-file-chart', 'order' => 13],
-            
+
             // Module Réalisation
             ['module_id' => $realisation->id, 'code' => 'maitrise_dangers_alimentaires', 'name' => 'Maîtrise des dangers alimentaires', 'route' => '/company/iso/operations/food-hazard-control', 'icon' => 'mdi-food-apple', 'order' => 10],
             ['module_id' => $realisation->id, 'code' => 'tracabilite_alimentaire', 'name' => 'Traçabilité alimentaire', 'route' => '/company/iso/operations/food-traceability', 'icon' => 'mdi-barcode-scan', 'order' => 11],
             ['module_id' => $realisation->id, 'code' => 'gestion_allergenes', 'name' => 'Gestion des allergènes', 'route' => '/company/iso/operations/allergen-management', 'icon' => 'mdi-alert-circle', 'order' => 12],
             ['module_id' => $realisation->id, 'code' => 'controle_fournisseurs', 'name' => 'Contrôle des fournisseurs', 'route' => '/company/iso/operations/supplier-control', 'icon' => 'mdi-truck-delivery', 'order' => 13],
-            
+
             // Module Évaluation
             ['module_id' => $evaluation->id, 'code' => 'surveillance_ccp', 'name' => 'Surveillance des CCP', 'route' => '/company/iso/performance/ccp-monitoring', 'icon' => 'mdi-monitor-eye', 'order' => 10],
             ['module_id' => $evaluation->id, 'code' => 'verification_haccp', 'name' => 'Vérification du système HACCP', 'route' => '/company/iso/performance/haccp-verification', 'icon' => 'mdi-check-decagram', 'order' => 11],
@@ -262,12 +291,12 @@ class AllISOStandardsSeeder extends Seeder
             ['module_id' => $planification->id, 'code' => 'collecte_donnees_energetiques', 'name' => 'Planification de collecte des données énergétiques', 'route' => '/company/iso/planning/analysts', 'icon' => 'mdi-database-search', 'order' => 12],
             ['module_id' => $planification->id, 'code' => 'ipe', 'name' => 'Indicateurs de performance énergétique (IPÉ)', 'route' => '/company/iso/planning/energy-indicators', 'icon' => 'mdi-gauge', 'order' => 13],
             ['module_id' => $planification->id, 'code' => 'objectifs_cibles_energetiques', 'name' => 'Objectifs et cibles énergétiques', 'route' => '/company/iso/planning/energy-objectives', 'icon' => 'mdi-bullseye-arrow', 'order' => 14],
-            
+
             // Module Réalisation
             ['module_id' => $realisation->id, 'code' => 'conception_energetique', 'name' => 'Conception énergétique', 'route' => '/company/iso/operations/energy-design', 'icon' => 'mdi-drawing', 'order' => 10],
             ['module_id' => $realisation->id, 'code' => 'achats_energie', 'name' => 'Achats d\'énergie', 'route' => '/company/iso/operations/energy-procurement', 'icon' => 'mdi-shopping', 'order' => 11],
             ['module_id' => $realisation->id, 'code' => 'achats_equipements_energetiques', 'name' => 'Achats d\'équipements énergétiques', 'route' => '/company/iso/operations/equipment-procurement', 'icon' => 'mdi-tools', 'order' => 12],
-            
+
             // Module Évaluation
             ['module_id' => $evaluation->id, 'code' => 'surveillance_performance_energetique', 'name' => 'Surveillance de la performance énergétique', 'route' => '/company/iso/performance/energy-monitoring', 'icon' => 'mdi-chart-areaspline', 'order' => 10],
             ['module_id' => $evaluation->id, 'code' => 'conformite_energetique', 'name' => 'Évaluation de la conformité énergétique', 'route' => '/company/iso/performance/energy-compliance', 'icon' => 'mdi-check-circle', 'order' => 11],

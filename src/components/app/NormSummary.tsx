@@ -35,7 +35,7 @@ export const NORM_SECTIONS: Record<string, { title: string; lines: SummaryLine[]
       { label: "Aspects significatifs (AES)", key: "aes_significant", slug: "aspects-environnementaux", access: "aspects_environnementaux", alert: true },
       { label: "Aspects à réévaluer", key: "aes_to_reassess", slug: "aspects-environnementaux", access: "aspects_environnementaux", alert: true },
       { label: "Situations d'urgence", key: "emergency_procedures", slug: "urgences", access: "urgences_environnementales" },
-      { label: "Obligations non conformes", key: "obligations_non_compliant", slug: "obligations", alert: true },
+      { label: "Obligations non conformes", key: "obligations_non_compliant", slug: "obligations", access: "obligations_conformite", alert: true },
     ],
   },
   "ISO 50001": {

@@ -1,24 +1,20 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
 use App\Modules\Hse\Controllers\AesRegistryVersionController;
 use App\Modules\Hse\Controllers\AesSettingsController;
-use App\Modules\Hse\Controllers\EnvironmentalAspectController;
-use App\Modules\Hse\Controllers\ManagementSystemOverviewController;
-use App\Modules\Hse\Controllers\DuerpController;
-use App\Modules\Support\Controllers\HabilitationController;
-use App\Modules\Hse\Controllers\EpiController;
-use App\Modules\Hse\Controllers\VerificationReglementaireController;
+use App\Modules\Hse\Controllers\ApplicableRequirementController;
 use App\Modules\Hse\Controllers\AspectEnvironnementalController;
-use App\Modules\Hse\Controllers\ObligationConformiteEnvironnementaleController;
-use App\Modules\Hse\Controllers\ConsommationEnergieController;
-use App\Modules\Hse\Controllers\IpeController;
 use App\Modules\Hse\Controllers\ComplianceObligationAspectController;
 use App\Modules\Hse\Controllers\ComplianceObligationController;
-use App\Modules\Hse\Controllers\ApplicableRequirementController;
-use App\Modules\Hse\Controllers\ProductServiceRequirementController;
-use App\Modules\Hse\Controllers\WorkAccidentController;
+use App\Modules\Hse\Controllers\ComplianceRegisterController;
+use App\Modules\Hse\Controllers\ConsommationEnergieController;
+use App\Modules\Hse\Controllers\DuerpController;
+use App\Modules\Hse\Controllers\EmergencyContactController;
+use App\Modules\Hse\Controllers\EmergencyEventController;
+use App\Modules\Hse\Controllers\EmergencyExerciseController;
+use App\Modules\Hse\Controllers\EmergencyOverviewController;
 use App\Modules\Hse\Controllers\EmergencyProcedureController;
+use App\Modules\Hse\Controllers\EmergencyResourceController;
 use App\Modules\Hse\Controllers\EnergyBaselineController;
 use App\Modules\Hse\Controllers\EnergyComplianceEvaluationController;
 use App\Modules\Hse\Controllers\EnergyDataCollectionPlanController;
@@ -28,6 +24,16 @@ use App\Modules\Hse\Controllers\EnergyInternalAuditController;
 use App\Modules\Hse\Controllers\EnergyMonitoringRecordController;
 use App\Modules\Hse\Controllers\EnergyObjectiveController;
 use App\Modules\Hse\Controllers\EnergyPurchaseController;
+use App\Modules\Hse\Controllers\EnvironmentalAspectController;
+use App\Modules\Hse\Controllers\EpiController;
+use App\Modules\Hse\Controllers\IpeController;
+use App\Modules\Hse\Controllers\ManagementSystemOverviewController;
+use App\Modules\Hse\Controllers\ObligationConformiteEnvironnementaleController;
+use App\Modules\Hse\Controllers\ProductServiceRequirementController;
+use App\Modules\Hse\Controllers\VerificationReglementaireController;
+use App\Modules\Hse\Controllers\WorkAccidentController;
+use App\Modules\Support\Controllers\HabilitationController;
+use Illuminate\Support\Facades\Route;
 
 // ============================================================
 // MODULE HSE & NORMES ASSOCIÉES (ISO 14001, ISO 45001, ISO 50001)
@@ -70,7 +76,7 @@ Route::apiResource('aspects-environnementaux', AspectEnvironnementalController::
 Route::get('obligations-conformite-environnementales/alertes', [ObligationConformiteEnvironnementaleController::class, 'alertes']);
 Route::get('obligations-conformite-environnementales/stats', [ObligationConformiteEnvironnementaleController::class, 'stats']);
 Route::apiResource('obligations-conformite-environnementales', ObligationConformiteEnvironnementaleController::class, [
-    'parameters' => ['obligations-conformite-environnementales' => 'obligation']
+    'parameters' => ['obligations-conformite-environnementales' => 'obligation'],
 ]);
 
 // --- 2. ISO 45001 : Santé & Sécurité au Travail (DUERP, Habilitations, EPI, VGP) ---
@@ -110,8 +116,37 @@ Route::post('work-accidents/{id}/close', [WorkAccidentController::class, 'close'
 Route::apiResource('work-accidents', WorkAccidentController::class);
 
 // Situations d'urgence & simulations (ISO 45001 / ISO 14001 - REQ-8.2-01 / REQ-8.2-02)
-Route::post('emergency-procedures/{id}/record-drill', [EmergencyProcedureController::class, 'recordDrill']);
-Route::apiResource('emergency-procedures', EmergencyProcedureController::class);
+// Préparation et réponse aux situations d'urgence (§8.2) : offre (ISO 14001 ou SST), puis droits de l'utilisateur.
+$urg = fn (string $action) => ['module.subscribed:urgences_environnementales,preparation_reponse_urgences_sst', "permission:environnement.urgences.{$action}|emergency_procedures.{$action}|emergency_procedures.manage|realisation.urgences_environnementales.{$action}|realisation.urgences_environnementales.manage"];
+Route::get('emergency/overview', [EmergencyOverviewController::class, 'overview'])->middleware($urg('read'));
+Route::get('emergency-procedures', [EmergencyProcedureController::class, 'index'])->middleware($urg('read'));
+Route::post('emergency-procedures', [EmergencyProcedureController::class, 'store'])->middleware($urg('create'));
+Route::get('emergency-procedures/{id}', [EmergencyProcedureController::class, 'show'])->whereNumber('id')->middleware($urg('read'));
+Route::put('emergency-procedures/{id}', [EmergencyProcedureController::class, 'update'])->whereNumber('id')->middleware($urg('update'));
+Route::patch('emergency-procedures/{id}', [EmergencyProcedureController::class, 'update'])->whereNumber('id')->middleware($urg('update'));
+Route::delete('emergency-procedures/{id}', [EmergencyProcedureController::class, 'destroy'])->whereNumber('id')->middleware($urg('delete'));
+Route::post('emergency-procedures/{id}/record-drill', [EmergencyProcedureController::class, 'recordDrill'])->whereNumber('id')->middleware($urg('update'));
+foreach ([
+    'emergency-contacts' => EmergencyContactController::class,
+    'emergency-resources' => EmergencyResourceController::class,
+    'emergency-exercises' => EmergencyExerciseController::class,
+    'emergency-events' => EmergencyEventController::class,
+] as $uri => $controller) {
+    Route::get("{$uri}/template", [$controller, 'downloadTemplate'])->middleware($urg('read'));
+    Route::get("{$uri}/export-xlsx", [$controller, 'exportXlsx'])->middleware($urg('read'));
+    Route::post("{$uri}/import-xlsx", [$controller, 'importXlsx'])->middleware($urg('create'));
+    Route::get($uri, [$controller, 'index'])->middleware($urg('read'));
+    Route::post($uri, [$controller, 'store'])->middleware($urg('create'));
+    Route::get("{$uri}/{id}", [$controller, 'show'])->whereNumber('id')->middleware($urg('read'));
+    Route::put("{$uri}/{id}", [$controller, 'update'])->whereNumber('id')->middleware($urg('update'));
+    Route::patch("{$uri}/{id}", [$controller, 'update'])->whereNumber('id')->middleware($urg('update'));
+    Route::delete("{$uri}/{id}", [$controller, 'destroy'])->whereNumber('id')->middleware($urg('delete'));
+}
+Route::post('emergency-exercises/{id}/complete', [EmergencyExerciseController::class, 'complete'])->whereNumber('id')->middleware($urg('update'));
+Route::post('emergency-exercises/{id}/cancel', [EmergencyExerciseController::class, 'cancel'])->whereNumber('id')->middleware($urg('update'));
+Route::post('emergency-events/{id}/timeline', [EmergencyEventController::class, 'addTimeline'])->whereNumber('id')->middleware($urg('update'));
+Route::post('emergency-events/{id}/contain', [EmergencyEventController::class, 'contain'])->whereNumber('id')->middleware($urg('update'));
+Route::post('emergency-events/{id}/close', [EmergencyEventController::class, 'close'])->whereNumber('id')->middleware($urg('update'));
 
 // Habilitations
 Route::get('habilitations/expires-soon', [HabilitationController::class, 'expiresSoon']);
@@ -141,19 +176,19 @@ Route::apiResource('verifications-reglementaires', VerificationReglementaireCont
 
 // --- 3. ISO 50001 : Énergie ---
 Route::middleware('module.subscribed:revue_energetique')->group(function () {
-Route::get('consommations-energie/stats', [ConsommationEnergieController::class, 'stats']);
-Route::post('consommations-energie/import-file', [ConsommationEnergieController::class, 'importCsv']);
-Route::post('consommations-energie/import-csv', [ConsommationEnergieController::class, 'importCsv']);
-Route::apiResource('consommations-energie', ConsommationEnergieController::class);
+    Route::get('consommations-energie/stats', [ConsommationEnergieController::class, 'stats']);
+    Route::post('consommations-energie/import-file', [ConsommationEnergieController::class, 'importCsv']);
+    Route::post('consommations-energie/import-csv', [ConsommationEnergieController::class, 'importCsv']);
+    Route::apiResource('consommations-energie', ConsommationEnergieController::class);
 });
 
 Route::middleware('module.subscribed:ipe')->group(function () {
 
-Route::get('ipe/stats', [IpeController::class, 'stats']);
-Route::post('ipe/{id}/valeurs', [IpeController::class, 'addValeur']);
-Route::get('ipe/{id}/valeurs', [IpeController::class, 'valeurs']);
-Route::get('ipe/{id}/tendance', [IpeController::class, 'tendance']);
-Route::apiResource('ipe', IpeController::class);
+    Route::get('ipe/stats', [IpeController::class, 'stats']);
+    Route::post('ipe/{id}/valeurs', [IpeController::class, 'addValeur']);
+    Route::get('ipe/{id}/valeurs', [IpeController::class, 'valeurs']);
+    Route::get('ipe/{id}/tendance', [IpeController::class, 'tendance']);
+    Route::apiResource('ipe', IpeController::class);
 });
 
 // --- 3 bis. ISO 50001 : sections du SMÉ (références : permissions du catalogue RBAC) ---
@@ -185,13 +220,27 @@ foreach ($energyResources as $uri => [$controller, $permission, $subModule]) {
 }
 
 // --- 4. Exigences et Obligations de Conformité Légale (§6.1.3) ---
-Route::get('compliance-obligation-aspects', [ComplianceObligationAspectController::class, 'index']);
-Route::post('compliance-obligation-aspects', [ComplianceObligationAspectController::class, 'store']);
-Route::put('compliance-obligation-aspects/{id}', [ComplianceObligationAspectController::class, 'update']);
-Route::get('compliance-obligations/template', [ComplianceObligationController::class, 'downloadTemplate']);
-Route::get('compliance-obligations/export-xlsx', [ComplianceObligationController::class, 'exportXlsx']);
-Route::post('compliance-obligations/import-xlsx', [ComplianceObligationController::class, 'importXlsx']);
-Route::apiResource('compliance-obligations', ComplianceObligationController::class)->except(['show']);
+// Registre de conformité unifié (§6.1.3 / §9.1.2) : offre et normes choisies, puis droits de l'utilisateur.
+$obl = fn (string $action) => ['module.subscribed:obligations_conformite', "permission:environnement.obligations.{$action}|obligation_conformite_environnementales.{$action}|obligation_conformite_environnementales.manage"];
+Route::get('compliance-obligation-aspects', [ComplianceObligationAspectController::class, 'index'])->middleware($obl('read'));
+Route::post('compliance-obligation-aspects', [ComplianceObligationAspectController::class, 'store'])->middleware($obl('create'));
+Route::put('compliance-obligation-aspects/{id}', [ComplianceObligationAspectController::class, 'update'])->whereNumber('id')->middleware($obl('update'));
+Route::get('compliance-obligations/template', [ComplianceObligationController::class, 'downloadTemplate'])->middleware($obl('read'));
+Route::get('compliance-obligations/export-xlsx', [ComplianceObligationController::class, 'exportXlsx'])->middleware($obl('read'));
+Route::post('compliance-obligations/import-xlsx', [ComplianceObligationController::class, 'importXlsx'])->middleware($obl('create'));
+Route::get('compliance-obligations/dashboard', [ComplianceRegisterController::class, 'dashboard'])->middleware($obl('read'));
+Route::get('compliance-obligations/expirations', [ComplianceRegisterController::class, 'expirations'])->middleware($obl('read'));
+Route::get('compliance-evaluations/{evaluationId}/evidence', [ComplianceRegisterController::class, 'downloadEvidence'])->whereNumber('evaluationId')->middleware($obl('read'));
+Route::get('compliance-obligations/{id}/evaluations', [ComplianceRegisterController::class, 'evaluations'])->whereNumber('id')->middleware($obl('read'));
+Route::post('compliance-obligations/{id}/evaluations', [ComplianceRegisterController::class, 'evaluate'])->whereNumber('id')->middleware($obl('update'));
+Route::post('compliance-obligations/{id}/applicability', [ComplianceRegisterController::class, 'applicability'])->whereNumber('id')->middleware($obl('update'));
+Route::post('compliance-obligations/{id}/analysis', [ComplianceRegisterController::class, 'analysis'])->whereNumber('id')->middleware($obl('update'));
+Route::post('compliance-obligations/{id}/agreement-plan', [ComplianceRegisterController::class, 'agreementPlan'])->whereNumber('id')->middleware($obl('create'));
+Route::get('compliance-obligations', [ComplianceObligationController::class, 'index'])->middleware($obl('read'));
+Route::post('compliance-obligations', [ComplianceObligationController::class, 'store'])->middleware($obl('create'));
+Route::put('compliance-obligations/{id}', [ComplianceObligationController::class, 'update'])->whereNumber('id')->middleware($obl('update'));
+Route::patch('compliance-obligations/{id}', [ComplianceObligationController::class, 'update'])->whereNumber('id')->middleware($obl('update'));
+Route::delete('compliance-obligations/{id}', [ComplianceObligationController::class, 'destroy'])->whereNumber('id')->middleware($obl('delete'));
 
 Route::get('product-service-requirements-obligation-aspects', [ComplianceObligationAspectController::class, 'index']);
 Route::post('product-service-requirements-obligation-aspects', [ComplianceObligationAspectController::class, 'store']);
@@ -200,7 +249,7 @@ Route::get('prod-req-obligations/template', [ComplianceObligationController::cla
 Route::get('prod-req-obligations/export-xlsx', [ComplianceObligationController::class, 'exportXlsx']);
 Route::post('prod-req-obligations/import-xlsx', [ComplianceObligationController::class, 'importXlsx']);
 Route::apiResource('prod-req-obligations', ComplianceObligationController::class, [
-    'parameters' => ['prod-req-obligations' => 'obligation']
+    'parameters' => ['prod-req-obligations' => 'obligation'],
 ])->except(['show']);
 
 Route::apiResource('applicable-requirements', ApplicableRequirementController::class);
@@ -213,4 +262,3 @@ Route::post('product-service-requirements/{productServiceRequirement}/review', [
 Route::apiResource('product-service-requirements', ProductServiceRequirementController::class)->parameters([
     'product-service-requirements' => 'productServiceRequirement',
 ]);
-

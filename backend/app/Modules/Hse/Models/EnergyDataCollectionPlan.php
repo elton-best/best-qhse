@@ -2,10 +2,12 @@
 
 namespace App\Modules\Hse\Models;
 
+use App\Models\Equipement;
+
 /**
  * Planification de la collecte des données énergétiques (ISO 50001 §6.6).
  */
-class EnergyDataCollectionPlan extends EnergyRecord
+class EnergyDataCollectionPlan extends ManagedRecord
 {
     protected static string $referencePrefix = 'PCD';
 
@@ -27,6 +29,6 @@ class EnergyDataCollectionPlan extends EnergyRecord
 
     public function equipment()
     {
-        return $this->belongsTo(\App\Models\Equipement::class, 'equipment_id');
+        return $this->belongsTo(Equipement::class, 'equipment_id');
     }
 }

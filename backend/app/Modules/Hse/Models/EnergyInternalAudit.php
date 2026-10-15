@@ -5,7 +5,7 @@ namespace App\Modules\Hse\Models;
 /**
  * Audit énergétique interne (ISO 50001 §9.2).
  */
-class EnergyInternalAudit extends EnergyRecord
+class EnergyInternalAudit extends ManagedRecord
 {
     protected static string $referencePrefix = 'AUE';
 

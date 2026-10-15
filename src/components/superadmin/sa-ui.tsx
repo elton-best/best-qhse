@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import type { PageMeta } from "@/integrations/backend/superadmin";
+export { Drawer, Field } from "../app/overlay";
 
 export const panel = "rounded-2xl border border-border bg-card";
 export const field =
@@ -90,34 +91,6 @@ export function Skeleton({ rows = 4 }: { rows?: number }) {
         <div key={index} className={`${panel} h-14 animate-pulse`} />
       ))}
     </div>
-  );
-}
-
-export function Drawer({ title, subtitle, onClose, children, wide = false }: { title: string; subtitle?: string | undefined; onClose: () => void; children: ReactNode; wide?: boolean }) {
-  return (
-    <div className="fixed inset-0 z-[80] flex justify-end bg-black/50" role="dialog" aria-modal="true" aria-label={title}>
-      <div className={`flex h-full w-full flex-col overflow-y-auto bg-background shadow-2xl ${wide ? "max-w-3xl" : "max-w-xl"}`}>
-        <div className="flex items-start justify-between gap-3 border-b border-border p-5">
-          <div>
-            {subtitle && <p className="text-xs font-bold uppercase tracking-wide text-primary">{subtitle}</p>}
-            <h2 className="font-display text-xl font-bold">{title}</h2>
-          </div>
-          <button type="button" className="rounded-xl px-3 py-1.5 text-sm font-semibold text-muted-foreground hover:bg-secondary" onClick={onClose}>
-            Fermer
-          </button>
-        </div>
-        <div className="flex-1 space-y-4 p-5">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-export function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">{label}</span>
-      {children}
-    </label>
   );
 }
 

@@ -7,7 +7,7 @@ use App\Modules\Hse\Models\EnergyDesignReview;
 /**
  * Revue de conception énergétique.
  */
-class EnergyDesignReviewController extends EnergyRecordController
+class EnergyDesignReviewController extends ManagedRecordController
 {
     protected function modelClass(): string
     {

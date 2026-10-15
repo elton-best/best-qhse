@@ -6,28 +6,47 @@ use App\Http\Controllers\Controller;
 use App\Models\ComplianceObligationAspect;
 use App\Models\ComplianceObligationText;
 use App\Models\Norm;
+use App\Models\Site;
+use App\Models\User;
+use App\Modules\Hse\Controllers\Concerns\ScopesToUserTenant;
+use App\Modules\Hse\Models\EnvironmentalAspect;
+use App\Modules\Hse\Services\ComplianceWatchService;
+use App\Services\DocumentSyncService;
 use App\Services\DocumentTypeResolver;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Shared\Date;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class ComplianceObligationController extends Controller
 {
+    use ScopesToUserTenant;
+
     public function index(Request $request)
     {
         $query = ComplianceObligationText::query()->with([
             'aspect.norms:id,code,name',
             'responsible:id,name,email',
             'actions.responsible:id,name,email',
+            'environmentalAspects:id,aspect_number,aspect',
         ]);
 
         if ($request->filled('site_id')) {
-            $siteId = (int) $request->site_id;
-            $query->whereHas('aspect', fn ($aspect) => $aspect->where('site_id', $siteId));
+            $query->where('site_id', (int) $request->site_id);
+        }
+        foreach (['source_type', 'analysis_status'] as $column) {
+            if ($request->filled($column)) {
+                $query->where($column, $request->input($column));
+            }
+        }
+        if ($request->filled('is_applicable')) {
+            $query->where('is_applicable', filter_var($request->input('is_applicable'), FILTER_VALIDATE_BOOLEAN));
         }
         if ($request->filled('compliance_status')) {
             $query->where('compliance_status', $request->compliance_status);
@@ -36,7 +55,7 @@ class ComplianceObligationController extends Controller
             $query->where('validity_status', $request->validity_status);
         }
         if ($request->filled('q')) {
-            $term = '%' . trim((string) $request->q) . '%';
+            $term = '%'.trim((string) $request->q).'%';
             $query->where(function ($inner) use ($term) {
                 $inner->where('ref', 'ilike', $term)
                     ->orWhere('regulatory_reference', 'ilike', $term)
@@ -62,9 +81,10 @@ class ComplianceObligationController extends Controller
 
     public function store(Request $request)
     {
-        $validated = $request->validate([
+        $this->assertTenant($request);
+        $validated = $request->validate($this->extraRules(false) + [
             'aspect_id' => 'nullable|exists:compliance_obligation_aspects,id',
-            'site_id' => 'required_without:aspect_id|nullable|exists:sites,id',
+            'site_id' => 'nullable|integer',
             'aspect_name' => 'required_without:aspect_id|nullable|string|max:255',
             'aspect_description' => 'nullable|string',
             'norm_ids' => 'nullable|array',
@@ -76,7 +96,7 @@ class ComplianceObligationController extends Controller
             'entry_into_force_date' => 'nullable|date',
             'regulatory_change_status' => 'nullable|in:existing,new,modified',
             'validity_status' => 'nullable|in:in_force,obsolete',
-            'compliance_status' => 'nullable|in:compliant,partial,non_compliant,not_applicable',
+            'compliance_status' => 'nullable|in:compliant,partial,non_compliant,not_applicable,not_evaluated',
             'actions_corrective_preventive' => 'nullable|string',
             'deadline' => 'nullable|date',
             'responsible_id' => 'nullable|exists:users,id',
@@ -90,8 +110,23 @@ class ComplianceObligationController extends Controller
             'actions.*.comments' => 'nullable|string',
         ]);
 
-        $aspect = $this->resolveAspect($validated);
+        if (empty($validated['aspect_id'])) {
+            $validated['site_id'] = $this->resolveSite($request, isset($validated['site_id']) ? (int) $validated['site_id'] : null)->id;
+        }
+        $this->assertSameEnterprise($validated, (int) $request->user()->enterprise_id);
+        $this->assertEnvironmentalAspectsOwned($validated);
 
+        $text = DB::transaction(fn () => $this->persistNewText($validated, $this->resolveAspect($validated)));
+        $text->load(['aspect.norms:id,code,name', 'responsible:id,name,email', 'actions.responsible:id,name,email', 'environmentalAspects:id,aspect_number,aspect']);
+
+        return response()->json(['data' => $this->serializeText($text)], 201);
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     */
+    private function persistNewText(array $validated, ComplianceObligationAspect $aspect): ComplianceObligationText
+    {
         $text = ComplianceObligationText::create([
             'aspect_id' => $aspect->id,
             'ref' => $this->generateRef(),
@@ -108,7 +143,10 @@ class ComplianceObligationController extends Controller
             'responsible_id' => $validated['responsible_id'] ?? null,
             'evaluation_frequency' => $validated['evaluation_frequency'] ?? null,
             'comments' => $validated['comments'] ?? null,
+            ...$this->extraAttributes($validated, null),
         ]);
+        $this->syncEnvironmentalAspects($text, $validated);
+        $this->flagForAnalysis($text);
 
         foreach ($validated['actions'] ?? [] as $action) {
             $text->actions()->create([
@@ -120,16 +158,16 @@ class ComplianceObligationController extends Controller
             ]);
         }
 
-        $text->load(['aspect.norms:id,code,name', 'responsible:id,name,email', 'actions.responsible:id,name,email']);
-
-        return response()->json(['data' => $this->serializeText($text)], 201);
+        return $text;
     }
 
     public function update(Request $request, int $id)
     {
+        $this->assertTenant($request);
         $text = ComplianceObligationText::with('aspect')->findOrFail($id);
+        $enterpriseId = (int) $text->enterprise_id;
 
-        $validated = $request->validate([
+        $validated = $request->validate($this->extraRules(true) + [
             'aspect_id' => 'sometimes|nullable|exists:compliance_obligation_aspects,id',
             'regulatory_reference' => 'sometimes|string',
             'description' => 'sometimes|nullable|string',
@@ -138,7 +176,7 @@ class ComplianceObligationController extends Controller
             'entry_into_force_date' => 'sometimes|nullable|date',
             'regulatory_change_status' => 'sometimes|nullable|in:existing,new,modified',
             'validity_status' => 'sometimes|nullable|in:in_force,obsolete',
-            'compliance_status' => 'sometimes|nullable|in:compliant,partial,non_compliant,not_applicable',
+            'compliance_status' => 'sometimes|nullable|in:compliant,partial,non_compliant,not_applicable,not_evaluated',
             'actions_corrective_preventive' => 'sometimes|nullable|string',
             'deadline' => 'sometimes|nullable|date',
             'responsible_id' => 'sometimes|nullable|exists:users,id',
@@ -151,6 +189,8 @@ class ComplianceObligationController extends Controller
             'actions.*.status' => 'nullable|in:pending,in_progress,done,cancelled',
             'actions.*.comments' => 'nullable|string',
         ]);
+
+        $this->assertSameEnterprise($validated, $enterpriseId);
 
         $text->update([
             'aspect_id' => array_key_exists('aspect_id', $validated) ? ($validated['aspect_id'] ?? $text->aspect_id) : $text->aspect_id,
@@ -168,6 +208,9 @@ class ComplianceObligationController extends Controller
             'evaluation_frequency' => array_key_exists('evaluation_frequency', $validated) ? $validated['evaluation_frequency'] : $text->evaluation_frequency,
             'comments' => array_key_exists('comments', $validated) ? $validated['comments'] : $text->comments,
         ]);
+        $text->update($this->extraAttributes($validated, $text));
+        $this->syncEnvironmentalAspects($text, $validated);
+        $this->flagForAnalysis($text);
 
         if (array_key_exists('actions', $validated)) {
             $text->actions()->delete();
@@ -182,7 +225,7 @@ class ComplianceObligationController extends Controller
             }
         }
 
-        $text->load(['aspect.norms:id,code,name', 'responsible:id,name,email', 'actions.responsible:id,name,email']);
+        $text->load(['aspect.norms:id,code,name', 'responsible:id,name,email', 'actions.responsible:id,name,email', 'environmentalAspects:id,aspect_number,aspect']);
 
         return response()->json(['data' => $this->serializeText($text)]);
     }
@@ -191,6 +234,7 @@ class ComplianceObligationController extends Controller
     {
         $text = ComplianceObligationText::findOrFail($id);
         $text->delete();
+
         return response()->json(['message' => 'Obligation supprimée.']);
     }
 
@@ -216,7 +260,7 @@ class ComplianceObligationController extends Controller
 
         // Export is built only from database data.
         // The provided file is used as structural inspiration (title + register columns).
-        $spreadsheet = new Spreadsheet();
+        $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Registre');
         $sheet->setCellValue('A1', 'REGISTRE DE VEILLE RÉGLEMENTAIRE');
@@ -295,21 +339,21 @@ class ComplianceObligationController extends Controller
                 $sheet->mergeCells("C{$groupStartRow}:C{$groupEndRow}");
                 $sheet->getStyle("B{$groupStartRow}:B{$groupEndRow}")
                     ->getAlignment()
-                    ->setVertical(\PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER);
+                    ->setVertical(Alignment::VERTICAL_CENTER);
                 $sheet->getStyle("C{$groupStartRow}:C{$groupEndRow}")
                     ->getAlignment()
-                    ->setVertical(\PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER);
+                    ->setVertical(Alignment::VERTICAL_CENTER);
             }
         }
 
         foreach (range('A', 'P') as $column) {
-            $sheet->getStyle($column . ($startRow) . ':' . $column . max($rowIndex, $startRow))->getAlignment()->setWrapText(true);
+            $sheet->getStyle($column.($startRow).':'.$column.max($rowIndex, $startRow))->getAlignment()->setWrapText(true);
             $sheet->getColumnDimension($column)->setAutoSize(true);
         }
 
-        $filename = 'registre_veille_reglementaire_' . now()->format('Ymd_His') . '.xlsx';
-        $tempPath = Storage::disk('local')->path('exports/' . $filename);
-        if (!is_dir(dirname($tempPath))) {
+        $filename = 'registre_veille_reglementaire_'.now()->format('Ymd_His').'.xlsx';
+        $tempPath = Storage::disk('local')->path('exports/'.$filename);
+        if (! is_dir(dirname($tempPath))) {
             mkdir(dirname($tempPath), 0775, true);
         }
 
@@ -322,13 +366,13 @@ class ComplianceObligationController extends Controller
             $siteId = (int) $user->site_id;
         }
         if ($siteId <= 0 && $user?->enterprise_id) {
-            $siteId = (int) \App\Models\Site::query()
+            $siteId = (int) Site::query()
                 ->where('enterprise_id', (int) $user->enterprise_id)
                 ->orderBy('id')
                 ->value('id');
         }
         if ($siteId > 0) {
-            app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
+            app(DocumentSyncService::class)->syncGeneratedProcessDocument([
                 'site_id' => $siteId,
                 'process_id' => null,
                 'process_code' => 'GEN',
@@ -347,7 +391,7 @@ class ComplianceObligationController extends Controller
 
     public function downloadTemplate(Request $request)
     {
-        $spreadsheet = new Spreadsheet();
+        $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Modele import');
         $sheet->setCellValue('A1', 'MODELE D\'IMPORT - REGISTRE DE VEILLE RÉGLEMENTAIRE');
@@ -381,13 +425,13 @@ class ComplianceObligationController extends Controller
         $sheet->fromArray($sampleRows, null, 'A6');
 
         foreach (range('A', 'P') as $column) {
-            $sheet->getStyle($column . '5:' . $column . '8')->getAlignment()->setWrapText(true);
+            $sheet->getStyle($column.'5:'.$column.'8')->getAlignment()->setWrapText(true);
             $sheet->getColumnDimension($column)->setAutoSize(true);
         }
 
-        $filename = 'modele_import_registre_veille_reglementaire_' . now()->format('Ymd_His') . '.xlsx';
-        $tempPath = Storage::disk('local')->path('exports/' . $filename);
-        if (!is_dir(dirname($tempPath))) {
+        $filename = 'modele_import_registre_veille_reglementaire_'.now()->format('Ymd_His').'.xlsx';
+        $tempPath = Storage::disk('local')->path('exports/'.$filename);
+        if (! is_dir(dirname($tempPath))) {
             mkdir(dirname($tempPath), 0775, true);
         }
 
@@ -404,7 +448,8 @@ class ComplianceObligationController extends Controller
             'file' => 'required|file|mimes:xlsx,xls|max:10240',
         ]);
 
-        $siteId = (int) $validated['site_id'];
+        $this->assertTenant($request);
+        $siteId = $this->resolveSite($request, (int) $validated['site_id'])->id;
         $file = $request->file('file');
         $reader = IOFactory::createReaderForFile($file->getRealPath());
         $reader->setReadDataOnly(true);
@@ -431,7 +476,7 @@ class ComplianceObligationController extends Controller
                 }
 
                 $regulatoryReference = trim((string) ($row['D'] ?? ''));
-                if (!$currentAspectName || $regulatoryReference === '') {
+                if (! $currentAspectName || $regulatoryReference === '') {
                     continue;
                 }
 
@@ -534,9 +579,113 @@ class ComplianceObligationController extends Controller
         }
     }
 
+    /**
+     * Champs du registre unifié (ISO 14001 §6.1.3) ajoutés au contrat historique.
+     *
+     * @return array<string, mixed>
+     */
+    private function extraRules(bool $sometimes): array
+    {
+        $optional = $sometimes ? 'sometimes|nullable' : 'nullable';
+
+        return [
+            'title' => "{$optional}|string|max:255",
+            'source_type' => ($sometimes ? 'sometimes|' : 'nullable|').'in:'.implode(',', ComplianceObligationText::SOURCE_TYPES),
+            'authority' => "{$optional}|string|max:255",
+            'source_url' => "{$optional}|url|max:500",
+            'permit_number' => "{$optional}|string|max:255",
+            'expiry_date' => "{$optional}|date",
+            'agreement_parent_id' => "{$optional}|integer",
+            'environmental_aspect_ids' => ($sometimes ? 'sometimes|' : 'nullable|').'array',
+            'environmental_aspect_ids.*' => 'integer',
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function extraAttributes(array $validated, ?ComplianceObligationText $existing): array
+    {
+        $attributes = [];
+        foreach (['title', 'source_type', 'authority', 'source_url', 'permit_number', 'expiry_date', 'agreement_parent_id'] as $key) {
+            if (array_key_exists($key, $validated)) {
+                $attributes[$key] = $validated[$key];
+            }
+        }
+        if ($existing === null) {
+            $attributes['source_type'] = $attributes['source_type'] ?? 'law';
+            $attributes['analysis_status'] = 'analyzed';
+        }
+
+        // Un texte nouveau ou modifié doit faire l'objet d'une analyse d'impact (M5-08).
+        $change = $validated['regulatory_change_status'] ?? null;
+        if (in_array($change, ['new', 'modified'], true) && ($existing === null || $existing->regulatory_change_status !== $change)) {
+            $attributes['analysis_status'] = 'to_analyze';
+        }
+
+        return $attributes;
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     */
+    private function syncEnvironmentalAspects(ComplianceObligationText $text, array $validated): void
+    {
+        if (! array_key_exists('environmental_aspect_ids', $validated)) {
+            return;
+        }
+        $this->assertEnvironmentalAspectsOwned($validated);
+        $text->environmentalAspects()->sync(array_values(array_unique($validated['environmental_aspect_ids'] ?? [])));
+    }
+
+    /**
+     * Le périmètre d'entreprise est appliqué par le scope du modèle : un aspect étranger n'est pas trouvé.
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    private function assertEnvironmentalAspectsOwned(array $validated): void
+    {
+        $ids = array_values(array_unique($validated['environmental_aspect_ids'] ?? []));
+        if ($ids !== [] && EnvironmentalAspect::query()->whereIn('id', $ids)->count() !== count($ids)) {
+            abort(response()->json([
+                'message' => 'Un aspect environnemental sélectionné est introuvable pour votre entreprise.',
+                'errors' => ['environmental_aspect_ids' => ['Aspect introuvable.']],
+            ], 422));
+        }
+    }
+
+    /**
+     * Notifie le responsable qu'un texte nouveau ou modifié attend son analyse d'impact.
+     */
+    private function flagForAnalysis(ComplianceObligationText $text): void
+    {
+        if ($text->analysis_status !== 'to_analyze' || ! $text->wasChanged('analysis_status') && ! $text->wasRecentlyCreated) {
+            return;
+        }
+        app(ComplianceWatchService::class)->notifyAnalysisRequired($text);
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     */
+    private function assertSameEnterprise(array $validated, int $enterpriseId): void
+    {
+        $this->assertOwnedByEnterprise(['responsible_id' => ['table' => 'users', 'column' => 'enterprise_id']], $validated, $enterpriseId);
+        if (! empty($validated['agreement_parent_id'])) {
+            $owned = ComplianceObligationText::query()->whereKey($validated['agreement_parent_id'])->exists();
+            if (! $owned) {
+                abort(response()->json([
+                    'message' => "L'obligation parente est introuvable pour votre entreprise.",
+                    'errors' => ['agreement_parent_id' => ['Obligation introuvable.']],
+                ], 422));
+            }
+        }
+    }
+
     private function resolveAspect(array $validated): ComplianceObligationAspect
     {
-        if (!empty($validated['aspect_id'])) {
+        if (! empty($validated['aspect_id'])) {
             return ComplianceObligationAspect::findOrFail((int) $validated['aspect_id']);
         }
 
@@ -555,7 +704,7 @@ class ComplianceObligationController extends Controller
     {
         $year = now()->format('Y');
         $prefix = "OBL-{$year}-";
-        $last = ComplianceObligationText::where('ref', 'like', $prefix . '%')
+        $last = ComplianceObligationText::query()->withoutGlobalScopes()->withTrashed()->where('ref', 'like', $prefix.'%')
             ->orderByDesc('ref')
             ->value('ref');
 
@@ -564,7 +713,7 @@ class ComplianceObligationController extends Controller
             $seq = ((int) $matches[1]) + 1;
         }
 
-        return $prefix . Str::padLeft((string) $seq, 4, '0');
+        return $prefix.Str::padLeft((string) $seq, 4, '0');
     }
 
     private function serializeText(ComplianceObligationText $row): array
@@ -597,6 +746,27 @@ class ComplianceObligationController extends Controller
             'responsible_name' => $row->responsible?->name,
             'evaluation_frequency' => $row->evaluation_frequency,
             'comments' => $row->comments,
+            'title' => $row->title,
+            'source_type' => $row->source_type,
+            'authority' => $row->authority,
+            'source_url' => $row->source_url,
+            'site_id' => $row->site_id,
+            'is_applicable' => $row->is_applicable,
+            'applicability_justification' => $row->applicability_justification,
+            'permit_number' => $row->permit_number,
+            'expiry_date' => $row->expiry_date?->format('Y-m-d'),
+            'last_evaluation_date' => $row->last_evaluation_date?->format('Y-m-d'),
+            'next_evaluation_date' => $row->next_evaluation_date?->format('Y-m-d'),
+            'analysis_status' => $row->analysis_status,
+            'analysis_note' => $row->analysis_note,
+            'agreement_parent_id' => $row->agreement_parent_id,
+            'environmental_aspects' => $row->relationLoaded('environmentalAspects')
+                ? $row->environmentalAspects->map(fn ($aspect) => [
+                    'id' => $aspect->id,
+                    'aspect_number' => $aspect->aspect_number,
+                    'aspect' => $aspect->aspect,
+                ])->values()
+                : [],
             'actions' => $row->actions->map(fn ($action) => [
                 'id' => $action->id,
                 'title' => $action->title,
@@ -654,6 +824,7 @@ class ComplianceObligationController extends Controller
     private function normalizeStringOrNull(mixed $value): ?string
     {
         $normalized = trim((string) ($value ?? ''));
+
         return $normalized !== '' ? $normalized : null;
     }
 
@@ -665,7 +836,7 @@ class ComplianceObligationController extends Controller
 
         if (is_numeric($value)) {
             try {
-                return \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject((float) $value)->format('Y-m-d');
+                return Date::excelToDateTimeObject((float) $value)->format('Y-m-d');
             } catch (\Throwable) {
                 return null;
             }
@@ -677,7 +848,7 @@ class ComplianceObligationController extends Controller
         }
 
         try {
-            return \Carbon\Carbon::parse($normalized)->format('Y-m-d');
+            return Carbon::parse($normalized)->format('Y-m-d');
         } catch (\Throwable) {
             return null;
         }
@@ -686,6 +857,7 @@ class ComplianceObligationController extends Controller
     private function mapChangeStatus(mixed $value): ?string
     {
         $normalized = Str::lower(trim((string) ($value ?? '')));
+
         return match ($normalized) {
             'nouveau', 'new' => 'new',
             'modifié', 'modifie', 'modified' => 'modified',
@@ -697,6 +869,7 @@ class ComplianceObligationController extends Controller
     private function mapValidityStatus(mixed $value): ?string
     {
         $normalized = Str::lower(trim((string) ($value ?? '')));
+
         return match ($normalized) {
             'en vigueur', 'in_force', 'in force' => 'in_force',
             'obsolète', 'obsolete', 'obsoletee' => 'obsolete',
@@ -707,6 +880,7 @@ class ComplianceObligationController extends Controller
     private function mapComplianceStatus(mixed $value): string
     {
         $normalized = Str::lower(trim((string) ($value ?? '')));
+
         return match ($normalized) {
             'conforme', 'compliant' => 'compliant',
             'partiellement conforme', 'partial' => 'partial',
@@ -718,6 +892,7 @@ class ComplianceObligationController extends Controller
     private function mapEvaluationFrequency(mixed $value): ?string
     {
         $normalized = Str::lower(trim((string) ($value ?? '')));
+
         return match ($normalized) {
             'mensuelle', 'monthly' => 'monthly',
             'trimestrielle', 'quarterly' => 'quarterly',
@@ -735,7 +910,7 @@ class ComplianceObligationController extends Controller
             return null;
         }
 
-        return \App\Models\User::query()
+        return User::query()
             ->whereRaw('LOWER(name) = ?', [Str::lower($name)])
             ->value('id');
     }

@@ -2,10 +2,12 @@
 
 namespace App\Modules\Hse\Models;
 
+use App\Models\Equipement;
+
 /**
  * Surveillance, mesurage et analyse de la performance énergétique (ISO 50001 §9.1.1).
  */
-class EnergyMonitoringRecord extends EnergyRecord
+class EnergyMonitoringRecord extends ManagedRecord
 {
     protected static string $referencePrefix = 'SUR';
 
@@ -37,6 +39,6 @@ class EnergyMonitoringRecord extends EnergyRecord
 
     public function equipment()
     {
-        return $this->belongsTo(\App\Models\Equipement::class, 'equipment_id');
+        return $this->belongsTo(Equipement::class, 'equipment_id');
     }
 }

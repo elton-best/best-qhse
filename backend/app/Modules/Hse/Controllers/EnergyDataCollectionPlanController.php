@@ -7,7 +7,7 @@ use App\Modules\Hse\Models\EnergyDataCollectionPlan;
 /**
  * Planification de la collecte des données énergétiques.
  */
-class EnergyDataCollectionPlanController extends EnergyRecordController
+class EnergyDataCollectionPlanController extends ManagedRecordController
 {
     protected function modelClass(): string
     {
