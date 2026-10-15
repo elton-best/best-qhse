@@ -40,6 +40,14 @@ import { ActionsPage } from "@/components/app/planning/ActionsPage";
 import { SmPlanPage } from "@/components/app/planning/SmPlanPage";
 import { HabilitationsPage } from "@/components/app/HabilitationsPage";
 import { SitesPage } from "@/components/app/SitesPage";
+import {
+  AwarenessPage,
+  CommunicationPage,
+  CompetencesPage,
+  DocumentsPage,
+  ResourcesPage,
+  SupportOverviewPage,
+} from "@/components/app/SupportPages";
 import { GlobalLoader } from "@/components/app/GlobalLoader";
 import { SectionErrorBoundary } from "@/components/app/SectionErrorBoundary";
 
@@ -80,6 +88,7 @@ const CUSTOM = [
   "mes-actions",
   "boite-reception",
   "habilitations",
+  "support",
 ];
 
 type Search = {
@@ -159,6 +168,18 @@ function SectionPage() {
       return <InboxPage />;
     case "habilitations":
       return <HabilitationsPage />;
+    case "support":
+      return <SupportOverviewPage />;
+    case "equipements":
+      return <ResourcesPage />;
+    case "competences":
+      return <CompetencesPage />;
+    case "sensibilisation":
+      return <AwarenessPage />;
+    case "communication":
+      return <CommunicationPage />;
+    case "documents":
+      return <DocumentsPage />;
     case "contexte":
       return <ContextOrganisationPage />;
     case "parties-interessees":

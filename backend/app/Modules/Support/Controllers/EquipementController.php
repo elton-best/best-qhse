@@ -30,6 +30,10 @@ class EquipementController extends Controller
     {
         $query = Equipement::with(['categorie', 'localisation']);
 
+        if ($request->filled('site_id')) {
+            $query->where('site_id', (int) $request->site_id);
+        }
+
         if ($request->has('categorie_id')) {
             $query->where('categorie_id', $request->categorie_id);
         }
@@ -69,6 +73,7 @@ class EquipementController extends Controller
             ?: Equipement::deriveEnterpriseSigle((string) ($enterprise?->name ?? $user?->enterprise?->name ?? 'ENT')));
 
         $validator = Validator::make($request->all(), [
+            'site_id' => 'nullable|integer|exists:sites,id',
             'categorie_id' => 'required|exists:codification_elements,id',
             'localisation_id' => 'required|exists:codification_elements,id',
             'nom_commun' => 'required|string|max:255',
@@ -86,6 +91,19 @@ class EquipementController extends Controller
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $siteId = (int) ($request->input('site_id') ?: ($user?->site_id ?? 0));
+        if ($siteId <= 0) {
+            return response()->json(['message' => 'Un site est requis pour enregistrer l’équipement.'], 422);
+        }
+
+        $site = Site::query()
+            ->whereKey($siteId)
+            ->where('enterprise_id', $enterpriseId)
+            ->first();
+        if (!$site || (!$user?->isEnterpriseAdmin() && (int) ($user?->site_id ?? 0) > 0 && $siteId !== (int) $user->site_id)) {
+            return response()->json(['message' => 'Le site sélectionné n’est pas autorisé pour cet utilisateur.'], 422);
         }
 
         $categorie = CodificationElement::findOrFail($request->categorie_id);
@@ -137,6 +155,7 @@ class EquipementController extends Controller
         $equipement = Equipement::create([
             ...$request->all(),
             'enterprise_id' => $enterpriseId,
+            'site_id' => $siteId,
             'code_complet' => $codeComplet,
             'nom_commun_abrege' => $nomCommunAbrege,
             'indice' => $indice,
@@ -153,8 +172,7 @@ class EquipementController extends Controller
         if ($equipement->necessite_maintenance && $equipement->frequence_maintenance_jours) {
             $this->scheduleInitialMaintenance(
                 $equipement,
-                (int) $equipement->frequence_maintenance_jours,
-                $enterpriseId
+                (int) $equipement->frequence_maintenance_jours
             );
         }
 
@@ -248,8 +266,7 @@ class EquipementController extends Controller
         if ($equipement->necessite_maintenance && $equipement->frequence_maintenance_jours) {
             $this->scheduleInitialMaintenance(
                 $equipement,
-                (int) $equipement->frequence_maintenance_jours,
-                $enterpriseId
+                (int) $equipement->frequence_maintenance_jours
             );
         }
 
@@ -293,7 +310,58 @@ class EquipementController extends Controller
         ]);
     }
 
-    private function scheduleInitialMaintenance(Equipement $equipement, int $frequencyDays, int $enterpriseId): void
+    /**
+     * Gabarit d'import de l'inventaire des équipements (colonnes = import()).
+     * Colonnes obligatoires : site, nom, categorie, localisation, etat, annee.
+     */
+    public function template()
+    {
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Inventaire');
+
+        $headers = [
+            'site', 'code_complet', 'nom', 'categorie', 'localisation', 'etat', 'annee',
+            'marque', 'modele', 'numero_serie', 'valeur', 'observations',
+            'necessite_maintenance', 'frequence',
+        ];
+        $sheet->fromArray($headers, null, 'A1');
+
+        $examples = [
+            ['Site principal', '', 'Écran 50 pouces', 'Informatique et bureautique', 'Bureau du CEO', 'bon', '2025', 'Samsung', '', '', '', '', 'non', ''],
+            ['Site principal', '', 'Ordinateur portable', 'Informatique et bureautique', 'Bureau du COO', 'tres_bon', '2024', 'HP', 'ProBook', 'SN12345', '750000', '', 'oui', '180'],
+        ];
+        $sheet->fromArray($examples, null, 'A2');
+
+        $sheet->getStyle('A1:N1')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => [
+                'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                'startColor' => ['rgb' => '1976D2'],
+            ],
+        ]);
+        foreach (range('A', 'N') as $column) {
+            $sheet->getColumnDimension($column)->setAutoSize(true);
+        }
+
+        $legend = $spreadsheet->createSheet();
+        $legend->setTitle('Légende');
+        $legend->setCellValue('A1', 'LÉGENDE');
+        $legend->getStyle('A1')->getFont()->setBold(true);
+        $legend->setCellValue('A2', 'Colonnes obligatoires : site (nom du site), nom, categorie (libellé ou code), localisation (libellé ou code), etat (tres_bon/bon/mauvais), annee (AAAA).');
+        $legend->setCellValue('A3', 'code_complet : vide = création avec codification auto ; renseigné = mise à jour de l\'équipement existant.');
+        $legend->setCellValue('A4', 'necessite_maintenance : oui/non. frequence : jours (ex. 180).');
+        $legend->getColumnDimension('A')->setWidth(140);
+
+        $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+        $fileName = 'modele_inventaire_equipements.xlsx';
+        $tempPath = storage_path('app/temp_'.uniqid('equip_template_', true).'.xlsx');
+        $writer->save($tempPath);
+
+        return response()->download($tempPath, $fileName)->deleteFileAfterSend(true);
+    }
+
+    private function scheduleInitialMaintenance(Equipement $equipement, int $frequencyDays): void
     {
         if ($frequencyDays <= 0) {
             return;
@@ -309,7 +377,6 @@ class EquipementController extends Controller
         }
 
         Maintenance::create([
-            'enterprise_id' => $enterpriseId,
             'equipement_id' => $equipement->id,
             'type' => 'preventive',
             'date_prevue' => Carbon::now()->addDays($frequencyDays)->toDateString(),

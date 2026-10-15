@@ -1,6 +1,9 @@
 import { getRouteApi } from "@tanstack/react-router";
 import {
+  ArrowUpDown,
   Calendar,
+  Check,
+  CheckCircle2,
   ClipboardList,
   Download,
   Eye,
@@ -13,10 +16,26 @@ import {
   Trash2,
   TrendingUp,
   Upload,
+  User,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
+import {
+  Kanban,
+  KanbanBoard,
+  KanbanColumn,
+  KanbanColumnContent,
+  KanbanItem,
+  KanbanItemHandle,
+  KanbanOverlay,
+  type KanbanMoveEvent,
+} from "@/components/reui/kanban";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/reui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import { useCurrentSite } from "@/hooks/use-workspace";
 import { useProcesses } from "@/integrations/backend/context";
 import {
@@ -25,9 +44,9 @@ import {
   PLAN_ACTION_STATUSES,
   PLAN_ACTION_TYPES,
   computePlanActionStats,
+  downloadActionBoardTemplate,
   downloadPlanActionTemplate,
   isPlanActionOverdue,
-  kanbanOf,
   lastProgressNote,
   planActionPriorityLabel,
   planActionSourceLabel,
@@ -155,92 +174,294 @@ function dueClass(item: PlanActionItem): string {
     : "text-muted-foreground";
 }
 
-// ---------- Carte kanban ----------
+// ---------- Carte kanban (ReUI + thème projet) ----------
 
-function ActionCard({
+type BoardColumnKey = "draft" | "assigned" | "in_progress" | "done";
+
+const BOARD_COLUMNS: { key: BoardColumnKey; label: string; hint: string }[] = [
+  { key: "draft", label: "Brouillon", hint: "À qualifier" },
+  { key: "assigned", label: "Assignée", hint: "Prête à démarrer" },
+  { key: "in_progress", label: "En cours", hint: "Suivi actif" },
+  { key: "done", label: "Terminées", hint: "Terminée · Annulée" },
+];
+
+function columnKeyOf(status: string): BoardColumnKey {
+  if (status === "assigned") return "assigned";
+  if (status === "in_progress") return "in_progress";
+  if (
+    status === "completed" ||
+    status === "verified" ||
+    status === "closed" ||
+    status === "cancelled"
+  )
+    return "done";
+  return "draft";
+}
+
+function dropStatusOf(column: BoardColumnKey): PlanActionItem["status"] {
+  if (column === "assigned") return "assigned";
+  if (column === "in_progress") return "in_progress";
+  if (column === "done") return "completed";
+  return "draft";
+}
+
+function priorityBadgeVariant(
+  priority: string,
+): "destructive-light" | "warning-light" | "success-light" | "primary-light" {
+  if (priority === "urgent" || priority === "critical" || priority === "high")
+    return "destructive-light";
+  if (priority === "medium") return "warning-light";
+  if (priority === "low") return "success-light";
+  return "primary-light";
+}
+
+function ActionKanbanCard({
   item,
+  canChange,
   onView,
   onProgress,
-  onDelete,
+  onQuickStatus,
 }: {
   item: PlanActionItem;
+  canChange: boolean;
   onView: () => void;
   onProgress: () => void;
-  onDelete: () => void;
+  onQuickStatus: () => void;
 }) {
   const overdue = isPlanActionOverdue(item.due_date, item.status);
   const processLabel = item.process_title ?? item.process_code ?? null;
-  return (
-    <div
+  const responsibleLabel = item.responsible_name ?? item.responsible_email ?? "Non assigné";
+  const progress = Math.min(100, Math.max(0, Math.round(item.progress)));
+  const cardContent = (
+    <Card
+      className={`cursor-pointer ${overdue ? "border-destructive/60" : ""}`}
       onClick={onView}
-      className="cursor-pointer rounded-xl border border-border bg-background p-3 transition hover:border-primary hover:shadow-md"
     >
-      <div className="flex items-start justify-between gap-2">
-        <span className="font-mono text-xs font-bold text-primary">{item.reference}</span>
-        <PriorityPill priority={item.priority} />
-      </div>
-      <p className="mt-1.5 text-sm font-semibold text-foreground">{item.title}</p>
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
-        <TypePill type={item.type} />
-        {processLabel && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-            {processLabel}
+      <CardContent className="space-y-2.5 p-3.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-mono text-xs font-bold text-primary">{item.reference}</span>
+          <Badge variant={priorityBadgeVariant(item.priority)} className="shrink-0 text-xs">
+            {planActionPriorityLabel(item.priority)}
+          </Badge>
+        </div>
+        <p className="line-clamp-2 text-sm font-semibold text-foreground">{item.title}</p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant="outline" className="text-[11px]">
+            {planActionTypeLabel(item.type)}
+          </Badge>
+          {processLabel && (
+            <span className="max-w-full truncate text-[11px] font-semibold text-muted-foreground">
+              {processLabel}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <Avatar className="size-5 shrink-0">
+              <AvatarFallback className="text-[10px] font-bold">
+                {(responsibleLabel.trim().charAt(0) || "?").toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <span className="truncate font-semibold text-foreground">{responsibleLabel}</span>
           </span>
-        )}
-        {item.due_date && (
-          <span className={`${dueClass(item)} inline-flex items-center gap-1`}>
-            <Calendar className="h-3 w-3" />
-            {overdue ? "En retard · " : ""}
-            {formatDateFR(item.due_date)}
+          {item.due_date && (
+            <time
+              className={`shrink-0 tabular-nums ${overdue ? "font-bold text-destructive" : ""}`}
+            >
+              {overdue ? "En retard · " : ""}
+              {formatDateFR(item.due_date)}
+            </time>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <Progress value={progress} className="h-1.5 flex-1" />
+          <span className="shrink-0 text-[11px] font-bold text-muted-foreground">
+            {progress} %
           </span>
-        )}
-      </div>
-      <div className="mt-2">
-        <ProgressBar value={item.progress} />
-      </div>
-      <div className="mt-2.5 flex items-center justify-between gap-1 border-t border-border pt-2">
-        <StatusPill status={item.status} />
-        <div className="flex gap-1">
-          <button
+        </div>
+        <div className="flex items-center justify-between gap-1.5">
+          <span className="flex items-center gap-1.5">
+            <StatusPill status={item.status} />
+            {item.effectiveness_verified && (
+              <span title="Efficacité vérifiée">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+              </span>
+            )}
+          </span>
+          {item.source_label && (
+            <span className="truncate text-[11px] font-semibold text-muted-foreground">
+              {item.source_label}
+            </span>
+          )}
+        </div>
+        <div className="flex gap-1.5">
+          <Button
             type="button"
+            size="sm"
+            className="flex-1"
+            disabled={!canChange}
+            title={
+              canChange
+                ? "Changer le statut"
+                : "Réservé au responsable de l'action (ou droit actions.update)"
+            }
+            onClick={(e) => {
+              e.stopPropagation();
+              onQuickStatus();
+            }}
+          >
+            <Check className="h-3.5 w-3.5" /> Statut
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant="outline"
             title="Voir le détail"
             aria-label="Voir le détail"
             onClick={(e) => {
               e.stopPropagation();
               onView();
             }}
-            className="rounded-lg p-1.5 text-primary hover:bg-primary-soft"
           >
             <Eye className="h-4 w-4" />
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            size="icon"
+            variant="outline"
             title="Mettre à jour le suivi"
             aria-label="Mettre à jour le suivi"
             onClick={(e) => {
               e.stopPropagation();
               onProgress();
             }}
-            className="rounded-lg p-1.5 text-primary hover:bg-primary-soft"
           >
             <TrendingUp className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            title="Supprimer"
-            aria-label="Supprimer"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="rounded-lg p-1.5 text-destructive hover:bg-destructive/10"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
+
+  return (
+    <KanbanItem value={String(item.id)}>
+      <KanbanItemHandle className="cursor-grab">{cardContent}</KanbanItemHandle>
+    </KanbanItem>
+  );
+}
+
+// ---------- Dialog changement de statut rapide (cartes + drag-and-drop) ----------
+
+function QuickStatusDialog({
+  item,
+  preset,
+  onClose,
+  onChanged,
+}: {
+  item: PlanActionItem;
+  preset: PlanActionItem["status"];
+  onClose: () => void;
+  onChanged?: () => void;
+}) {
+  const statusMutation = usePlanActionStatus();
+  const [status, setStatus] = useState<PlanActionItem["status"]>(preset);
+  const [comment, setComment] = useState("");
+
+  const submit = () => {
+    statusMutation.mutate(
+      { id: item.id, status, comments: comment.trim() || undefined },
+      {
+        onSuccess: () => {
+          toast.success(`Statut mis à jour : ${planActionStatusLabel(status)}`);
+          onChanged?.();
+          onClose();
+        },
+        onError: (error) => {
+          const code = (error as { status?: unknown } | null)?.status;
+          toast.error(
+            code === 403
+              ? "Changement impossible : vous n'avez pas la permission (responsable de l'action ou droit actions.update requis)."
+              : errorMessage(error, "Changement impossible."),
+          );
+        },
+      },
+    );
+  };
+
+  return typeof document !== "undefined"
+    ? createPortal(
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-foreground/40 p-4"
+          onClick={() => {
+            if (!statusMutation.isPending) onClose();
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Changer le statut"
+          >
+            <p className="font-mono text-xs font-bold text-primary">{item.reference}</p>
+            <h2 className="mt-1 font-display text-lg font-bold text-foreground">
+              Changer le statut
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {item.title} — statut actuel « {planActionStatusLabel(item.status)} ».
+            </p>
+            <label className="mt-4 block">
+              <span className="mb-1.5 block text-xs font-bold text-muted-foreground">
+                Nouveau statut
+              </span>
+              <select
+                className={input}
+                value={status}
+                onChange={(e) => setStatus(e.target.value as PlanActionItem["status"])}
+                aria-label="Nouveau statut"
+              >
+                {PLAN_ACTION_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {planActionStatusLabel(s)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="mt-3 block">
+              <span className="mb-1.5 block text-xs font-bold text-muted-foreground">
+                Commentaire (optionnel)
+              </span>
+              <textarea
+                className={`${input} min-h-24`}
+                value={comment}
+                maxLength={1000}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="Motif du changement…"
+              />
+            </label>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={statusMutation.isPending}
+                className={`${secondary} flex-1`}
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={statusMutation.isPending}
+                className={`${primary} flex-1`}
+              >
+                {statusMutation.isPending ? "Application…" : "Appliquer"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
 }
 
 // ---------- Dialog création / édition ----------
@@ -839,18 +1060,22 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ActionDetailDialog({
+export function ActionDetailDialog({
   item,
   onClose,
   onEdit,
   onProgress,
   onDelete,
+  onChanged,
+  canChange,
 }: {
   item: PlanActionItem;
   onClose: () => void;
   onEdit: () => void;
   onProgress: () => void;
   onDelete: () => void;
+  onChanged?: () => void;
+  canChange?: boolean;
 }) {
   const statusMutation = usePlanActionStatus();
   const verifyMutation = useVerifyPlanAction();
@@ -859,16 +1084,30 @@ function ActionDetailDialog({
   const [rating, setRating] = useState(3);
   const [verifyComment, setVerifyComment] = useState("");
   const overdue = isPlanActionOverdue(item.due_date, item.status);
+  const allowed = canChange ?? true;
+
+  // Après un changement (refetch), le sélecteur suit le statut réel de l'action.
+  useEffect(() => {
+    setTargetStatus((prev) => (statusPrompt ? prev : item.status));
+  }, [item.status, statusPrompt]);
 
   const applyStatus = (comments: string) => {
     statusMutation.mutate(
       { id: item.id, status: targetStatus, comments: comments || undefined },
       {
         onSuccess: () => {
-          toast.success("Statut mis à jour");
+          toast.success(`Statut mis à jour : ${planActionStatusLabel(targetStatus)}`);
           setStatusPrompt(false);
+          onChanged?.();
         },
-        onError: (error) => toast.error(errorMessage(error, "Changement impossible.")),
+        onError: (error) => {
+          const status = (error as { status?: unknown } | null)?.status;
+          toast.error(
+            status === 403
+              ? "Changement impossible : vous n'avez pas la permission (responsable de l'action ou droit actions.update requis)."
+              : errorMessage(error, "Changement impossible."),
+          );
+        },
       },
     );
   };
@@ -970,9 +1209,14 @@ function ActionDetailDialog({
             </select>
             <button
               type="button"
-              disabled={statusMutation.isPending}
+              disabled={statusMutation.isPending || !allowed}
               onClick={() => setStatusPrompt(true)}
-              className={`${primary} shrink-0`}
+              title={
+                allowed
+                  ? "Appliquer le nouveau statut"
+                  : "Réservé au responsable de l'action (ou droit actions.update)"
+              }
+              className={`${primary} shrink-0 disabled:opacity-50`}
             >
               {statusMutation.isPending ? "Application…" : "Appliquer"}
             </button>
@@ -1062,17 +1306,25 @@ function ActionDetailDialog({
         </div>
       </div>
 
-      <PromptDialog
-        open={statusPrompt}
-        title="Changer le statut"
-        description={`Passer ${item.reference} au statut « ${planActionStatusLabel(targetStatus)} ». Commentaire optionnel.`}
-        label="Commentaire"
-        placeholder="Motif du changement…"
-        multiline
-        confirmLabel="Appliquer"
-        onSubmit={applyStatus}
-        onCancel={() => setStatusPrompt(false)}
-      />
+      {statusPrompt
+        ? createPortal(
+            <PromptDialog
+              open={statusPrompt}
+              title="Changer le statut"
+              description={`Passer ${item.reference} au statut « ${planActionStatusLabel(targetStatus)} ». Commentaire optionnel.`}
+              label="Commentaire"
+              placeholder="Motif du changement…"
+              multiline
+              confirmLabel="Appliquer"
+              busy={statusMutation.isPending}
+              onSubmit={applyStatus}
+              onCancel={() => {
+                if (!statusMutation.isPending) setStatusPrompt(false);
+              }}
+            />,
+            document.body,
+          )
+        : null}
           </div>,
           document.body,
         )
@@ -1111,7 +1363,11 @@ export function ActionsPage() {
   const [progressId, setProgressId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [sortBy, setSortBy] = useState<"priority" | "due" | "recent">("priority");
+  const [quickItem, setQuickItem] = useState<PlanActionItem | null>(null);
+  const [quickPreset, setQuickPreset] = useState<PlanActionItem["status"]>("in_progress");
   const [myId, setMyId] = useState("");
+  const [myPermissions, setMyPermissions] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const autoOpened = useRef(false);
 
@@ -1121,13 +1377,25 @@ export function ActionsPage() {
     backendApi.auth
       .me()
       .then((profile) => {
-        if (!off) setMyId(String(profile.id ?? ""));
+        if (!off) {
+          setMyId(String(profile.id ?? ""));
+          setMyPermissions(Array.isArray(profile.permissions) ? profile.permissions : []);
+        }
       })
       .catch(() => {});
     return () => {
       off = true;
     };
   }, []);
+
+  // Changement de statut autorisé : responsable de l'action ou droit global.
+  // Le backend reste l'arbitre (périmètre, workflow fermé) : ceci n'est qu'un
+  // garde-fou d'affichage pour éviter les 403 incompris.
+  const canChangeStatus = (item: PlanActionItem): boolean => {
+    if (myId === "") return true;
+    if (String(item.responsible_id ?? "") === myId) return true;
+    return myPermissions.some((p) => p === "actions.update" || p === "actions.manage");
+  };
 
   const items = useMemo(() => actionsQuery.data ?? [], [actionsQuery.data]);
   const userOptions = useMemo(() => usersQuery.data ?? [], [usersQuery.data]);
@@ -1159,7 +1427,8 @@ export function ActionsPage() {
 
   const filtered = useMemo(() => {
     const query = filters.search.trim().toLowerCase();
-    return items.filter((item) => {
+    const rank: Record<string, number> = { urgent: 0, critical: 0, high: 1, medium: 2, low: 3 };
+    const list = items.filter((item) => {
       if (filters.type !== "all" && item.type !== filters.type) return false;
       if (filters.priority !== "all" && item.priority !== filters.priority) return false;
       if (filters.status !== "all" && item.status !== filters.status) return false;
@@ -1187,19 +1456,27 @@ export function ActionsPage() {
       }
       return true;
     });
-  }, [items, filters]);
+    const sorted = [...list];
+    if (sortBy === "priority") {
+      sorted.sort((a, b) => (rank[a.priority] ?? 9) - (rank[b.priority] ?? 9));
+    } else if (sortBy === "due") {
+      sorted.sort((a, b) => (a.due_date ?? "9999").localeCompare(b.due_date ?? "9999"));
+    } else {
+      sorted.sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
+    }
+    return sorted;
+  }, [items, filters, sortBy]);
 
-  const columns = useMemo(() => {
-    const groups: Record<"draft" | "assigned" | "in_progress" | "completed", PlanActionItem[]> = {
+  // Colonnes du board ReUI (4) : les statuts vérifiée/clôturée rejoignent
+  // « Terminées », qui accueille aussi les annulées.
+  const boardColumns = useMemo(() => {
+    const groups: Record<BoardColumnKey, PlanActionItem[]> = {
       draft: [],
       assigned: [],
       in_progress: [],
-      completed: [],
+      done: [],
     };
-    for (const item of filtered) {
-      const column = kanbanOf(item.status);
-      if (column) groups[column].push(item);
-    }
+    for (const item of filtered) groups[columnKeyOf(item.status)].push(item);
     return groups;
   }, [filtered]);
 
@@ -1229,6 +1506,45 @@ export function ActionsPage() {
     setFormOpen(true);
   };
 
+  const openQuickStatus = (item: PlanActionItem, preset?: PlanActionItem["status"]) => {
+    setQuickItem(item);
+    setQuickPreset(preset ?? item.status);
+  };
+
+  // Après un changement de statut réussi, on lève le filtre de statut pour
+  // que la carte déplacée reste visible (sinon elle « disparaît » de la vue).
+  const revealAfterStatusChange = () => setFilter("status", "all");
+
+  // Déplacement inter-colonnes (ReUI `onMove`) : on n'applique jamais le
+  // déplacement localement (la valeur du board est dérivée des données) ;
+  // on ouvre l'invite de statut avec commentaire (traçabilité).
+  const handleKanbanMove = (event: KanbanMoveEvent) => {
+    if (event.activeContainer === event.overContainer) return;
+    const from =
+      boardColumns[event.activeContainer as BoardColumnKey] ??
+      ([] as PlanActionItem[]);
+    const target = from[event.activeIndex];
+    if (!target) return;
+    if (columnKeyOf(target.status) === event.overContainer) return;
+    if (!canChangeStatus(target)) {
+      toast.error(
+        "Changement impossible : réservé au responsable de l'action (ou droit actions.update).",
+      );
+      return;
+    }
+    openQuickStatus(target, dropStatusOf(event.overContainer as BoardColumnKey));
+  };
+
+  const overlayItem = (id: string | number): PlanActionItem | null => {
+    for (const key of Object.keys(boardColumns)) {
+      const found = boardColumns[key as BoardColumnKey]?.find(
+        (item: PlanActionItem) => String(item.id) === String(id),
+      );
+      if (found) return found;
+    }
+    return null;
+  };
+
   const confirmDelete = () => {
     if (deleteId === null) return;
     deleteMutation.mutate(deleteId, {
@@ -1245,7 +1561,19 @@ export function ActionsPage() {
     setDownloading(true);
     try {
       await downloadPlanActionTemplate();
-      toast.success("Modèle Excel téléchargé");
+      toast.success("Modèle d'import Excel téléchargé");
+    } catch (error) {
+      toast.error(errorMessage(error, "Téléchargement impossible."));
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const downloadBoard = async () => {
+    setDownloading(true);
+    try {
+      await downloadActionBoardTemplate();
+      toast.success("Canevas M10-D1 téléchargé");
     } catch (error) {
       toast.error(errorMessage(error, "Téléchargement impossible."));
     } finally {
@@ -1298,9 +1626,18 @@ export function ActionsPage() {
           disabled={downloading}
           onClick={downloadTemplate}
           className={secondary}
-          title="Télécharger le modèle Excel d'import"
+          title="Télécharger le modèle Excel d'import (colonnes = import)"
         >
-          <Download className="h-4 w-4" /> {downloading ? "Téléchargement…" : "Modèle Excel"}
+          <Download className="h-4 w-4" /> {downloading ? "Téléchargement…" : "Modèle d'import"}
+        </button>
+        <button
+          type="button"
+          disabled={downloading}
+          onClick={downloadBoard}
+          className={secondary}
+          title="Canevas M10-D1 : tableau de bord et maîtrise des actions (Logi files)"
+        >
+          <Download className="h-4 w-4" /> Canevas M10-D1
         </button>
         <button
           type="button"
@@ -1501,38 +1838,108 @@ export function ActionsPage() {
               )}
             </div>
           ) : viewMode === "kanban" ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {(
-                [
-                  { key: "draft", label: "Brouillon" },
-                  { key: "assigned", label: "Assignée" },
-                  { key: "in_progress", label: "En cours" },
-                  { key: "completed", label: "Terminée" },
-                ] as const
-              ).map((column) => (
-                <div key={column.key} className={`${card} p-4`}>
-                  <div className="mb-3 flex items-center gap-2">
-                    <h3 className="font-semibold text-foreground">{column.label}</h3>
-                    <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs font-bold text-muted-foreground">
-                      {columns[column.key].length}
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-lg font-bold text-foreground">
+                    Board des actions{" "}
+                    <span className="ml-1 rounded-full bg-primary px-2.5 py-0.5 text-xs font-bold text-primary-foreground">
+                      {filtered.length}
                     </span>
-                  </div>
-                  <div className="space-y-3">
-                    {columns[column.key].map((item) => (
-                      <ActionCard
-                        key={item.id}
-                        item={item}
-                        onView={() => setDetailId(item.id)}
-                        onProgress={() => setProgressId(item.id)}
-                        onDelete={() => setDeleteId(item.id)}
-                      />
-                    ))}
-                    {columns[column.key].length === 0 && (
-                      <p className="py-4 text-center text-xs text-muted-foreground">Vide</p>
-                    )}
-                  </div>
+                  </h2>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    Glissez les cartes entre colonnes pour changer leur statut (avec
+                    commentaire).
+                  </p>
                 </div>
-              ))}
+                <label className="flex items-center gap-2 rounded-full border border-border bg-background px-3.5 py-2 text-sm font-semibold">
+                  <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+                  <select
+                    value={sortBy}
+                    onChange={(e) =>
+                      setSortBy(e.target.value as "priority" | "due" | "recent")
+                    }
+                    aria-label="Trier les cartes"
+                    className="bg-transparent outline-none"
+                  >
+                    <option value="priority">Tri : Priorité</option>
+                    <option value="due">Tri : Échéance</option>
+                    <option value="recent">Tri : Récent</option>
+                  </select>
+                </label>
+              </div>
+              <Kanban
+                value={boardColumns}
+                onValueChange={() => {}}
+                getItemValue={(item) => String(item.id)}
+                onMove={handleKanbanMove}
+              >
+                <KanbanBoard className="grid auto-rows-fr grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  {BOARD_COLUMNS.map((column) => {
+                    const tasks = boardColumns[column.key];
+                    return (
+                      <KanbanColumn key={column.key} value={column.key}>
+                        <Card className="flex h-full flex-col">
+                          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-3">
+                            <div>
+                              <p className="text-sm font-bold text-foreground">
+                                {column.label}
+                              </p>
+                              <p className="text-[11px] font-semibold text-muted-foreground">
+                                {column.hint}
+                              </p>
+                            </div>
+                            <Badge variant="outline">{tasks.length}</Badge>
+                          </CardHeader>
+                          <CardContent className="flex-1">
+                            <KanbanColumnContent
+                              value={column.key}
+                              className="flex min-h-24 flex-col gap-2.5"
+                            >
+                              {tasks.map((item) => (
+                                <ActionKanbanCard
+                                  key={item.id}
+                                  item={item}
+                                  canChange={canChangeStatus(item)}
+                                  onView={() => setDetailId(item.id)}
+                                  onProgress={() => setProgressId(item.id)}
+                                  onQuickStatus={() => openQuickStatus(item)}
+                                />
+                              ))}
+                              {tasks.length === 0 && (
+                                <p className="rounded-xl border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+                                  Déposez une carte ici
+                                </p>
+                              )}
+                            </KanbanColumnContent>
+                          </CardContent>
+                        </Card>
+                      </KanbanColumn>
+                    );
+                  })}
+                </KanbanBoard>
+                <KanbanOverlay className="rounded-xl border-2 border-dashed border-primary/40 bg-primary-soft/60">
+                  {({ value }) => {
+                    const overlay = overlayItem(value);
+                    if (!overlay) return null;
+                    return (
+                      <Card className="w-64 opacity-90 shadow-xl">
+                        <CardContent className="space-y-1.5 p-3.5">
+                          <p className="font-mono text-[11px] font-bold text-primary">
+                            {overlay.reference}
+                          </p>
+                          <p className="line-clamp-2 text-sm font-semibold">
+                            {overlay.title}
+                          </p>
+                        </CardContent>
+                      </Card>
+                    );
+                  }}
+                </KanbanOverlay>
+              </Kanban>
+              <p className="mt-4 text-xs font-semibold text-muted-foreground">
+                Astuce : le changement de statut demande toujours un commentaire (traçabilité).
+              </p>
             </div>
           ) : (
             <div className={`${card} overflow-x-auto [-webkit-overflow-scrolling:touch]`}>
@@ -1664,6 +2071,8 @@ export function ActionsPage() {
         <ActionDetailDialog
           item={detailItem}
           onClose={() => setDetailId(null)}
+          onChanged={revealAfterStatusChange}
+          canChange={canChangeStatus(detailItem)}
           onEdit={() => {
             setEditing(detailItem);
             setPrefillSourceId(undefined);
@@ -1676,6 +2085,15 @@ export function ActionsPage() {
       )}
 
       {progressItem && <ProgressDialog item={progressItem} onClose={() => setProgressId(null)} />}
+
+      {quickItem && (
+        <QuickStatusDialog
+          item={quickItem}
+          preset={quickPreset}
+          onClose={() => setQuickItem(null)}
+          onChanged={revealAfterStatusChange}
+        />
+      )}
 
       <ConfirmDialog
         open={deleteId !== null}

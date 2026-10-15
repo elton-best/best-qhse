@@ -175,6 +175,9 @@ export function useDocumentWorkflow() {
 }
 
 const WORKFLOW_ACTION_LABELS: Record<string, string> = {
+  created: "Création",
+  updated: "Modification",
+  deleted: "Suppression",
   submitted: "Soumis pour vérification",
   confirm_code: "Code confirmé",
   submit_for_approval: "Soumission au workflow",

@@ -84,7 +84,6 @@ const IMPORT_COLUMNS = [
   "address",
   "job_title",
   "start_date",
-  "site",
 ] as const;
 
 function initialsOf(item: Collaborator): string {
@@ -520,7 +519,8 @@ export function CollaboratorsPage() {
       toast.success("Modèle d'import téléchargé.");
     } catch {
       const legend =
-        "Légende: first_name=Prénom* ; last_name=Nom* ; email=Email* ; phone=Téléphone ; address=Adresse ; job_title=Poste* ; start_date=AAAA-MM-JJ ; site=Site\n";
+        "Légende: first_name=Prénom* ; last_name=Nom* ; email=Email* ; phone=Téléphone ; address=Adresse ; job_title=Poste* ; start_date=AAAA-MM-JJ\n" +
+        "Les collaborateurs importés sont rattachés au site sélectionné.\n";
       downloadBlob(
         new Blob(["﻿" + legend + IMPORT_COLUMNS.join(";") + "\n"], {
           type: "text/csv;charset=utf-8",
@@ -927,7 +927,8 @@ export function CollaboratorsPage() {
           <h2 className="font-display text-lg font-bold">Import en masse</h2>
         </div>
         <p className={`mt-2 ${muted}`}>
-          Fichier CSV ou Excel avec les 8 colonnes : {IMPORT_COLUMNS.join(", ")}.
+          Fichier CSV ou Excel avec les 7 colonnes : {IMPORT_COLUMNS.join(", ")}. Les
+          collaborateurs sont rattachés au site sélectionné.
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button className={secondary} onClick={() => void downloadTemplate()}>

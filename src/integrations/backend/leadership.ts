@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { backendApi } from "@/integrations/backend/client";
-import { flattenResource } from "@/integrations/backend/context";
 
 export const POLICY_KEY = ["qhse-policy"] as const;
 export const POLICY_HISTORY_KEY = ["qhse-policy-history"] as const;
@@ -190,10 +189,40 @@ function dataOf<T>(payload: unknown): T | null {
   return (root["data"] ?? payload) as T;
 }
 
+function objectOf(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function flattenLeadershipResource(value: unknown): Record<string, unknown> {
+  const raw = objectOf(value);
+  const attributes = objectOf(raw["attributes"] ?? raw);
+  const result: Record<string, unknown> = {
+    ...attributes,
+    ...(raw["id"] != null ? { id: raw["id"] } : {}),
+  };
+  const relationships = objectOf(raw["relationships"]);
+
+  for (const [name, relationship] of Object.entries(relationships)) {
+    const relation = objectOf(relationship);
+    const related = relation["data"] ?? relationship;
+    if (Array.isArray(related)) {
+      result[name] = related.map((item) => flattenLeadershipResource(item));
+    } else if (related != null && typeof related === "object") {
+      result[name] = flattenLeadershipResource(related);
+    } else {
+      result[name] = related;
+    }
+  }
+
+  return result;
+}
+
 function listOf<T = Record<string, unknown>>(payload: unknown): T[] {
   const data = dataOf<unknown>(payload);
   if (!Array.isArray(data)) return [];
-  return data.map((item) => flattenResource(item) as T);
+  return data.map((item) => flattenLeadershipResource(item) as T);
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {
@@ -420,16 +449,17 @@ export async function generateResponsibilityDraft(
 // ---------------------------------------------------------------------------
 
 export async function fetchCollaborators(siteId: string): Promise<Collaborator[]> {
-  const payload = await backendApi.request<unknown>(
-    `users?site_id=${encodeURIComponent(siteId)}&per_page=100`,
-  );
+  const query = new URLSearchParams({ per_page: "100" });
+  if (siteId) query.set("site_id", siteId);
+  const payload = await backendApi.request<unknown>(`users?${query.toString()}`);
   return listOf<Collaborator>(payload);
 }
 
 export async function fetchPendingApprovals(siteId: string): Promise<Collaborator[]> {
-  const payload = await backendApi.request<unknown>(
-    `users/pending-approvals?site_id=${encodeURIComponent(siteId)}`,
-  );
+  const query = new URLSearchParams();
+  if (siteId) query.set("site_id", siteId);
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const payload = await backendApi.request<unknown>(`users/pending-approvals${suffix}`);
   return listOf<Collaborator>(payload);
 }
 

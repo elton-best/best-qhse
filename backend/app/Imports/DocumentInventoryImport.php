@@ -3,243 +3,265 @@
 namespace App\Imports;
 
 use App\Models\Document;
+use App\Models\DocumentTypeCatalog;
+use App\Models\Process;
 use App\Models\Site;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\RichText\RichText;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
-use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\ValidationException;
 
 /**
- * Import Document Inventory from XLSX file
- * 
- * Format attendu (basé sur M5-D2-INVENTAIRE DOCUMENTAIRE.xlsx):
- * - Sheet 1: "Cartouche & légende" (skip)
- * - Sheet 2: "Inventaire" avec colonnes:
- *   N°, PRC (Processus), Type, Nom, Code, Version, État, Observation
+ * Import d'inventaire documentaire depuis XLSX.
+ *
+ * Format attendu = le gabarit `modele_inventaire_documentaire.xlsx`
+ * (GET documents/inventory-template, basé sur M5-D2) :
+ * - Feuille 1 : cartouche/légende (ignorée).
+ * - Feuille 2 « Inventaire » : A N° | B PRC (code ou abréviation du processus)
+ *   | C Type | D Nom | E Code (vide = auto) | F Version | G État | H Observation.
  */
 class DocumentInventoryImport
 {
     protected array $errors = [];
-    protected array $imported = [];
+    protected int $imported = 0;
     protected int $currentRow = 0;
     protected ?int $siteId = null;
-    
+    protected ?int $enterpriseId = null;
+
     /**
      * Import XLSX file
      */
     public function import(string $filePath, ?int $siteId = null): array
     {
-        $this->siteId = $siteId;
         $this->errors = [];
-        $this->imported = [];
-        
+        $this->imported = 0;
+        $this->siteId = $siteId;
+
+        $user = auth()->user();
+        $this->enterpriseId = $user?->enterprise_id ? (int) $user->enterprise_id : null;
+
         try {
             $spreadsheet = IOFactory::load($filePath);
-            
-            // Skip first sheet (Cartouche), use second sheet (Inventaire)
+
+            // Première feuille = cartouche, on lit la deuxième (Inventaire).
             if ($spreadsheet->getSheetCount() < 2) {
-                throw new \Exception('Le fichier doit contenir au moins 2 feuilles: Cartouche et Inventaire');
+                throw new \Exception('Le fichier doit contenir au moins 2 feuilles : cartouche et inventaire.');
             }
-            
-            $sheet = $spreadsheet->getSheet(1); // Index 1 = 2ème feuille
-            
-            $this->processSheet($sheet);
-            
+
+            $this->processSheet($spreadsheet->getSheet(1));
         } catch (\Exception $e) {
             $this->errors[] = [
                 'row' => 0,
-                'error' => 'Erreur lecture fichier: ' . $e->getMessage()
+                'errors' => ['Erreur lecture fichier : '.$e->getMessage()],
             ];
         }
-        
+
         return [
-            'success' => count($this->imported),
+            'success' => $this->imported,
             'errors' => count($this->errors),
-            'imported' => $this->imported,
             'error_details' => $this->errors,
         ];
     }
-    
+
     /**
      * Process inventory sheet
      */
     protected function processSheet(Worksheet $sheet): void
     {
         $highestRow = $sheet->getHighestRow();
-        
-        // Skip header row (row 1)
+
+        // Ligne 1 = en-têtes.
         for ($row = 2; $row <= $highestRow; $row++) {
             $this->currentRow = $row;
-            
+
             $rowData = [
-                'numero' => $sheet->getCell('A' . $row)->getValue(),
-                'processus' => $sheet->getCell('B' . $row)->getValue(),
-                'type' => $sheet->getCell('C' . $row)->getValue(),
-                'nom' => $sheet->getCell('D' . $row)->getValue(),
-                'code' => $sheet->getCell('E' . $row)->getValue(),
-                'version' => $sheet->getCell('F' . $row)->getValue(),
-                'etat' => $sheet->getCell('G' . $row)->getValue(),
-                'observation' => $sheet->getCell('H' . $row)->getValue(),
+                'numero' => $this->cell($sheet, 'A'.$row),
+                'prc' => $this->cell($sheet, 'B'.$row),
+                'type' => $this->cell($sheet, 'C'.$row),
+                'nom' => $this->cell($sheet, 'D'.$row),
+                'code' => $this->cell($sheet, 'E'.$row),
+                'version' => $this->cell($sheet, 'F'.$row),
+                'etat' => $this->cell($sheet, 'G'.$row),
+                'observation' => $this->cell($sheet, 'H'.$row),
             ];
-            
-            // Skip empty rows
-            if (empty($rowData['nom']) && empty($rowData['code'])) {
+
+            // Ligne vide => ignorée.
+            if (($rowData['nom'] === null || trim((string) $rowData['nom']) === '')
+                && ($rowData['code'] === null || trim((string) $rowData['code']) === '')
+            ) {
                 continue;
             }
-            
+
             $this->processRow($rowData);
         }
     }
-    
+
     /**
      * Process single row
      */
     protected function processRow(array $rowData): void
     {
-        // Validation
-        $validator = Validator::make($rowData, [
-            'nom' => 'required|string|max:255',
-            'code' => 'nullable|string|max:50|unique:documents,code',
-            'type' => 'nullable|string|in:politique,manuel,procedure,instruction,enregistrement,formulaire',
-            'version' => 'nullable|string|max:20',
-            'etat' => 'nullable|string|in:brouillon,en_revue,valide,obsolete,archive',
-        ]);
-        
-        if ($validator->fails()) {
-            $this->errors[] = [
-                'row' => $this->currentRow,
-                'data' => $rowData,
-                'errors' => $validator->errors()->all(),
-            ];
+        $rowErrors = [];
+
+        $title = trim((string) ($rowData['nom'] ?? ''));
+        if ($title === '' || mb_strlen($title) > 255) {
+            $rowErrors[] = 'Le nom du document est obligatoire (255 caractères maximum).';
+        }
+
+        if ($this->siteId === null) {
+            $rowErrors[] = 'Aucun site cible (renseignez site_id ou sélectionnez un site).';
+        }
+
+        $processId = $this->resolveProcess($rowData['prc']);
+        $typeConfigId = $this->resolveType($rowData['type']);
+        $status = $this->mapEtat($rowData['etat']);
+        if ($status === null) {
+            $rowErrors[] = 'État invalide (attendu : brouillon, en revue, validé ou archivé).';
+        }
+
+        $version = trim((string) ($rowData['version'] ?? ''));
+        if ($version === '') {
+            $version = '1.0';
+        }
+
+        if (count($rowErrors) > 0) {
+            $this->errors[] = ['row' => $this->currentRow, 'errors' => $rowErrors];
             return;
         }
-        
+
         try {
-            // Map type
-            $type = $this->mapType($rowData['type']);
-            
-            // Map status
-            $status = $this->mapStatus($rowData['etat']);
-            
-            // Create document
-            $document = Document::create([
+            $code = trim((string) ($rowData['code'] ?? ''));
+            if ($code === '') {
+                $code = $this->generateCode($typeConfigId, $processId);
+            }
+
+            Document::create([
                 'site_id' => $this->siteId,
-                'nom' => $rowData['nom'],
-                'code' => $rowData['code'] ?: $this->generateCode($type),
-                'type' => $type,
-                'niveau' => $this->detectNiveau($type),
-                'version' => $rowData['version'] ?: '1.0',
-                'statut' => $status,
-                'description' => $rowData['observation'],
-                'processus' => $rowData['processus'],
-                'created_by' => auth()->id(),
+                'enterprise_id' => $this->enterpriseId,
+                'process_id' => $processId,
+                'processus' => is_string($rowData['prc']) ? trim($rowData['prc']) : null,
+                'document_type_configuration_id' => $typeConfigId,
+                'code' => $code,
+                'title' => $title,
+                'description' => is_string($rowData['observation']) ? trim($rowData['observation']) : null,
+                'version' => mb_substr($version, 0, 50),
+                'status' => $status,
+                'workflow_status' => $status,
+                'source_type' => 'import',
+                'author_id' => auth()->id(),
             ]);
-            
-            $this->imported[] = [
-                'row' => $this->currentRow,
-                'document_id' => $document->id,
-                'nom' => $document->nom,
-                'code' => $document->code,
-            ];
-            
+
+            $this->imported++;
         } catch (\Exception $e) {
             $this->errors[] = [
                 'row' => $this->currentRow,
-                'data' => $rowData,
-                'errors' => ['Erreur création: ' . $e->getMessage()],
+                'errors' => ['Erreur création : '.$e->getMessage()],
             ];
         }
     }
-    
-    /**
-     * Map Excel type to DB type
-     */
-    protected function mapType(?string $type): string
+
+    // ---------- Résolutions / mappings ----------
+
+    protected function cell(Worksheet $sheet, string $coord): mixed
     {
-        if (!$type) return 'procedure';
-        
-        $type = strtolower(trim($type));
-        
-        return match(true) {
-            str_contains($type, 'politique') => 'politique',
-            str_contains($type, 'manuel') => 'manuel',
-            str_contains($type, 'procédure') || str_contains($type, 'procedure') => 'procedure',
-            str_contains($type, 'instruction') => 'instruction',
-            str_contains($type, 'enregistrement') => 'enregistrement',
-            str_contains($type, 'formulaire') => 'formulaire',
-            default => 'procedure',
-        };
+        $value = $sheet->getCell($coord)->getValue();
+        if ($value instanceof RichText) {
+            $value = $value->getPlainText();
+        }
+        if (is_string($value)) {
+            $value = trim($value);
+            return $value === '' ? null : $value;
+        }
+        return $value;
     }
-    
-    /**
-     * Map Excel status to DB status
-     */
-    protected function mapStatus(?string $etat): string
+
+    protected function resolveProcess(mixed $prc): ?int
     {
-        if (!$etat) return 'brouillon';
-        
-        $etat = strtolower(trim($etat));
-        
-        return match(true) {
-            str_contains($etat, 'brouillon') || str_contains($etat, 'draft') => 'brouillon',
-            str_contains($etat, 'revue') || str_contains($etat, 'review') => 'en_revue',
-            str_contains($etat, 'validé') || str_contains($etat, 'valide') || str_contains($etat, 'approved') => 'valide',
-            str_contains($etat, 'obsolète') || str_contains($etat, 'obsolete') => 'obsolete',
-            str_contains($etat, 'archivé') || str_contains($etat, 'archive') => 'archive',
-            default => 'brouillon',
-        };
+        if (!is_string($prc) || trim($prc) === '') {
+            return null;
+        }
+        $ref = trim($prc);
+        $process = Process::where('code', $ref)->orWhere('abbreviation', $ref)->first();
+        return $process ? (int) $process->id : null;
     }
-    
-    /**
-     * Detect document level (pyramide N1-N5)
-     */
-    protected function detectNiveau(string $type): int
+
+    protected function resolveType(mixed $type): ?int
     {
-        return match($type) {
-            'politique' => 1,
-            'manuel' => 2,
-            'procedure' => 3,
-            'instruction' => 4,
-            'enregistrement', 'formulaire' => 5,
-            default => 3,
-        };
+        $abbr = $this->mapTypeAbbr($type);
+        if ($abbr === null) {
+            return null;
+        }
+        $catalog = DocumentTypeCatalog::where('abbreviation', $abbr)->first();
+        return $catalog ? (int) $catalog->id : null;
     }
-    
-    /**
-     * Generate auto code if not provided
-     */
-    protected function generateCode(string $type): string
+
+    protected function mapTypeAbbr(mixed $type): ?string
     {
-        $prefix = match($type) {
-            'politique' => 'POL',
-            'manuel' => 'MAN',
-            'procedure' => 'PRD',
-            'instruction' => 'INS',
-            'enregistrement' => 'ENR',
-            'formulaire' => 'FOR',
-            default => 'DOC',
-        };
-        
-        $count = Document::where('type', $type)->count() + 1;
-        $year = date('Y');
-        
-        return sprintf('%s_%03d_%d', $prefix, $count, $year);
+        if (!is_string($type) || trim($type) === '') {
+            return null;
+        }
+        $value = mb_strtolower(trim($type));
+        if (str_contains($value, 'polit')) {
+            return 'POL';
+        }
+        if (str_contains($value, 'manuel') || str_contains($value, 'manual')) {
+            return null;
+        }
+        if (str_contains($value, 'proced') || str_contains($value, 'procéd')) {
+            return 'PRC';
+        }
+        if (str_contains($value, 'instruct')) {
+            return 'PRD';
+        }
+        if (str_contains($value, 'enreg')) {
+            return 'ENR';
+        }
+        if (str_contains($value, 'formul')) {
+            return 'FOR';
+        }
+        // Abréviation directe (POL, PRC, PRD, ENR, FOR).
+        $upper = mb_strtoupper(trim($type));
+        if (in_array($upper, ['POL', 'PRC', 'PRD', 'ENR', 'FOR'], true)) {
+            return $upper;
+        }
+        return null;
     }
-    
-    /**
-     * Get import errors
-     */
-    public function getErrors(): array
+
+    protected function mapEtat(mixed $etat): ?string
     {
-        return $this->errors;
+        if ($etat === null || (is_string($etat) && trim($etat) === '')) {
+            return 'draft';
+        }
+        $value = mb_strtolower(trim((string) $etat));
+        if (str_contains($value, 'brouillon') || str_contains($value, 'draft')) {
+            return 'draft';
+        }
+        if (str_contains($value, 'revue') || str_contains($value, 'review') || str_contains($value, 'verification') || str_contains($value, 'vérification') || str_contains($value, 'approbation') || str_contains($value, 'correction')) {
+            return 'pending_verification';
+        }
+        if (str_contains($value, 'valid') || str_contains($value, 'termin') || str_contains($value, 'publi') || str_contains($value, 'approuv')) {
+            return 'approved';
+        }
+        if (str_contains($value, 'archiv') || str_contains($value, 'obsolet') || str_contains($value, 'obsol')) {
+            return 'obsolete';
+        }
+        if (str_contains($value, 'rejet')) {
+            return 'rejected';
+        }
+        return null;
     }
-    
-    /**
-     * Get imported documents
-     */
-    public function getImported(): array
+
+    protected function generateCode(?int $typeConfigId, ?int $processId): string
     {
-        return $this->imported;
+        $abbr = 'DOC';
+        if ($typeConfigId) {
+            $abbr = (string) (DocumentTypeCatalog::where('id', $typeConfigId)->value('abbreviation') ?: 'DOC');
+        }
+        $prc = 'GEN';
+        if ($processId) {
+            $prc = (string) (Process::where('id', $processId)->value('abbreviation')
+                ?: Process::where('id', $processId)->value('code')
+                ?: 'GEN');
+        }
+        return sprintf('%s/%s/IMP-%d', $abbr, $prc, time() % 1000000 + $this->currentRow);
     }
 }

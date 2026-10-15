@@ -2,218 +2,326 @@
 
 namespace App\Imports;
 
-use App\Models\Action;
-use App\Models\User;
 use App\Models\Process;
+use App\Models\Site;
+use App\Models\User;
+use App\Modules\Improvement\Services\ActionService;
+use Carbon\Carbon;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
-use Illuminate\Support\Facades\Validator;
 
 /**
- * Import Action Plan from XLSX file
- * 
- * Format attendu:
- * Colonnes: N°, Titre, Description, Type, Priorité, Responsable (email), 
- *           Processus (code), Délai (date), Statut
+ * Import d'un plan d'actions depuis XLSX.
+ *
+ * Format attendu = le gabarit `Template_Plan_Actions.xlsx`
+ * (GET actions/templates/plan) :
+ *   A N° | B Titre | C Description | D Type | E Priorité |
+ *   F Responsable (email) | G Processus (code) | H Codification documentaire (info, ignorée) |
+ *   I Délai (JJ/MM/AAAA) | J Statut
  */
 class ActionPlanImport
 {
     protected array $errors = [];
-    protected array $imported = [];
+    protected int $imported = 0;
     protected int $currentRow = 0;
     protected ?int $siteId = null;
-    
+    protected ?int $enterpriseId = null;
+
+    protected ActionService $service;
+
+    public function __construct(?ActionService $service = null)
+    {
+        $this->service = $service ?? app(ActionService::class);
+    }
+
     /**
      * Import XLSX file
      */
     public function import(string $filePath, ?int $siteId = null): array
     {
-        $this->siteId = $siteId;
         $this->errors = [];
-        $this->imported = [];
-        
+        $this->imported = 0;
+
+        $user = auth()->user();
+        $this->enterpriseId = $user?->enterprise_id ? (int) $user->enterprise_id : null;
+        $this->siteId = $siteId
+            ?? ($user?->site_id ? (int) $user->site_id : null)
+            ?? $this->firstEnterpriseSiteId();
+
         try {
             $spreadsheet = IOFactory::load($filePath);
             $sheet = $spreadsheet->getActiveSheet();
-            
+
             $this->processSheet($sheet);
-            
         } catch (\Exception $e) {
             $this->errors[] = [
                 'row' => 0,
-                'error' => 'Erreur lecture fichier: ' . $e->getMessage()
+                'errors' => ['Erreur lecture fichier : '.$e->getMessage()],
             ];
         }
-        
+
         return [
-            'success' => count($this->imported),
+            'success' => $this->imported,
             'errors' => count($this->errors),
-            'imported' => $this->imported,
             'error_details' => $this->errors,
         ];
     }
-    
+
     /**
      * Process sheet
      */
     protected function processSheet(Worksheet $sheet): void
     {
         $highestRow = $sheet->getHighestRow();
-        
-        // Skip header row
+
+        // Ligne 1 = en-têtes, on démarre à la ligne 2.
         for ($row = 2; $row <= $highestRow; $row++) {
             $this->currentRow = $row;
-            
+
             $rowData = [
-                'numero' => $sheet->getCell('A' . $row)->getValue(),
-                'titre' => $sheet->getCell('B' . $row)->getValue(),
-                'description' => $sheet->getCell('C' . $row)->getValue(),
-                'type' => $sheet->getCell('D' . $row)->getValue(),
-                'priorite' => $sheet->getCell('E' . $row)->getValue(),
-                'responsable_email' => $sheet->getCell('F' . $row)->getValue(),
-                'processus_code' => $sheet->getCell('G' . $row)->getValue(),
-                'delai' => $sheet->getCell('H' . $row)->getValue(),
-                'statut' => $sheet->getCell('I' . $row)->getValue(),
+                'numero' => $this->cell($sheet, 'A'.$row),
+                'titre' => $this->cell($sheet, 'B'.$row),
+                'description' => $this->cell($sheet, 'C'.$row),
+                'type' => $this->cell($sheet, 'D'.$row),
+                'priorite' => $this->cell($sheet, 'E'.$row),
+                'responsable_email' => $this->cell($sheet, 'F'.$row),
+                'processus_code' => $this->cell($sheet, 'G'.$row),
+                // H = Codification documentaire : informative, sans colonne cible.
+                'delai' => $this->strVal($sheet->getCell('I'.$row)->getValue()),
+                'statut' => $this->cell($sheet, 'J'.$row),
             ];
-            
-            // Skip empty rows
-            if (empty($rowData['titre'])) {
+
+            // Ligne vide => ignorée (la légende sous le tableau aussi : pas de titre).
+            if ($rowData['titre'] === null || trim((string) $rowData['titre']) === '') {
                 continue;
             }
-            
+
             $this->processRow($rowData);
         }
     }
-    
+
     /**
      * Process single row
      */
     protected function processRow(array $rowData): void
     {
-        // Validation
-        $validator = Validator::make($rowData, [
-            'titre' => 'required|string|max:255',
-            'type' => 'nullable|string|in:corrective,preventive,amelioration',
-            'priorite' => 'nullable|string|in:basse,moyenne,haute,critique',
-            'responsable_email' => 'nullable|email|exists:users,email',
-            'processus_code' => 'nullable|string|exists:processes,code',
-        ]);
-        
-        if ($validator->fails()) {
-            $this->errors[] = [
-                'row' => $this->currentRow,
-                'data' => $rowData,
-                'errors' => $validator->errors()->all(),
-            ];
+        $rowErrors = [];
+
+        $title = trim((string) ($rowData['titre'] ?? ''));
+        if ($title === '' || mb_strlen($title) > 255) {
+            $rowErrors[] = 'Le titre est obligatoire (255 caractères maximum).';
+        }
+
+        $type = $this->mapType($rowData['type']);
+        if ($type === null) {
+            $rowErrors[] = 'Type invalide (attendu : Corrective, Préventive ou Amélioration).';
+        }
+
+        $priority = $this->mapPriorite($rowData['priorite']);
+        if ($priority === null) {
+            $rowErrors[] = 'Priorité invalide (attendue : Basse, Moyenne, Haute ou Critique).';
+        }
+
+        $responsibleId = $this->resolveUser($rowData['responsable_email'], $rowErrors);
+        $processId = $this->resolveProcess($rowData['processus_code'], $rowErrors);
+        $deadline = $this->parseDeadline($rowData['delai'], $rowErrors);
+        $status = $this->mapStatut($rowData['statut']);
+        if ($status === null) {
+            $rowErrors[] = 'Statut invalide (attendu : Planifiée, En cours, Terminée, Validée ou Annulée).';
+        }
+
+        if ($this->siteId === null) {
+            $rowErrors[] = 'Aucun site cible (renseignez site_id ou sélectionnez un site).';
+        }
+
+        if (count($rowErrors) > 0) {
+            $this->errors[] = ['row' => $this->currentRow, 'errors' => $rowErrors];
             return;
         }
-        
+
         try {
-            // Find responsible user
-            $responsableId = null;
-            if ($rowData['responsable_email']) {
-                $user = User::where('email', $rowData['responsable_email'])->first();
-                $responsableId = $user?->id;
-            }
-            
-            // Find process
-            $processId = null;
-            if ($rowData['processus_code']) {
-                $process = Process::where('code', $rowData['processus_code'])->first();
-                $processId = $process?->id;
-            }
-            
-            // Parse date
-            $delai = null;
-            if ($rowData['delai']) {
-                try {
-                    $delai = \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($rowData['delai']);
-                } catch (\Exception $e) {
-                    // Try parsing as string
-                    $delai = new \DateTime($rowData['delai']);
-                }
-            }
-            
-            // Create action
-            $action = Action::create([
+            $description = trim((string) ($rowData['description'] ?? ''));
+            $payload = [
                 'site_id' => $this->siteId,
-                'titre' => $rowData['titre'],
-                'description' => $rowData['description'],
-                'type' => $this->mapType($rowData['type']),
-                'priorite' => $this->mapPriorite($rowData['priorite']),
-                'responsable_id' => $responsableId,
                 'process_id' => $processId,
-                'delai' => $delai,
-                'statut' => $this->mapStatut($rowData['statut']),
-                'created_by' => auth()->id(),
-            ]);
-            
-            $this->imported[] = [
-                'row' => $this->currentRow,
-                'action_id' => $action->id,
-                'titre' => $action->titre,
+                'type' => $type,
+                'priority' => $priority,
+                'title' => $title,
+                'description' => $description !== '' ? $description : 'Action importée depuis Excel',
+                'responsible_id' => $responsibleId,
+                'deadline' => $deadline,
+                'status' => $status,
+                'progress' => $status === 'completed' ? 100 : 0,
             ];
-            
+            if ($status === 'completed') {
+                $payload['completion_date'] = now()->toDateString();
+            }
+
+            $this->service->create($payload);
+            $this->imported++;
         } catch (\Exception $e) {
             $this->errors[] = [
                 'row' => $this->currentRow,
-                'data' => $rowData,
-                'errors' => ['Erreur création: ' . $e->getMessage()],
+                'errors' => ['Erreur création : '.$e->getMessage()],
             ];
         }
     }
-    
-    /**
-     * Map type
-     */
-    protected function mapType(?string $type): string
+
+    // ---------- Résolutions / mappings ----------
+
+    protected function cell(Worksheet $sheet, string $coord): mixed
     {
-        if (!$type) return 'corrective';
-        
-        $type = strtolower(trim($type));
-        
-        return match(true) {
-            str_contains($type, 'corrective') || str_contains($type, 'correctif') => 'corrective',
-            str_contains($type, 'preventive') || str_contains($type, 'préventif') => 'preventive',
-            str_contains($type, 'amélioration') || str_contains($type, 'amelioration') => 'amelioration',
-            default => 'corrective',
-        };
+        return $this->strVal($sheet->getCell($coord)->getValue());
     }
-    
-    /**
-     * Map priorite
-     */
-    protected function mapPriorite(?string $priorite): string
+
+    protected function strVal(mixed $value): mixed
     {
-        if (!$priorite) return 'moyenne';
-        
-        $priorite = strtolower(trim($priorite));
-        
-        return match(true) {
-            str_contains($priorite, 'critique') || str_contains($priorite, 'critical') => 'critique',
-            str_contains($priorite, 'haute') || str_contains($priorite, 'high') => 'haute',
-            str_contains($priorite, 'moyenne') || str_contains($priorite, 'medium') => 'moyenne',
-            str_contains($priorite, 'basse') || str_contains($priorite, 'low') => 'basse',
-            default => 'moyenne',
-        };
+        if ($value instanceof \PhpOffice\PhpSpreadsheet\RichText\RichText) {
+            $value = $value->getPlainText();
+        }
+        if (is_string($value)) {
+            $value = trim($value);
+            return $value === '' ? null : $value;
+        }
+        return $value;
     }
-    
-    /**
-     * Map statut
-     */
-    protected function mapStatut(?string $statut): string
+
+    protected function resolveUser(mixed $email, array &$rowErrors): ?int
     {
-        if (!$statut) return 'planifiee';
-        
-        $statut = strtolower(trim($statut));
-        
-        return match(true) {
-            str_contains($statut, 'planifiée') || str_contains($statut, 'planifiee') || str_contains($statut, 'planned') => 'planifiee',
-            str_contains($statut, 'en cours') || str_contains($statut, 'progress') => 'en_cours',
-            str_contains($statut, 'terminée') || str_contains($statut, 'terminee') || str_contains($statut, 'done') => 'terminee',
-            str_contains($statut, 'validée') || str_contains($statut, 'validee') || str_contains($statut, 'validated') => 'validee',
-            str_contains($statut, 'annulée') || str_contains($statut, 'annulee') || str_contains($statut, 'cancelled') => 'annulee',
-            default => 'planifiee',
-        };
+        if ($email === null || $email === '') {
+            return null;
+        }
+        if (!is_string($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $rowErrors[] = 'E-mail responsable invalide.';
+            return null;
+        }
+        $query = User::where('email', $email);
+        if ($this->enterpriseId) {
+            $query->where('enterprise_id', $this->enterpriseId);
+        }
+        $user = $query->first();
+        if (!$user) {
+            $rowErrors[] = "Responsable introuvable : {$email}.";
+            return null;
+        }
+        return (int) $user->id;
+    }
+
+    protected function resolveProcess(mixed $code, array &$rowErrors): ?int
+    {
+        if ($code === null || $code === '' || !is_string($code)) {
+            $rowErrors[] = 'Processus (code) obligatoire et doit exister.';
+            return null;
+        }
+        // `code` est unique globalement : recherche directe.
+        $process = Process::where('code', trim($code))->first();
+        if (!$process) {
+            $rowErrors[] = "Processus introuvable : {$code}.";
+            return null;
+        }
+        return (int) $process->id;
+    }
+
+    protected function parseDeadline(mixed $value, array &$rowErrors): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        try {
+            if (is_numeric($value)) {
+                return ExcelDate::excelToDateTimeObject((float) $value)->format('Y-m-d');
+            }
+            $text = trim((string) $value);
+            if (preg_match('#^\d{2}/\d{2}/\d{4}$#', $text)) {
+                return Carbon::createFromFormat('d/m/Y', $text)->format('Y-m-d');
+            }
+            return Carbon::parse($text)->format('Y-m-d');
+        } catch (\Exception) {
+            $rowErrors[] = 'Délai invalide (attendu : JJ/MM/AAAA).';
+            return null;
+        }
+    }
+
+    protected function mapType(mixed $type): ?string
+    {
+        if ($type === null || $type === '') {
+            return 'corrective';
+        }
+        $value = mb_strtolower(trim((string) $type));
+        if (str_contains($value, 'correct')) {
+            return 'corrective';
+        }
+        if (str_contains($value, 'prevent') || str_contains($value, 'prévent') || str_contains($value, 'prevent')) {
+            return 'preventive';
+        }
+        if (str_contains($value, 'amelior') || str_contains($value, 'amélior') || str_contains($value, 'improv')) {
+            return 'improvement';
+        }
+        if (str_contains($value, 'immediate') || str_contains($value, 'immédiat')) {
+            return 'immediate';
+        }
+        return null;
+    }
+
+    protected function mapPriorite(mixed $priorite): ?string
+    {
+        if ($priorite === null || $priorite === '') {
+            return 'medium';
+        }
+        $value = mb_strtolower(trim((string) $priorite));
+        if (str_contains($value, 'crit') || str_contains($value, 'urgent')) {
+            return 'critical';
+        }
+        if (str_contains($value, 'haut') || str_contains($value, 'high') || str_contains($value, 'elev')) {
+            return 'high';
+        }
+        if (str_contains($value, 'moyen') || str_contains($value, 'medium') || str_contains($value, 'normal')) {
+            return 'medium';
+        }
+        if (str_contains($value, 'bas') || str_contains($value, 'low') || str_contains($value, 'faible')) {
+            return 'low';
+        }
+        return null;
+    }
+
+    protected function mapStatut(mixed $statut): ?string
+    {
+        if ($statut === null || $statut === '') {
+            return 'planned';
+        }
+        $value = mb_strtolower(trim((string) $statut));
+        if (str_contains($value, 'planif') || str_contains($value, 'planned') || str_contains($value, 'brouillon') || str_contains($value, 'assign')) {
+            return 'planned';
+        }
+        if (str_contains($value, 'cours') || str_contains($value, 'progress') || str_contains($value, 'demarr')) {
+            return 'in_progress';
+        }
+        if (str_contains($value, 'termin') || str_contains($value, 'complet') || str_contains($value, 'clotur') || str_contains($value, 'clôtur') || str_contains($value, 'done')) {
+            return 'completed';
+        }
+        if (str_contains($value, 'valid') || str_contains($value, 'verifi') || str_contains($value, 'vérifi') || str_contains($value, 'verif')) {
+            return 'verified';
+        }
+        if (str_contains($value, 'annul') || str_contains($value, 'cancel')) {
+            return 'cancelled';
+        }
+        return null;
+    }
+
+    protected function firstEnterpriseSiteId(): ?int
+    {
+        $query = Site::query()->orderBy('id');
+        if ($this->enterpriseId) {
+            $query->where('enterprise_id', $this->enterpriseId);
+        }
+        $id = $query->value('id');
+        return $id === null ? null : (int) $id;
+    }
+
+    // Gardé pour compatibilité avec l'ancien appelant (non utilisé en interne).
+    public function __invoke(string $filePath, ?int $siteId = null): array
+    {
+        return $this->import($filePath, $siteId);
     }
 }

@@ -47,6 +47,7 @@ Route::prefix('reclamations')->group(function () {
 Route::get('my-actions', [ActionController::class, 'myActions']);
 Route::get('actions/my-actions', [ActionController::class, 'myActions']);
 Route::get('actions/templates/plan', [ActionController::class, 'downloadPlanTemplate']);
+Route::get('actions/templates/tableau-de-bord', [ActionController::class, 'downloadBoardTemplate']);
 Route::post('actions/import-plan', [ActionController::class, 'importPlan']);
 Route::prefix('actions')->group(function () {
     Route::post('{id}/status', [ActionController::class, 'updateStatus']);

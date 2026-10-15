@@ -400,6 +400,19 @@ class ActionController extends Controller
     /**
      * Download action plan template
      */
+    public function downloadBoardTemplate(): BinaryFileResponse
+    {
+        // Canevas de référence (M10-D1 Logi files) : tableau de bord des
+        // objectifs et maîtrise des actions. Document de travail, pas un
+        // format d'import (l'import utilise Template_Plan_Actions.xlsx).
+        $filePath = public_path('templates/M10-D1-tableau-de-bord-actions.xlsx');
+        abort_unless(is_file($filePath), 404, 'Canevas M10-D1 introuvable.');
+
+        return response()->download(
+            $filePath,
+            'M10-D1-Tableau de bord et de maîtrise des actions.xlsx'
+        );
+    }
     public function downloadPlanTemplate(): BinaryFileResponse
     {
         $generator = new \App\Exports\ActionPlanTemplate(Auth::user()?->enterprise);
@@ -442,13 +455,15 @@ class ActionController extends Controller
             'file' => 'required|file|mimes:xlsx,xls|max:10240', // 10MB max
             'site_id' => 'nullable|integer|exists:sites,id',
         ]);
-        
+
+        $this->authorize('create', \App\Models\Action::class);
+
         $file = $request->file('file');
         $siteId = $request->input('site_id');
 
-        // Store file temporarily
+        // Store file temporarily (chemin résolu via le disque par défaut).
         $path = $file->store('temp');
-        $fullPath = storage_path('app/' . $path);
+        $fullPath = Storage::path($path);
 
         try {
             $importer = new \App\Imports\ActionPlanImport();
@@ -476,7 +491,9 @@ class ActionController extends Controller
             // Clean up temp file
             Storage::delete($path);
 
-            $httpStatus = count($results['errors']) > 0 ? 422 : 200;
+            // Le frontend gère déjà le partiel (warning) : on renvoie toujours
+            // 200 avec le détail par ligne pour ne pas masquer les succès.
+            $httpStatus = 200;
 
             return response()->json($results, $httpStatus);
 

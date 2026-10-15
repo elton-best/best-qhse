@@ -598,6 +598,21 @@ class CommunicationController extends Controller
             $query->where('site_id', $request->site_id);
         }
 
+        if ($request->type) {
+            $query->whereIn('type', (array) $request->type);
+        }
+
+        if ($request->year) {
+            $year = (int) $request->year;
+            $query->where(function ($subQuery) use ($year) {
+                $subQuery
+                    ->whereYear('date_debut', $year)
+                    ->orWhere(function ($nested) use ($year) {
+                        $nested->whereNull('date_debut')->where('plan_year', $year);
+                    });
+            });
+        }
+
         $communications = $query->get();
 
         return [

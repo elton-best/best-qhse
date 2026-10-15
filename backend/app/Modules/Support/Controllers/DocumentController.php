@@ -54,7 +54,7 @@ class DocumentController extends Controller
         $this->scopeDocumentQuery($query, $request->user());
 
         if ($request->filled('site_id')) {
-            $query->where('site_id', $request->integer('site_id'));
+            $query->where('documents.site_id', $request->integer('site_id'));
         }
         if ($request->filled('type')) {
             // Filtrer par abréviation de type → résoudre via DocumentTypeConfiguration
@@ -1257,20 +1257,38 @@ class DocumentController extends Controller
 
     public function downloadInventoryTemplate()
     {
+        // Gabarit aligné sur M5-D2-INVENTAIRE DOCUMENTAIRE :
+        // feuille 1 = cartouche/légende, feuille 2 = Inventaire
+        // (N°, PRC, Type, Nom, Code, Version, État, Observation).
         $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
-        $sheet = $spreadsheet->getActiveSheet();
+
+        $cartouche = $spreadsheet->getActiveSheet();
+        $cartouche->setTitle('Cartouche');
+        $cartouche->setCellValue('B3', 'INVENTAIRE DOCUMENTAIRE');
+        $cartouche->setCellValue('B4', 'Code :');
+        $cartouche->setCellValue('B5', 'Version :');
+        $cartouche->setCellValue('B6', 'Date :');
+        $cartouche->setCellValue('B8', 'LÉGENDE — Types : politique, manuel, procédure, instruction, enregistrement, formulaire.');
+        $cartouche->setCellValue('B9', 'LÉGENDE — États : brouillon, en revue, validé, archivé.');
+        $cartouche->setCellValue('B10', 'PRC = code ou abréviation du processus. Le code document peut être laissé vide (génération auto).');
+        $cartouche->getStyle('B3')->getFont()->setBold(true)->setSize(14);
+        foreach (['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'] as $column) {
+            $cartouche->getColumnDimension($column)->setAutoSize(true);
+        }
+
+        $sheet = $spreadsheet->createSheet();
         $sheet->setTitle('Inventaire');
 
-        $headers = ['N°', 'Type', 'Nom', 'Code', 'Version', 'État', 'Observation'];
+        $headers = ['N°', 'PRC', 'Type', 'Nom', 'Code', 'Version', 'État', 'Observation'];
         $sheet->fromArray($headers, null, 'A1');
 
         $examples = [
-            [1, 'procedure', 'Gestion documentaire', 'PRC_2026_001', '1.0', 'brouillon', 'Exemple de procédure'],
-            [2, 'formulaire', 'Fiche de non-conformité', '', '1.0', 'en revue', 'Le code peut être auto-généré'],
+            [1, '', 'procedure', 'Gestion documentaire', '', '1.0', 'brouillon', 'Exemple : complétez une ligne par document'],
+            [2, '', 'formulaire', 'Fiche de non-conformité', '', '1.0', 'brouillon', 'Le code peut être laissé vide'],
         ];
         $sheet->fromArray($examples, null, 'A2');
 
-        foreach (range('A', 'G') as $column) {
+        foreach (range('A', 'H') as $column) {
             $sheet->getColumnDimension($column)->setAutoSize(true);
         }
 
@@ -1281,10 +1299,10 @@ class DocumentController extends Controller
                 'startColor' => ['rgb' => '1976D2'],
             ],
         ];
-        $sheet->getStyle('A1:G1')->applyFromArray($headerStyle);
+        $sheet->getStyle('A1:H1')->applyFromArray($headerStyle);
 
         $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
-        $fileName = 'template_documents_inventory.xlsx';
+        $fileName = 'modele_inventaire_documentaire.xlsx';
         $tempPath = storage_path('app/temp_' . uniqid('doc_inventory_', true) . '.xlsx');
         $writer->save($tempPath);
 
@@ -1304,12 +1322,11 @@ class DocumentController extends Controller
         $path = $request->file('file')->store('imports/documents');
 
         try {
-            /** @var DocumentInventoryImporter $importer */
-            $importer = app(DocumentInventoryImporter::class);
-            $results = $importer->import(storage_path('app/' . $path), (int) $site->id);
+            $importer = new \App\Imports\DocumentInventoryImport();
+            $results = $importer->import(Storage::path($path), (int) $site->id);
 
-            $httpStatus = count($results['errors'] ?? []) > 0 ? 422 : 200;
-            return response()->json($results, $httpStatus);
+            // Le frontend gère déjà le partiel : 200 avec le détail par ligne.
+            return response()->json($results, 200);
         } catch (\Throwable $e) {
             Log::error('DOCUMENT_INVENTORY_IMPORT_ERROR', [
                 'site_id' => $site?->id,
@@ -1321,14 +1338,10 @@ class DocumentController extends Controller
 
             return response()->json([
                 'success' => 0,
-                'errors' => [
-                    [
-                        'line' => 0,
-                        'message' => 'Erreur lors de l\'import de l\'inventaire documentaire.',
-                    ],
+                'errors' => 1,
+                'error_details' => [
+                    ['row' => 0, 'errors' => ['Échec de l\'import.']],
                 ],
-                'created' => [],
-                'message' => 'Échec de l\'import',
             ], 500);
         } finally {
             Storage::delete($path);
@@ -1338,73 +1351,75 @@ class DocumentController extends Controller
     public function exportInventory(Request $request)
     {
         $validated = $request->validate([
-            'site_id'                  => 'required|exists:sites,id',
-            'document_type_catalog_id' => 'required|exists:document_type_catalogs,id',
-            'process_id'               => 'required|exists:processes,id',
+            'site_id'                  => 'nullable|exists:sites,id',
+            'document_type_catalog_id' => 'nullable|exists:document_type_catalogs,id',
+            'process_id'               => 'nullable|exists:processes,id',
         ]);
 
-        $catalog = \App\Models\DocumentTypeCatalog::with('processes:id')
-            ->findOrFail((int) $validated['document_type_catalog_id']);
+        $catalogId = $validated['document_type_catalog_id'] ?? null;
+        $processId = $validated['process_id'] ?? null;
+        if (($catalogId && !$processId) || (!$catalogId && $processId)) {
+            throw ValidationException::withMessages([
+                'document_type_catalog_id' => ['Le type documentaire et le processus doivent être fournis ensemble.'],
+            ]);
+        }
 
-        if ($catalog->processes->isNotEmpty()) {
-            $allowed = $catalog->processes->contains(fn ($p) => (int) $p->id === (int) $validated['process_id']);
-            if (!$allowed) {
+        $query = Document::query()->with(['typeConfiguration', 'category']);
+        $this->scopeDocumentQuery($query, $request->user());
+        if (!empty($validated['site_id'])) {
+            $query->where('site_id', (int) $validated['site_id']);
+        }
+        if ($catalogId && $processId) {
+            $catalog = DocumentTypeCatalog::with('processes:id')->findOrFail((int) $catalogId);
+            if ($catalog->processes->isNotEmpty() && !$catalog->processes->contains(
+                fn ($process) => (int) $process->id === (int) $processId
+            )) {
                 return response()->json([
                     'message' => "Le processus sélectionné n'est pas autorisé pour ce type documentaire.",
                 ], 422);
             }
+            $query->where('process_id', (int) $processId)
+                ->whereHas('typeConfiguration', fn ($typeQuery) =>
+                    $typeQuery->where('abbreviation', $catalog->abbreviation));
         }
 
-        $documents = Document::query()
-            ->where('site_id', (int) $validated['site_id'])
-            ->where('process_id', (int) $validated['process_id'])
-            ->whereHas('typeConfiguration', fn ($q) => $q->where('abbreviation', $catalog->abbreviation))
-            ->where('workflow_status', 'approved')
-            ->get(['code', 'title', 'version', 'workflow_status', 'approved_at', 'description']);
-
-        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
-        $sheet = $spreadsheet->getActiveSheet()->setTitle('Inventaire');
-        $sheet = $spreadsheet->getActiveSheet();
-
-        $sheet->fromArray(['Code', 'Titre', 'Version', 'Statut', 'Date approbation', 'Description'], null, 'A1');
-        $row = 2;
-        foreach ($documents as $doc) {
-            $sheet->fromArray([
-                $doc->code, $doc->title, $doc->version,
-                $doc->workflow_status, $doc->approved_at?->format('Y-m-d'), $doc->description,
-            ], null, 'A' . $row++);
-        }
-
-        foreach (range('A', 'F') as $col) {
-            $sheet->getColumnDimension($col)->setAutoSize(true);
-        }
-        $sheet->getStyle('A1:F1')->applyFromArray([
-            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
-            'fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'startColor' => ['rgb' => '1976D2']],
-        ]);
-
-        $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
-        $tmp = storage_path('app/temp_inv_' . uniqid('', true) . '.xlsx');
-        $writer->save($tmp);
-
-        return response()->download($tmp, 'inventaire_documents.xlsx', [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ])->deleteFileAfterSend(true);
+        return $this->downloadDocumentInventory($query, 'inventaire_documents.xlsx');
     }
 
     public function exportByLevel(string $level)
     {
-        return response()->json([
-            'message' => 'Export pyramide disponible dans un prochain incrément.',
-            'level' => $level,
-        ], 501);
+        $normalizedLevel = strtoupper(trim($level));
+        $typeByLevel = [
+            'N1' => 'POL',
+            'N2' => 'MAN',
+            'N3' => 'PRC',
+            'N4' => 'PRD',
+            'N5' => 'ENR',
+        ];
+        abort_unless(isset($typeByLevel[$normalizedLevel]), 422, 'Niveau documentaire invalide.');
+
+        $query = Document::query()->with(['typeConfiguration', 'category']);
+        $this->scopeDocumentQuery($query, request()->user());
+        if (request()->filled('site_id')) {
+            $query->where('documents.site_id', request()->integer('site_id'));
+        }
+        $query->whereHas(
+            'typeConfiguration',
+            fn ($typeQuery) => $typeQuery->where('abbreviation', $typeByLevel[$normalizedLevel])
+        );
+
+        return $this->downloadDocumentInventory($query, 'inventaire_' . strtolower($normalizedLevel) . '.xlsx');
     }
 
-    public function exportCompletePyramid()
+    public function exportCompletePyramid(Request $request)
     {
-        return response()->json([
-            'message' => 'Export pyramide complet disponible dans un prochain incrément.',
-        ], 501);
+        $query = Document::query()->with(['typeConfiguration', 'category']);
+        $this->scopeDocumentQuery($query, $request->user());
+        if ($request->filled('site_id')) {
+            $query->where('documents.site_id', $request->integer('site_id'));
+        }
+
+        return $this->downloadDocumentInventory($query, 'inventaire_pyramide_complet.xlsx');
     }
 
     /**
@@ -1417,7 +1432,7 @@ class DocumentController extends Controller
         $this->scopeDocumentQuery($query, $request->user());
 
         if ($request->filled('site_id')) {
-            $query->where('site_id', $request->integer('site_id'));
+            $query->where('documents.site_id', $request->integer('site_id'));
         }
         if ($request->filled('module')) {
             $query->where('source_module', $request->string('module'));
@@ -1466,13 +1481,93 @@ class DocumentController extends Controller
 
     public function getPyramideStats()
     {
-        $stats = DocumentCategory::query()
-            ->select('level', DB::raw('count(*) as categories_count'))
-            ->groupBy('level')
-            ->orderBy('level')
-            ->get();
+        $query = Document::query();
+        $this->scopeDocumentQuery($query, request()->user());
+        if (request()->filled('site_id')) {
+            $query->where('documents.site_id', request()->integer('site_id'));
+        }
+
+        $levels = [
+            'N1' => ['label' => 'N1 — Manuel & Politiques', 'type' => 'POL'],
+            'N2' => ['label' => 'N2 — Manuel qualité', 'type' => 'MAN'],
+            'N3' => ['label' => 'N3 — Procédures', 'type' => 'PRC'],
+            'N4' => ['label' => 'N4 — Instructions & modes opératoires', 'type' => 'PRD'],
+            'N5' => ['label' => 'N5 — Enregistrements', 'type' => 'ENR'],
+        ];
+        $stats = [];
+        foreach ($levels as $level => $definition) {
+            $levelQuery = (clone $query)->whereHas(
+                'typeConfiguration',
+                fn ($typeQuery) => $typeQuery->where('abbreviation', $definition['type'])
+            );
+            $stats[$level] = [
+                'label' => $definition['label'],
+                'count' => (clone $levelQuery)->count(),
+                'approved' => (clone $levelQuery)->where('workflow_status', 'approved')->count(),
+            ];
+        }
 
         return response()->json(['data' => $stats]);
+    }
+
+    private function downloadDocumentInventory($query, string $filename)
+    {
+        $documents = $query->orderByDesc('id')->get();
+        foreach ($documents as $document) {
+            $this->attachSafeRelations($document);
+        }
+
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Inventaire');
+        $sheet->fromArray([
+            'ID', 'Code', 'Titre', 'Type', 'Version', 'Statut', 'Workflow',
+            'Site', 'Processus', 'Auteur', 'Date de création', 'Date d’application',
+            'Révision prévue', 'Description',
+        ], null, 'A1');
+
+        $row = 2;
+        foreach ($documents as $document) {
+            $sheet->fromArray([
+                $document->id,
+                $document->code,
+                $document->title,
+                $document->typeConfiguration?->abbreviation ?? $document->source_type,
+                $document->version,
+                $document->status,
+                $document->workflow_status,
+                $document->site?->name,
+                $document->process?->name ?? $document->process?->title,
+                $document->author?->name ?? $document->author?->email,
+                $document->created_at?->format('Y-m-d H:i'),
+                $document->effective_date?->format('Y-m-d'),
+                $document->review_due_date?->format('Y-m-d'),
+                $document->description,
+            ], null, 'A' . $row++);
+        }
+
+        foreach (range('A', 'N') as $column) {
+            $sheet->getColumnDimension($column)->setAutoSize(true);
+        }
+        $sheet->getStyle('A1:N1')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => [
+                'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                'startColor' => ['rgb' => '1976D2'],
+            ],
+        ]);
+
+        $path = storage_path('app/temp/inventaire_' . uniqid('', true) . '.xlsx');
+        if (!is_dir(dirname($path))) {
+            mkdir(dirname($path), 0775, true);
+        }
+        (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save($path);
+
+        return response()->download(
+            $path,
+            $filename,
+            ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+        )->deleteFileAfterSend(true);
     }
 
     private function mergeSourceContext(array $metadata, array $input): array
@@ -1596,7 +1691,7 @@ class DocumentController extends Controller
         }
 
         if (!empty($user->site_id)) {
-            $query->where('site_id', $user->site_id);
+            $query->where('documents.site_id', $user->site_id);
             return;
         }
 
@@ -1610,7 +1705,7 @@ class DocumentController extends Controller
             return;
         }
 
-        $query->whereIn('site_id', $siteIds);
+        $query->whereIn('documents.site_id', $siteIds);
     }
 
     private function applyGeneratedDraftVisibilityScope($query, $user): void

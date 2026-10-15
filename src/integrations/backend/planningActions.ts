@@ -372,14 +372,15 @@ export function computePlanActionStats(items: PlanActionItem[]): PlanActionStats
   };
 }
 
-/** Colonne kanban Vue (draft|assigned|in_progress|completed+verified+closed). `null` = hors kanban (annulée). */
+/** Colonne kanban Vue (draft|assigned|in_progress|completed+verified+closed|cancelled). `null` = hors kanban. */
 export function kanbanOf(
   status: string,
-): "draft" | "assigned" | "in_progress" | "completed" | null {
+): "draft" | "assigned" | "in_progress" | "completed" | "cancelled" | null {
   if (status === "draft") return "draft";
   if (status === "assigned") return "assigned";
   if (status === "in_progress") return "in_progress";
   if (status === "completed" || status === "verified" || status === "closed") return "completed";
+  if (status === "cancelled") return "cancelled";
   return null;
 }
 
@@ -589,6 +590,19 @@ export async function downloadPlanActionTemplate(): Promise<void> {
   const link = window.document.createElement("a");
   link.href = url;
   link.setAttribute("download", "Template_Plan_Actions.xlsx");
+  window.document.body.append(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+/** Canevas de référence M10-D1 (tableau de bord, Logi files) — pas un format d'import. */
+export async function downloadActionBoardTemplate(): Promise<void> {
+  const blob = await backendApi.blob("actions/templates/tableau-de-bord");
+  const url = window.URL.createObjectURL(blob);
+  const link = window.document.createElement("a");
+  link.href = url;
+  link.setAttribute("download", "M10-D1-Tableau de bord et de maîtrise des actions.xlsx");
   window.document.body.append(link);
   link.click();
   link.remove();

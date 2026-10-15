@@ -28,6 +28,7 @@ import {
 } from "@/integrations/backend/planning";
 import { useProcesses } from "@/integrations/backend/context";
 import {
+  historyActionLabel,
   historyOf,
   RECORDS_KEY,
   useRecords,
@@ -2171,7 +2172,7 @@ export function JournalPage() {
       (!type || e.action === type) &&
       (!from || e.at >= from) &&
       (!q ||
-        `${e.by} ${e.action} ${e.r.reference} ${e.r.title} ${e.comment ?? ""}`
+        `${e.by} ${e.action} ${historyActionLabel(e.action)} ${e.r.reference} ${e.r.title} ${e.comment ?? ""}`
           .toLowerCase()
           .includes(q.toLowerCase())),
   );
@@ -2188,7 +2189,7 @@ export function JournalPage() {
               ...list.map((e) => [
                 new Date(e.at).toLocaleString("fr-FR"),
                 e.by,
-                e.action,
+                historyActionLabel(e.action),
                 `${e.r.reference} ${e.r.title}`,
                 e.from ?? "",
                 e.to ?? "",
@@ -2215,7 +2216,7 @@ export function JournalPage() {
         >
           <option value="">Tous les types</option>
           {types.map((t) => (
-            <option key={t}>{t}</option>
+            <option key={t} value={t}>{historyActionLabel(t)}</option>
           ))}
         </select>
         <input
@@ -2252,7 +2253,7 @@ export function JournalPage() {
                 </td>
                 <td className="px-4 py-2.5">{e.by || "—"}</td>
                 <td className="px-4 py-2.5 font-semibold text-foreground">
-                  {e.action}
+                  {historyActionLabel(e.action)}
                   {e.to && e.from !== e.to ? ` → ${e.to}` : ""}
                 </td>
                 <td className="px-4 py-2.5">

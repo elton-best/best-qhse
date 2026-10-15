@@ -39,14 +39,14 @@ Route::get('documents/{document}/collaboration/users', [DocumentCollaborationCon
 Route::get('documents/preview-code', [DocumentController::class, 'previewCode']);
 Route::get('documents/active-norms', [DocumentController::class, 'getActiveNorms']);
 Route::get('documents/export-inventory', [DocumentController::class, 'exportInventory']);
+Route::get('documents/inventory-template', [DocumentController::class, 'downloadInventoryTemplate']);
+Route::post('documents/inventory-import', [DocumentController::class, 'importInventory']);
 
 // Pyramide documentaire
 Route::get('documents/pyramide/export/{level}', [DocumentController::class, 'exportByLevel']);
 Route::get('documents/pyramide/export-complete', [DocumentController::class, 'exportCompletePyramid']);
 Route::get('documents/pyramide/stats', [DocumentController::class, 'getPyramideStats']);
 Route::get('documents/stats', [DocumentController::class, 'getStats']);
-Route::get('documents/templates/politique-qualite', [DocumentController::class, 'downloadPolitiqueTemplate']);
-Route::get('documents/templates/manuel-qualite', [DocumentController::class, 'downloadManuelTemplate']);
 
 // Workflow de validation des documents
 Route::post('documents/{document}/confirm-code', [DocumentWorkflowController::class, 'confirmCode'])
@@ -144,6 +144,7 @@ Route::apiResource('process-catalogs', ProcessCatalogController::class)->except(
 Route::apiResource('codifications', CodificationController::class);
 
 Route::get('equipements/prochain-indice', [EquipementController::class, 'prochainIndice']);
+Route::get('equipements/template', [EquipementController::class, 'template']);
 Route::post('equipements/import-file', [EquipementController::class, 'import']);
 Route::post('equipements/import', [EquipementController::class, 'import']);
 Route::get('equipements/{equipement}/transfers', [EquipementTransferController::class, 'equipmentTransfers'])->middleware('throttle:20,1');

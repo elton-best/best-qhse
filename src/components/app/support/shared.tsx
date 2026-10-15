@@ -45,19 +45,127 @@ export function Header({
   );
 }
 
+export function TextField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+  required,
+}: {
+  label: React.ReactNode;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+  required?: boolean;
+}) {
+  return (
+    <div>
+      <Label>
+        {label}
+        {required && " *"}
+      </Label>
+      <input
+        className={input}
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+    </div>
+  );
+}
+
+export function TextAreaField({
+  label,
+  value,
+  onChange,
+  minHeight = "min-h-24",
+  placeholder,
+  span = false,
+  required,
+}: {
+  label: React.ReactNode;
+  value: string;
+  onChange: (value: string) => void;
+  minHeight?: string;
+  placeholder?: string;
+  span?: boolean;
+  required?: boolean;
+}) {
+  return (
+    <div className={span ? "md:col-span-2" : undefined}>
+      <Label>
+        {label}
+        {required && " *"}
+      </Label>
+      <textarea
+        className={`${input} ${minHeight}`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+    </div>
+  );
+}
+
+export function SelectField({
+  label,
+  value,
+  onChange,
+  children,
+  required,
+}: {
+  label: React.ReactNode;
+  value: string;
+  onChange: (value: string) => void;
+  children: React.ReactNode;
+  required?: boolean;
+}) {
+  return (
+    <div>
+      <Label>
+        {label}
+        {required && " *"}
+      </Label>
+      <select className={input} value={value} onChange={(e) => onChange(e.target.value)}>
+        {children}
+      </select>
+    </div>
+  );
+}
+
+export function formatFileSize(size: unknown): string {
+  const bytes = Number(size);
+  if (!Number.isFinite(bytes) || bytes < 0) return "taille inconnue";
+  if (bytes < 1024) return `${bytes} o`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+}
+
+export function formatDateTimeFR(value: unknown): string {
+  if (value == null || value === "") return "—";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("fr-FR");
+}
+
 export function SiteRequired() {
   return (
     <div className={`${card} mx-auto max-w-3xl p-8 text-center`}>
       <p className="mt-3 font-display text-lg font-bold">Sélectionnez un site</p>
       <p className={`mt-2 ${muted}`}>
-        Les données Planification sont rattachées au site courant. Sélectionnez un site avant de
-        consulter cette section.
+        Les données Support sont rattachées au site courant. Sélectionnez un site avant de consulter
+        cette section.
       </p>
     </div>
   );
 }
 
-export function SiteNotice() {
+export function SiteNotice({ siteId }: { siteId?: string | null } = {}) {
+  if (siteId) return null;
+
   return (
     <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
       Aucun site sélectionné — affichage basé sur le site de votre compte. Choisissez un site dans
@@ -130,13 +238,114 @@ export function statusBadge(status: unknown): string {
     .toLowerCase()
     .trim();
   if (
-    ["validated", "validée", "atteint", "termine", "terminée", "realise", "réalisé"].includes(value)
+    [
+      "validated",
+      "validée",
+      "validé",
+      "valide",
+      "atteint",
+      "termine",
+      "terminée",
+      "realise",
+      "réalisé",
+      "réalisée",
+      "active",
+      "actif",
+      "compliant",
+      "tres_bon",
+      "très bon",
+    ].includes(value)
   )
     return `${base} bg-emerald-100 text-emerald-700`;
-  if (value.includes("cours") || value.includes("progress") || value === "en_revision")
+  if (
+    value.includes("cours") ||
+    value.includes("progress") ||
+    value === "en_revision" ||
+    value === "planifiee" ||
+    value === "planifié" ||
+    value === "bon"
+  )
     return `${base} bg-sky-100 text-sky-700`;
-  if (["critique", "critical", "eleve", "élevé", "high"].includes(value))
+  if (
+    [
+      "critique",
+      "critical",
+      "eleve",
+      "élevé",
+      "high",
+      "expiree",
+      "expirée",
+      "depassee",
+      "dépassée",
+      "mauvais",
+      "annulee",
+      "annulée",
+    ].includes(value)
+  )
     return `${base} bg-red-100 text-red-700`;
-  if (["moyen", "medium"].includes(value)) return `${base} bg-amber-100 text-amber-700`;
+  if (
+    [
+      "moyen",
+      "medium",
+      "en_attente",
+      "replanifiee",
+      "replanifiée",
+      "reporte",
+      "reporté",
+      "insufficient",
+    ].includes(value)
+  )
+    return `${base} bg-amber-100 text-amber-700`;
   return `${base} bg-slate-100 text-slate-600`;
+}
+
+export function statusLabel(status: unknown): string {
+  const value = String(status ?? "")
+    .toLowerCase()
+    .trim();
+  const labels: Record<string, string> = {
+    active: "Actif",
+    actif: "Actif",
+    annulee: "Annulée",
+    annulée: "Annulée",
+    atteint: "Atteint",
+    aujourd_hui: "Aujourd’hui",
+    approved: "Approuvé",
+    bon: "Bon",
+    compliant: "Conforme",
+    critical: "Critique",
+    draft: "Brouillon",
+    en_attente: "En attente",
+    en_cours: "En cours",
+    expired: "Expiré",
+    expiree: "Expirée",
+    expirée: "Expirée",
+    high: "Élevé",
+    insufficient: "Insuffisant",
+    mauvais: "Mauvais",
+    moyen: "Moyen",
+    pending_approval: "En attente d’approbation",
+    pending_verification: "En attente de vérification",
+    planifie: "Planifié",
+    planifiee: "Planifiée",
+    planifié: "Planifié",
+    realise: "Réalisé",
+    realisee: "Réalisée",
+    replanifiee: "Replanifiée",
+    replanifiée: "Replanifiée",
+    rejected: "Rejeté",
+    reporte: "Reporté",
+    tres_bon: "Très bon",
+    "très bon": "Très bon",
+    validated: "Validé",
+    valide: "Validé",
+    validee: "Validée",
+    veille: "La veille",
+    obsolete: "Obsolète",
+    trois_jours: "Dans 3 jours",
+    sept_jours: "Dans 7 jours",
+  };
+  if (labels[value]) return labels[value];
+  if (!value) return "—";
+  return value.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase());
 }

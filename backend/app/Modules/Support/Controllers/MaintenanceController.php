@@ -32,6 +32,12 @@ class MaintenanceController extends Controller
     {
         $query = Maintenance::with(['equipement.categorie', 'equipement.localisation']);
 
+        if ($request->filled('site_id')) {
+            $query->whereHas('equipement', function ($equipementQuery) use ($request) {
+                $equipementQuery->where('site_id', (int) $request->site_id);
+            });
+        }
+
         if ($request->has('equipement_id')) {
             $query->where('equipement_id', $request->equipement_id);
         }
@@ -171,11 +177,18 @@ class MaintenanceController extends Controller
         ]);
     }
 
-    public function alertes()
+    public function alertes(Request $request)
     {
-        $maintenances = Maintenance::with(['equipement.categorie', 'equipement.localisation'])
-            ->avecAlertes()
-            ->get();
+        $query = Maintenance::with(['equipement.categorie', 'equipement.localisation'])
+            ->avecAlertes();
+
+        if ($request->filled('site_id')) {
+            $query->whereHas('equipement', function ($equipementQuery) use ($request) {
+                $equipementQuery->where('site_id', (int) $request->site_id);
+            });
+        }
+
+        $maintenances = $query->get();
 
         return response()->json($maintenances->map(function ($maintenance) {
             return [
@@ -298,7 +311,6 @@ class MaintenanceController extends Controller
                     }
 
                     $maintenance = Maintenance::create([
-                        'enterprise_id' => $enterpriseId,
                         'equipement_id' => $equipement->id,
                         'type' => $type,
                         'date_prevue' => $datePrevue,
@@ -495,9 +507,16 @@ class MaintenanceController extends Controller
 
     public function export(Request $request)
     {
-        $maintenances = Maintenance::with(['equipement.categorie', 'equipement.localisation'])
-            ->orderBy('date_prevue')
-            ->get();
+        $query = Maintenance::with(['equipement.categorie', 'equipement.localisation'])
+            ->orderBy('date_prevue');
+
+        if ($request->filled('site_id')) {
+            $query->whereHas('equipement', function ($equipementQuery) use ($request) {
+                $equipementQuery->where('site_id', (int) $request->site_id);
+            });
+        }
+
+        $maintenances = $query->get();
 
         $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();

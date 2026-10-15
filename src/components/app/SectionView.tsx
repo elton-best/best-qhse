@@ -9,7 +9,7 @@ import {
   type Field, type KindConfig, type SectionConfig, type Transition,
 } from "./sections";
 import {
-  historyOf, isOverdue, useAddNote, useDeleteRecord, useRecords, useSaveRecord, useSetStatus, useTransition, type QRecord,
+  historyOf, historyActionLabel, isOverdue, useAddNote, useDeleteRecord, useRecords, useSaveRecord, useSetStatus, useTransition, type QRecord,
 } from "@/hooks/use-records";
 import { computeWorkspace, useCurrentSite } from "@/hooks/use-workspace";
 import { DoubleScroll } from "./DoubleScroll";
@@ -447,7 +447,7 @@ export function HistoryList({ record }: { record: QRecord }) {
         <li key={i} className="relative text-sm">
           <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full bg-primary" />
           <p className="font-semibold text-foreground">
-            {e.action}
+            {historyActionLabel(e.action)}
             {e.to && e.from !== e.to && <span className="font-normal text-muted-foreground"> → {e.to}</span>}
           </p>
           {e.comment && <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">{e.comment}</p>}

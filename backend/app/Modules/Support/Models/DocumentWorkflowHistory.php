@@ -32,6 +32,8 @@ class DocumentWorkflowHistory extends Model
         'action_at' => 'datetime',
     ];
 
+    protected $appends = ['action_label'];
+
     public function document(): BelongsTo
     {
         return $this->belongsTo(Document::class);
@@ -78,12 +80,22 @@ class DocumentWorkflowHistory extends Model
     public function getActionLabelAttribute(): string
     {
         return match($this->action) {
+            'created' => 'Création',
+            'updated' => 'Modification',
+            'deleted' => 'Suppression',
             'submitted' => 'Soumis pour vérification',
+            'auto_submitted' => 'Soumis automatiquement',
+            'submit_for_approval' => 'Soumission au workflow',
+            'confirm_code' => 'Code confirmé',
+            'verify' => 'Vérification effectuée',
             'verified' => 'Vérifié',
+            'approve' => 'Approbation effectuée',
             'approved' => 'Approuvé',
+            'reject' => 'Rejet effectué',
             'rejected' => 'Rejeté',
             'rejection_confirmed' => 'Rejet confirmé',
             'rejection_cancelled' => 'Rejet annulé',
+            'confirm_rejection_decision' => 'Décision du soumissionnaire',
             'delegated' => 'Délégué',
             'reminded' => 'Rappel envoyé',
             'generated' => 'Généré',

@@ -346,6 +346,43 @@ export function historyOf(r: QRecord): HistoryEntry[] {
   return Array.isArray(history) ? (history as HistoryEntry[]) : [];
 }
 
+/**
+ * Libellé français d'une entrée d'historique générique (traçabilité).
+ * Les libellés déjà français sont conservés ; les codes anglais bruts
+ * (`created`, `updated`…) sont traduits pour ne jamais fuiter à l'écran.
+ */
+export function historyActionLabel(action: unknown): string {
+  const text = typeof action === "string" ? action.trim() : "";
+  if (text === "") return "Événement";
+  const labels: Record<string, string> = {
+    created: "Création",
+    create: "Création",
+    updated: "Modification",
+    update: "Modification",
+    deleted: "Suppression",
+    delete: "Suppression",
+    completed: "Réalisation",
+    complete: "Réalisation",
+    rescheduled: "Replanification",
+    cancelled: "Annulation",
+    cancel: "Annulation",
+    verified: "Vérifiée",
+    verify: "Vérification",
+    approved: "Approuvée",
+    approve: "Approbation",
+    rejected: "Rejetée",
+    reject: "Rejet",
+    submitted: "Soumise",
+    delegated: "Déléguée",
+    reminded: "Rappel envoyé",
+    downloaded: "Téléchargée",
+    previewed: "Prévisualisée",
+    generated: "Générée",
+    regenerated: "Régénérée",
+  };
+  return labels[text] ?? labels[text.toLowerCase()] ?? text;
+}
+
 function entry(by: string, action: string, extra: Partial<HistoryEntry> = {}): HistoryEntry {
   return { at: new Date().toISOString(), by, action, ...extra };
 }

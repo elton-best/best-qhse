@@ -30,6 +30,8 @@ class FormationHistory extends Model
         'new_date' => 'date',
     ];
 
+    protected $appends = ['action_label'];
+
     public function formation(): BelongsTo
     {
         return $this->belongsTo(Formation::class);
@@ -38,5 +40,21 @@ class FormationHistory extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Libellé français de l'action pour l'affichage (traçabilité).
+     */
+    public function getActionLabelAttribute(): string
+    {
+        return match ($this->action) {
+            'created' => 'Création',
+            'updated' => 'Modification',
+            'completed' => 'Réalisation',
+            'rescheduled' => 'Replanification',
+            'cancelled' => 'Annulation',
+            'deleted' => 'Suppression',
+            default => (string) $this->action,
+        };
     }
 }

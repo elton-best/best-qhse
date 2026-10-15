@@ -7,10 +7,12 @@ import {
   FileDown,
   Filter,
   GitBranch,
+  LayoutGrid,
   PenLine,
   Plus,
   Save,
   Send,
+  Table,
   Trash2,
   X,
 } from "lucide-react";
@@ -120,6 +122,7 @@ export function ResponsibilitiesPage() {
   const [query, setQuery] = useState("");
   const [levelFilter, setLevelFilter] = useState("all");
   const [processFilter, setProcessFilter] = useState("all");
+  const [viewMode, setViewMode] = useState<"cards" | "matrix">("cards");
 
   const [catalogs, setCatalogs] = useState<CatalogOption[]>([]);
   const [catalogId, setCatalogId] = useState("");
@@ -129,6 +132,7 @@ export function ResponsibilitiesPage() {
   const [lastDocId, setLastDocId] = useState<string | undefined>(undefined);
   const [docCode, setDocCode] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | undefined>(undefined);
+  const [previewKey, setPreviewKey] = useState(0);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
@@ -136,11 +140,10 @@ export function ResponsibilitiesPage() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!siteId) return undefined;
+    const catalogQuery = new URLSearchParams({ is_active: "true" });
+    if (siteId) catalogQuery.set("site_id", siteId);
     backendApi
-      .request<unknown>(
-        `document-type-catalogs?site_id=${encodeURIComponent(siteId)}&is_active=true`,
-      )
+      .request<unknown>(`document-type-catalogs?${catalogQuery.toString()}`)
       .then((payload) => {
         const root =
           payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
@@ -264,7 +267,7 @@ export function ResponsibilitiesPage() {
       await save.mutateAsync({
         id: editingId,
         payload: {
-          site_id: Number(siteId),
+          ...(siteId ? { site_id: Number(siteId) } : {}),
           process_id: Number(form.process_id),
           level,
           role_title: form.role_title,
@@ -330,6 +333,7 @@ export function ResponsibilitiesPage() {
       const blob = await backendApi.blob(`documents/${id}/preview`);
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(URL.createObjectURL(blob));
+      setPreviewKey((current) => current + 1);
       setPreviewOpen(true);
     } catch (error) {
       toast.error(errorMessage(error, "Impossible de prévisualiser le document."));
@@ -354,11 +358,12 @@ export function ResponsibilitiesPage() {
     }
     setDocBusy(true);
     try {
-      const response = await generateResponsibilityDraft({
-        site_id: Number(siteId),
+      const payload: Record<string, unknown> = {
         document_type_catalog_id: Number(catalogId),
         ...(genProcessId ? { process_id: Number(genProcessId) } : {}),
-      });
+      };
+      if (siteId) payload["site_id"] = Number(siteId);
+      const response = await generateResponsibilityDraft(payload);
       const info = documentInfo(response);
       if (!info.id || !info.code)
         throw new Error("Le brouillon n'a pas retourné de code documentaire.");
@@ -595,6 +600,23 @@ export function ResponsibilitiesPage() {
           <button className={secondary} onClick={resetFilters}>
             Réinitialiser
           </button>
+
+          <div className="ml-auto flex rounded-lg border border-border p-1 bg-muted/20">
+            <button
+              className={`p-1.5 rounded ${viewMode === "cards" ? "bg-background shadow-xs text-primary font-bold" : "text-muted-foreground"}`}
+              onClick={() => setViewMode("cards")}
+              title="Vue Cartes"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button
+              className={`p-1.5 rounded ${viewMode === "matrix" ? "bg-background shadow-xs text-primary font-bold" : "text-muted-foreground"}`}
+              onClick={() => setViewMode("matrix")}
+              title="Tableau Matriciel"
+            >
+              <Table className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         {isLoading ? (
           <PageSkeleton rows={4} />
@@ -610,6 +632,83 @@ export function ResponsibilitiesPage() {
                 Réinitialiser les filtres
               </button>
             )}
+          </div>
+        ) : viewMode === "matrix" ? (
+          <div className="mt-4 overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-border bg-muted/40 text-xs font-semibold uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3" style={{ width: "25%" }}>
+                    Processus
+                  </th>
+                  <th className="px-4 py-3" style={{ width: "15%" }}>
+                    Niveau
+                  </th>
+                  <th className="px-4 py-3" style={{ width: "30%" }}>
+                    Rôle et responsabilités
+                  </th>
+                  <th className="px-4 py-3" style={{ width: "20%" }}>
+                    Livrables
+                  </th>
+                  <th className="px-4 py-3 text-right" style={{ width: "10%" }}>
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {visible.map((item) => (
+                  <tr key={String(item.id)} className="hover:bg-muted/20">
+                    <td className="px-4 py-3 text-xs font-medium">
+                      <span className="font-mono font-bold text-primary mr-1.5">
+                        {codeOf(processIdOf(item))}
+                      </span>
+                      <span>{processName(item)}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={statusBadge(normalizeLevel(item.level) || "Pilote")}>
+                        {levelLabel(item.level)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      <div className="font-semibold text-foreground">{titleOf(item)}</div>
+                      {item.responsibilities && (
+                        <div className="text-muted-foreground mt-0.5 line-clamp-2">
+                          {String(item.responsibilities)}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {String(item.deliverables || "—")}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          className="rounded p-1 text-muted-foreground hover:bg-muted"
+                          onClick={() => edit(item)}
+                          title="Modifier"
+                        >
+                          <PenLine className="h-4 w-4" />
+                        </button>
+                        <button
+                          className="rounded p-1 text-muted-foreground hover:bg-muted"
+                          onClick={() => duplicate(item)}
+                          title="Dupliquer"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </button>
+                        <button
+                          className="rounded p-1 text-destructive hover:bg-destructive/10"
+                          onClick={() => void destroy(String(item.id))}
+                          title="Supprimer"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
           <ul className="mt-4 space-y-2">
@@ -744,6 +843,7 @@ export function ResponsibilitiesPage() {
             </button>
           </div>
           <iframe
+            key={previewKey}
             title="Prévisualisation de la fiche de responsabilité"
             src={previewUrl}
             className="mx-auto h-full w-full max-w-5xl rounded-2xl bg-white"

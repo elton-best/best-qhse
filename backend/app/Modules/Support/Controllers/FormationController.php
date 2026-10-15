@@ -267,6 +267,7 @@ class FormationController extends Controller
             'period_mode' => 'required|in:standard,custom',
             'period_label' => 'nullable|string|max:255',
             'frequency' => 'required|in:ponctuelle,annuelle,semestrielle,trimestrielle,mensuelle,biennale,sur_demande',
+            'cout' => 'nullable|numeric',
             'observations' => 'nullable|string',
             'site_id' => 'nullable|exists:sites,id',
             'plan_year' => 'nullable|integer|min:2020|max:2100',
@@ -346,6 +347,7 @@ class FormationController extends Controller
             'period_mode' => $validated['period_mode'],
             'period_label' => $periodLabel,
             'frequency' => $validated['frequency'],
+            'cout' => $validated['cout'] ?? null,
             'observations' => $validated['observations'] ?? null,
             'site_id' => $validated['site_id'] ?? null,
             'created_by' => $user->id,
@@ -412,6 +414,7 @@ class FormationController extends Controller
             'period_mode' => 'in:standard,custom',
             'period_label' => 'nullable|string|max:255',
             'frequency' => 'in:ponctuelle,annuelle,semestrielle,trimestrielle,mensuelle,biennale,sur_demande',
+            'cout' => 'nullable|numeric',
             'observations' => 'nullable|string',
             'plan_year' => 'nullable|integer|min:2020|max:2100',
         ])->validate();
@@ -730,6 +733,17 @@ class FormationController extends Controller
 
         if ($request->site_id) {
             $query->where('site_id', $request->site_id);
+        }
+
+        if ($request->year) {
+            $year = (int) $request->year;
+            $query->where(function ($subQuery) use ($year) {
+                $subQuery
+                    ->whereYear('date_debut', $year)
+                    ->orWhere(function ($nested) use ($year) {
+                        $nested->whereNull('date_debut')->where('plan_year', $year);
+                    });
+            });
         }
 
         $formations = $query->get();

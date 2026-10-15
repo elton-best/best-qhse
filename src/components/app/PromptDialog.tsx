@@ -18,6 +18,7 @@ export function PromptDialog({
   multiline = false,
   confirmLabel = "Confirmer",
   cancelLabel = "Annuler",
+  busy = false,
   onSubmit,
   onCancel,
 }: {
@@ -32,6 +33,7 @@ export function PromptDialog({
   multiline?: boolean;
   confirmLabel?: string;
   cancelLabel?: string;
+  busy?: boolean;
   onSubmit: (value: string) => void;
   onCancel: () => void;
 }) {
@@ -52,7 +54,7 @@ export function PromptDialog({
         : minLength > 0 && trimmed.length === 0
           ? `Saisissez au moins ${minLength} caractères.`
           : null;
-  const canSubmit = !error && (!required || trimmed.length > 0);
+  const canSubmit = !busy && !error && (!required || trimmed.length > 0);
 
   return (
     <div
@@ -111,6 +113,7 @@ export function PromptDialog({
             type="button"
             className={`${button} border border-border bg-card hover:border-primary`}
             onClick={onCancel}
+            disabled={busy}
           >
             {cancelLabel}
           </button>
@@ -120,7 +123,7 @@ export function PromptDialog({
             disabled={!canSubmit}
             onClick={() => onSubmit(trimmed)}
           >
-            {confirmLabel}
+            {busy ? "Traitement…" : confirmLabel}
           </button>
         </div>
       </div>
