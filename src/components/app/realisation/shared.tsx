@@ -1,0 +1,612 @@
+import { useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
+import {
+  Eye,
+  FileDown,
+  FileUp,
+  FileWarning,
+  Filter,
+  LayoutGrid,
+  List,
+  PenLine,
+  Plus,
+  Trash2,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import { useCurrentSite } from "@/hooks/use-workspace";
+import { ConfirmDialog } from "../ConfirmDialog";
+import {
+  Header,
+  PageSkeleton,
+  SiteNotice,
+  Stat,
+  card,
+  errorMessage,
+  formatDateFR,
+  input,
+  muted,
+  primary,
+  secondary,
+  statusBadge,
+} from "../planning/shared";
+import {
+  downloadBlob,
+  exportRealisationXlsx,
+  importRealisationXlsx,
+  templateRealisationXlsx,
+  useRealisationList,
+  useRealisationMutations,
+  type RealisationItem,
+  type RealisationKey,
+} from "@/integrations/backend/realisation";
+
+export type RealisationFieldType = "text" | "textarea" | "select" | "date" | "number";
+
+export type RealisationField = {
+  key: string;
+  label: string;
+  type: RealisationFieldType;
+  options?: string[];
+  required?: boolean;
+  full?: boolean;
+};
+
+export type RealisationPageConfig = {
+  resource: RealisationKey;
+  eyebrow: string;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  /** Statuts affichés (filtre, badge, formulaire). */
+  statuses: string[];
+  statusKey?: string;
+  titleKeys?: string[];
+  codeKeys?: string[];
+  fields: RealisationField[];
+  /** Valeurs imposées à la création (ex. type de document). */
+  defaults?: Record<string, unknown>;
+  /** Filtre client supplémentaire (ex. procédures parmi les documents). */
+  clientFilter?: (item: RealisationItem) => boolean;
+  /** Préfixe des noms de fichiers exportés. */
+  filePrefix: string;
+  searchPlaceholder?: string;
+};
+
+function str(value: unknown): string {
+  return typeof value === "string" ? value : value == null ? "" : String(value);
+}
+
+function firstOf(item: RealisationItem, keys: string[]): string {
+  for (const key of keys) {
+    const value = str(item[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+export function RealisationPage(config: RealisationPageConfig) {
+  const {
+    resource,
+    eyebrow,
+    title,
+    description,
+    icon,
+    statuses,
+    fields,
+    defaults,
+    clientFilter,
+    filePrefix,
+  } = config;
+  const statusKey = config.statusKey ?? "status";
+  const titleKeys = config.titleKeys ?? ["title", "name", "label"];
+  const codeKeys = config.codeKeys ?? ["code", "reference", "ref"];
+
+  const [siteId] = useCurrentSite();
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [view, setView] = useState<"grid" | "list">("grid");
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<RealisationItem | null>(null);
+  const [detail, setDetail] = useState<RealisationItem | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<RealisationItem | null>(null);
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [formStatus, setFormStatus] = useState(statuses[0] ?? "");
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const filters = useMemo(
+    () => ({ site_id: siteId || undefined, search: query.trim() || undefined }),
+    [siteId, query],
+  );
+  const { data: items = [], isLoading } = useRealisationList(resource, filters);
+  const mutations = useRealisationMutations(resource, siteId);
+
+  const visible = useMemo(() => {
+    const base = clientFilter ? items.filter(clientFilter) : items;
+    const q = query.trim().toLowerCase();
+    return base.filter((item) => {
+      if (statusFilter !== "all" && str(item[statusKey]).toLowerCase() !== statusFilter)
+        return false;
+      if (q) {
+        const haystack =
+          `${firstOf(item, titleKeys)} ${firstOf(item, codeKeys)} ${str(item["description"])}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [items, clientFilter, query, statusFilter, statusKey, titleKeys, codeKeys]);
+
+  const stats = useMemo(() => {
+    const perStatus = new Map<string, number>();
+    visible.forEach((item) => {
+      const s = str(item[statusKey]) || "—";
+      perStatus.set(s, (perStatus.get(s) ?? 0) + 1);
+    });
+    return { total: visible.length, perStatus: [...perStatus.entries()].slice(0, 3) };
+  }, [visible, statusKey]);
+
+  const resetFilters = (): void => {
+    setQuery("");
+    setStatusFilter("all");
+  };
+
+  const openCreate = (): void => {
+    if (!siteId) {
+      toast.error("Sélectionnez un site avant de créer un élément.");
+      return;
+    }
+    setEditing(null);
+    setForm({});
+    setFormStatus(statuses[0] ?? "");
+    setFormOpen(true);
+  };
+
+  const openEdit = (item: RealisationItem): void => {
+    setEditing(item);
+    const next: Record<string, string> = {};
+    fields.forEach((f) => {
+      next[f.key] = str(item[f.key]);
+    });
+    setForm(next);
+    setFormStatus(str(item[statusKey]) || (statuses[0] ?? ""));
+    setDetail(null);
+    setFormOpen(true);
+  };
+
+  const touch = (key: string, value: string): void =>
+    setForm((current) => ({ ...current, [key]: value }));
+
+  const submit = async (): Promise<void> => {
+    for (const field of fields) {
+      if (field.required && !(form[field.key] ?? "").trim()) {
+        toast.error(`Le champ « ${field.label} » est obligatoire.`);
+        return;
+      }
+    }
+    if (!(form[titleKeys[0] ?? "title"] ?? "").trim() && !editing) {
+      toast.error("L'intitulé est requis.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const payload: Record<string, unknown> = { ...(defaults ?? {}) };
+      fields.forEach((field) => {
+        const value = (form[field.key] ?? "").trim();
+        payload[field.key] = field.type === "number" ? value === "" ? null : Number(value) : value || null;
+      });
+      const mainTitleKey = titleKeys[0] ?? "title";
+      if (!payload[mainTitleKey] || !str(payload[mainTitleKey]).trim()) {
+        payload[mainTitleKey] =
+          str(payload["description"]).slice(0, 120) || `${title} ${new Date().toLocaleDateString("fr-FR")}`;
+      }
+      payload[statusKey] = formStatus || null;
+      if (editing) {
+        await mutations.update.mutateAsync({ id: editing.id, payload });
+      } else {
+        await mutations.create.mutateAsync(payload);
+      }
+      setFormOpen(false);
+      setEditing(null);
+    } catch (error) {
+      toast.error(errorMessage(error, "Enregistrement impossible."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doDelete = async (): Promise<void> => {
+    if (!confirmDelete) return;
+    try {
+      await mutations.remove.mutateAsync(confirmDelete.id);
+    } catch (error) {
+      toast.error(errorMessage(error, "Suppression impossible."));
+    } finally {
+      setConfirmDelete(null);
+      setDetail(null);
+    }
+  };
+
+  const doExport = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      const blob = await exportRealisationXlsx(resource, siteId || undefined);
+      downloadBlob(blob, `${filePrefix}-${siteId || "tous"}.xlsx`);
+      toast.success("Export Excel téléchargé.");
+    } catch (error) {
+      toast.error(errorMessage(error, "Export impossible."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doTemplate = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      const blob = await templateRealisationXlsx(resource);
+      downloadBlob(blob, `modele-${filePrefix}.xlsx`);
+      toast.success("Modèle d'import téléchargé.");
+    } catch (error) {
+      toast.error(errorMessage(error, "Téléchargement du modèle impossible."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doImport = async (file: File): Promise<void> => {
+    if (!siteId) {
+      toast.error("Sélectionnez un site avant d'importer.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await importRealisationXlsx(resource, siteId, file);
+      toast.success("Import terminé.");
+    } catch (error) {
+      toast.error(errorMessage(error, "Import impossible."));
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const renderActions = (item: RealisationItem) => (
+    <div className="flex flex-wrap gap-2">
+      <button type="button" className={secondary} onClick={() => setDetail(item)}>
+        <Eye className="h-4 w-4" /> Détail
+      </button>
+      <button type="button" className={secondary} onClick={() => openEdit(item)}>
+        <PenLine className="h-4 w-4" /> Modifier
+      </button>
+      <button type="button" className={secondary} onClick={() => setConfirmDelete(item)}>
+        <Trash2 className="h-4 w-4" /> Supprimer
+      </button>
+    </div>
+  );
+
+  const Icon = icon;
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-8">
+      {!siteId && <SiteNotice />}
+      <Header eyebrow={eyebrow} title={title} description={description} icon={Icon}>
+        <button type="button" className={secondary} disabled={busy} onClick={() => void doTemplate()}>
+          <FileWarning className="h-4 w-4" /> Modèle
+        </button>
+        <button type="button" className={secondary} disabled={busy} onClick={() => fileRef.current?.click()}>
+          <FileUp className="h-4 w-4" /> Import Excel
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx,.xls"
+          className="hidden"
+          aria-label="Fichier Excel à importer"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void doImport(file);
+          }}
+        />
+        <button type="button" className={secondary} disabled={busy} onClick={() => void doExport()}>
+          <FileDown className="h-4 w-4" /> {busy ? "Export…" : "Export Excel"}
+        </button>
+        <button type="button" className={primary} onClick={openCreate}>
+          <Plus className="h-4 w-4" /> Nouveau
+        </button>
+      </Header>
+
+      <div className={`${card} grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4`}>
+        <Stat value={stats.total} label="Total" />
+        {stats.perStatus.map(([status, count]) => (
+          <Stat key={status} value={count} label={status} />
+        ))}
+      </div>
+
+      <div className={`${card} p-5`}>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-primary" />
+            <span className="text-sm font-bold">Filtres</span>
+          </div>
+          <input
+            className={`${input} max-w-full sm:max-w-xs`}
+            placeholder={config.searchPlaceholder ?? "Rechercher intitulé, code, description…"}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <select
+            className={`${input} max-w-full sm:max-w-[220px]`}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            aria-label="Filtrer par statut"
+          >
+            <option value="all">Tous les statuts</option>
+            {statuses.map((s) => (
+              <option key={s} value={s.toLowerCase()}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <button type="button" className={secondary} onClick={resetFilters}>
+            Réinitialiser
+          </button>
+          <div className="ml-auto flex gap-2">
+            <button
+              type="button"
+              className={view === "grid" ? primary : secondary}
+              onClick={() => setView("grid")}
+              aria-label="Vue grille"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className={view === "list" ? primary : secondary}
+              onClick={() => setView("list")}
+              aria-label="Vue liste"
+            >
+              <List className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="mt-4">
+            <PageSkeleton rows={4} />
+          </div>
+        ) : visible.length === 0 ? (
+          <div className="py-10 text-center">
+            <p className={muted}>
+              {items.length === 0
+                ? "Aucun élément enregistré pour ce périmètre."
+                : "Aucun élément ne correspond aux filtres."}
+            </p>
+            {(query.trim() !== "" || statusFilter !== "all") && items.length > 0 && (
+              <button type="button" className={`${secondary} mt-3`} onClick={resetFilters}>
+                Réinitialiser les filtres
+              </button>
+            )}
+          </div>
+        ) : view === "grid" ? (
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {visible.map((item) => (
+              <article
+                key={String(item.id)}
+                className="rounded-xl border border-border bg-background p-4"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-bold text-muted-foreground">
+                    {firstOf(item, codeKeys) || `#${String(item.id)}`}
+                  </span>
+                  <span className={statusBadge(item[statusKey])}>
+                    {str(item[statusKey]) || "—"}
+                  </span>
+                </div>
+                <h3 className="mt-2 font-display font-bold">
+                  {firstOf(item, titleKeys) || "Sans intitulé"}
+                </h3>
+                <p className={`mt-1 line-clamp-2 text-sm ${muted}`}>
+                  {str(item["description"]) || "—"}
+                </p>
+                <div className="mt-3">{renderActions(item)}</div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-4 overflow-x-auto [-webkit-overflow-scrolling:touch]">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <th className="px-3 py-2">Référence</th>
+                  <th className="px-3 py-2">Intitulé</th>
+                  <th className="px-3 py-2">Statut</th>
+                  <th className="px-3 py-2">Mise à jour</th>
+                  <th className="px-3 py-2">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((item) => (
+                  <tr key={String(item.id)} className="border-t border-border">
+                    <td className="px-3 py-2 font-semibold">
+                      {firstOf(item, codeKeys) || "—"}
+                    </td>
+                    <td className="px-3 py-2 font-semibold">
+                      {firstOf(item, titleKeys) || "—"}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={statusBadge(item[statusKey])}>
+                        {str(item[statusKey]) || "—"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">{formatDateFR(item["updated_at"])}</td>
+                    <td className="px-3 py-2">{renderActions(item)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {formOpen && (
+        <div
+          className="fixed inset-0 z-[80] grid place-items-center overflow-y-auto bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={editing ? `Modifier ${title}` : `Nouveau ${title}`}
+        >
+          <div className={`${card} my-8 w-full max-w-3xl p-6 shadow-2xl`}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-primary">
+                  {editing ? "Modification" : "Création"}
+                </p>
+                <h2 className="mt-1 font-display text-xl font-bold">
+                  {editing ? "Modifier la fiche" : `Nouveau — ${title}`}
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="rounded-xl p-2 text-muted-foreground hover:bg-background"
+                onClick={() => setFormOpen(false)}
+                aria-label="Fermer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                  Statut *
+                </label>
+                <select
+                  className={input}
+                  value={formStatus}
+                  onChange={(e) => setFormStatus(e.target.value)}
+                >
+                  {statuses.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {fields.map((field) => (
+                <div key={field.key} className={field.full ? "sm:col-span-2" : undefined}>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    {field.label} {field.required ? "*" : ""}
+                  </label>
+                  {field.type === "textarea" ? (
+                    <textarea
+                      className={`${input} min-h-24`}
+                      value={form[field.key] ?? ""}
+                      onChange={(e) => touch(field.key, e.target.value)}
+                    />
+                  ) : field.type === "select" ? (
+                    <select
+                      className={input}
+                      value={form[field.key] ?? ""}
+                      onChange={(e) => touch(field.key, e.target.value)}
+                    >
+                      <option value="">—</option>
+                      {(field.options ?? []).map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={field.type === "date" ? "date" : field.type === "number" ? "number" : "text"}
+                      className={input}
+                      value={form[field.key] ?? ""}
+                      onChange={(e) => touch(field.key, e.target.value)}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" className={secondary} onClick={() => setFormOpen(false)}>
+                Annuler
+              </button>
+              <button type="button" className={primary} disabled={busy} onClick={() => void submit()}>
+                {busy ? "Enregistrement…" : "Enregistrer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detail && (
+        <div
+          className="fixed inset-0 z-[80] grid place-items-center overflow-y-auto bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Détail de la fiche"
+        >
+          <div className={`${card} my-8 w-full max-w-3xl p-6 shadow-2xl`}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-primary">
+                  {firstOf(detail, codeKeys) || `#${String(detail.id)}`}
+                </p>
+                <h2 className="mt-1 font-display text-xl font-bold">
+                  {firstOf(detail, titleKeys) || "Sans intitulé"}
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="rounded-xl p-2 text-muted-foreground hover:bg-background"
+                onClick={() => setDetail(null)}
+                aria-label="Fermer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className={statusBadge(detail[statusKey])}>
+                {str(detail[statusKey]) || "—"}
+              </span>
+              <span className={`text-xs ${muted}`}>
+                Mise à jour : {formatDateFR(detail["updated_at"])}
+              </span>
+            </div>
+            <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {fields.map((field) => (
+                <div key={field.key} className={`rounded-xl bg-background p-3 ${field.full ? "sm:col-span-2" : ""}`}>
+                  <dt className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    {field.label}
+                  </dt>
+                  <dd className="mt-1 text-sm">
+                    {field.type === "date"
+                      ? formatDateFR(detail[field.key])
+                      : str(detail[field.key]) || "—"}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button type="button" className={secondary} onClick={() => openEdit(detail)}>
+                <PenLine className="h-4 w-4" /> Modifier
+              </button>
+              <button type="button" className={secondary} onClick={() => setConfirmDelete(detail)}>
+                <Trash2 className="h-4 w-4" /> Supprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Supprimer cet élément ?"
+        description="Cette action est définitive. L'élément sera supprimé du registre."
+        confirmLabel="Supprimer"
+        destructive
+        onConfirm={() => void doDelete()}
+        onCancel={() => setConfirmDelete(null)}
+      />
+    </div>
+  );
+}

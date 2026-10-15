@@ -38,6 +38,15 @@ import { RisksPage } from "@/components/app/planning/RisksPage";
 import { ObjectivesPage } from "@/components/app/planning/ObjectivesPage";
 import { ActionsPage } from "@/components/app/planning/ActionsPage";
 import { SmPlanPage } from "@/components/app/planning/SmPlanPage";
+import {
+  DesignPage,
+  NonconformingPage,
+  OperationalControlPage,
+  ProceduresPage,
+  RealisationOverviewPage,
+  ReleasePage,
+  RequirementsPage,
+} from "@/components/app/realisation";
 import { HabilitationsPage } from "@/components/app/HabilitationsPage";
 import { SitesPage } from "@/components/app/SitesPage";
 import { GlobalLoader } from "@/components/app/GlobalLoader";
@@ -197,6 +206,20 @@ function SectionPage() {
       return <ActionsPage />;
     case "plan-sm":
       return <SmPlanPage />;
+    case "procedures":
+      return <ProceduresPage />;
+    case "maitrise-operationnelle":
+      return <OperationalControlPage />;
+    case "exigences":
+      return <RequirementsPage />;
+    case "conception":
+      return <DesignPage />;
+    case "realisation":
+      return <RealisationOverviewPage />;
+    case "liberation":
+      return <ReleasePage />;
+    case "sorties-non-conformes":
+      return <NonconformingPage />;
   }
   const section = SECTIONS[slug]!;
   if (GUIDE[slug] && !search.open && !search.new)

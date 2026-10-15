@@ -10,6 +10,7 @@ use App\Modules\Improvement\Controllers\ImprovementDashboardController;
 use App\Modules\Improvement\Controllers\ImprovementSuggestionController;
 use App\Modules\Improvement\Controllers\MyTasksController;
 use App\Modules\Improvement\Controllers\ActionPlanTrackingController;
+use App\Modules\Improvement\Controllers\NonconformingOutputController;
 
 // ============================================================
 // CHAPITRE 10 : AMÉLIORATION CONTINUE (NC, RÉCLAMATIONS, ACTIONS, PLANS)
@@ -88,4 +89,17 @@ Route::prefix('improvement')->group(function () {
 
 Route::post('improvement-suggestions/{id}/validate', [ImprovementSuggestionController::class, 'validateSuggestion']);
 Route::apiResource('improvement-suggestions', ImprovementSuggestionController::class);
+
+// --- Sorties non conformes (§8.7) ---
+Route::get('nonconforming-outputs/template', [NonconformingOutputController::class, 'downloadTemplate']);
+Route::get('nonconforming-outputs/export-xlsx', [NonconformingOutputController::class, 'exportXlsx']);
+Route::post('nonconforming-outputs/import-xlsx', [NonconformingOutputController::class, 'importXlsx']);
+Route::post('nonconforming-outputs/{nonconformingOutput}/isoler', [NonconformingOutputController::class, 'isoler']);
+Route::post('nonconforming-outputs/{nonconformingOutput}/corriger', [NonconformingOutputController::class, 'corriger']);
+Route::post('nonconforming-outputs/{nonconformingOutput}/derogation', [NonconformingOutputController::class, 'derogation']);
+Route::post('nonconforming-outputs/{nonconformingOutput}/rebuter', [NonconformingOutputController::class, 'rebuter']);
+Route::post('nonconforming-outputs/{nonconformingOutput}/cloturer', [NonconformingOutputController::class, 'cloturer']);
+Route::apiResource('nonconforming-outputs', NonconformingOutputController::class)->parameters([
+    'nonconforming-outputs' => 'nonconformingOutput',
+]);
 

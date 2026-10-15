@@ -48,6 +48,10 @@ Route::get('documents/stats', [DocumentController::class, 'getStats']);
 Route::get('documents/templates/politique-qualite', [DocumentController::class, 'downloadPolitiqueTemplate']);
 Route::get('documents/templates/manuel-qualite', [DocumentController::class, 'downloadManuelTemplate']);
 
+// Procédures (§7.5) : inventaire filtré type=procedure + modèle d'import
+Route::get('procedures/template', [DocumentController::class, 'proceduresTemplate']);
+Route::get('procedures', [DocumentController::class, 'procedures']);
+
 // Workflow de validation des documents
 Route::post('documents/{document}/confirm-code', [DocumentWorkflowController::class, 'confirmCode'])
     ->middleware('document.workflow.rate.limit');

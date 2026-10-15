@@ -13,6 +13,7 @@ use App\Modules\Hse\Controllers\IpeController;
 use App\Modules\Hse\Controllers\ComplianceObligationAspectController;
 use App\Modules\Hse\Controllers\ComplianceObligationController;
 use App\Modules\Hse\Controllers\ApplicableRequirementController;
+use App\Modules\Hse\Controllers\ProductServiceRequirementController;
 use App\Modules\Hse\Controllers\WorkAccidentController;
 use App\Modules\Hse\Controllers\EmergencyProcedureController;
 
@@ -133,4 +134,13 @@ Route::apiResource('prod-req-obligations', ComplianceObligationController::class
 ])->except(['show']);
 
 Route::apiResource('applicable-requirements', ApplicableRequirementController::class);
+
+// --- 5. Exigences relatives aux Produits & Services (ISO 9001 §8.2) ---
+Route::get('product-service-requirements/template', [ProductServiceRequirementController::class, 'downloadTemplate']);
+Route::get('product-service-requirements/export-xlsx', [ProductServiceRequirementController::class, 'exportXlsx']);
+Route::post('product-service-requirements/import-xlsx', [ProductServiceRequirementController::class, 'importXlsx']);
+Route::post('product-service-requirements/{productServiceRequirement}/review', [ProductServiceRequirementController::class, 'review']);
+Route::apiResource('product-service-requirements', ProductServiceRequirementController::class)->parameters([
+    'product-service-requirements' => 'productServiceRequirement',
+]);
 
