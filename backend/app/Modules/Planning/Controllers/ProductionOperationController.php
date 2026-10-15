@@ -20,7 +20,7 @@ class ProductionOperationController extends Controller
         $this->applyScope($request, $query);
 
         if ($request->filled('status')) {
-            $query->where('status', $request->string('status'));
+            $query->where('status', $this->normalizeStatus($request->input('status')));
         }
         if ($request->filled('process_id')) {
             $query->where('process_id', (int) $request->integer('process_id'));
@@ -41,6 +41,7 @@ class ProductionOperationController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $this->normalizeInput($request);
         $validated = $request->validate($this->rules(), $this->messages());
         $validated['enterprise_id'] = $request->user()->enterprise_id;
         $validated['status'] = $validated['status'] ?? ProductionOperation::STATUS_PLANIFIEE;
@@ -64,6 +65,7 @@ class ProductionOperationController extends Controller
     {
         $this->assertAccess($request, $productionOperation);
 
+        $this->normalizeInput($request);
         $validated = $request->validate($this->updateRules(), $this->messages());
         unset($validated['status']);
         $productionOperation->update($validated);
@@ -89,6 +91,9 @@ class ProductionOperationController extends Controller
     {
         $this->assertAccess($request, $productionOperation);
 
+        if ($request->filled('status')) {
+            $request->merge(['status' => $this->normalizeStatus($request->input('status'))]);
+        }
         $validated = $request->validate([
             'status' => 'required|in:' . implode(',', ProductionOperation::STATUSES),
             'control_result' => 'nullable|string',
@@ -126,7 +131,7 @@ class ProductionOperationController extends Controller
         $query = ProductionOperation::query()->with(['site:id,name', 'process:id,title,code']);
         $this->applyScope($request, $query);
         if ($request->filled('status')) {
-            $query->where('status', $request->string('status'));
+            $query->where('status', $this->normalizeStatus($request->input('status')));
         }
         $rows = $query->orderBy('id')->get();
 
@@ -331,6 +336,68 @@ class ProductionOperationController extends Controller
         );
     }
 
+    private function normalizeInput(Request $request): void
+    {
+        $merge = [];
+
+        if ($request->filled('status')) {
+            $merge['status'] = $this->normalizeStatus($request->input('status'));
+        }
+
+        // process_id / equipment_id : le frontend les envoie en texte libre (id ou nom) ou null.
+        if ($request->has('process_id')) {
+            $merge['process_id'] = $this->normalizeProcessId($request->input('process_id'));
+        }
+        if ($request->has('equipment_id')) {
+            $merge['equipment_id'] = $this->normalizeEquipmentId($request->input('equipment_id'));
+        }
+
+        // Alias frontend : client -> client_order, date -> planned_date, requirements -> criteria.
+        if (!$request->filled('client_order') && $request->filled('client')) {
+            $merge['client_order'] = trim((string) $request->input('client'));
+        }
+        if (!$request->filled('planned_date') && $request->filled('date')) {
+            $merge['planned_date'] = $request->input('date');
+        }
+        if (!$request->filled('criteria') && $request->filled('requirements')) {
+            $merge['criteria'] = trim((string) $request->input('requirements'));
+        }
+
+        if ($merge !== []) {
+            $request->merge($merge);
+        }
+    }
+
+    private function normalizeProcessId(mixed $value): ?int
+    {
+        if ($value === null || trim((string) $value) === '') {
+            return null;
+        }
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+        $id = \App\Modules\Processes\Models\Process::query()
+            ->where('code', (string) $value)
+            ->orWhereRaw('LOWER(title) = ?', [mb_strtolower(trim((string) $value))])
+            ->value('id');
+        return $id !== null ? (int) $id : null;
+    }
+
+    private function normalizeEquipmentId(mixed $value): ?int
+    {
+        if ($value === null || trim((string) $value) === '') {
+            return null;
+        }
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+        $id = \App\Modules\Support\Models\Equipement::query()
+            ->where('code_complet', (string) $value)
+            ->orWhereRaw('LOWER(nom_commun) = ?', [mb_strtolower(trim((string) $value))])
+            ->value('id');
+        return $id !== null ? (int) $id : null;
+    }
+
     private function nullIfEmpty(mixed $value): ?string
     {
         $normalized = trim((string) ($value ?? ''));
@@ -358,13 +425,17 @@ class ProductionOperationController extends Controller
 
     private function normalizeStatus(mixed $value): string
     {
-        $normalized = strtolower(trim((string) ($value ?? '')));
+        $normalized = str_replace(
+            ['é', 'è', 'ê', 'ë'],
+            'e',
+            mb_strtolower(trim((string) ($value ?? '')))
+        );
         $map = [
-            'planifiée' => 'planifiee', 'planifiee' => 'planifiee', 'planifie' => 'planifiee',
+            'planifiee' => 'planifiee', 'planifie' => 'planifiee',
             'en cours' => 'en_cours', 'en_cours' => 'en_cours',
-            'contrôlée' => 'controlee', 'controlee' => 'controlee',
-            'libérée' => 'liberee', 'liberee' => 'liberee',
-            'bloquée' => 'bloquee', 'bloquee' => 'bloquee',
+            'controlee' => 'controlee',
+            'liberee' => 'liberee',
+            'bloquee' => 'bloquee',
         ];
         $status = $map[$normalized] ?? 'planifiee';
         return in_array($status, ProductionOperation::STATUSES, true) ? $status : 'planifiee';

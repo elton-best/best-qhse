@@ -30,7 +30,7 @@ class OperationalControlController extends Controller
         $this->applyScope($request, $query);
 
         if ($request->filled('status')) {
-            $query->where('status', $request->string('status'));
+            $query->where('status', $this->normalizeStatus($request->input('status')));
         }
         if ($request->filled('process_id')) {
             $query->where('process_id', (int) $request->integer('process_id'));
@@ -51,6 +51,7 @@ class OperationalControlController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $this->normalizeInput($request);
         $validated = $request->validate($this->rules(), $this->messages());
         $validated['enterprise_id'] = $request->user()->enterprise_id;
 
@@ -73,6 +74,7 @@ class OperationalControlController extends Controller
     {
         $this->assertAccess($request, $operationalControl);
 
+        $this->normalizeInput($request);
         $validated = $request->validate($this->updateRules(), $this->messages());
         $operationalControl->update($validated);
 
@@ -94,7 +96,7 @@ class OperationalControlController extends Controller
         $query = OperationalControl::query()->with(['site:id,name', 'process:id,title,code']);
         $this->applyScope($request, $query);
         if ($request->filled('status')) {
-            $query->where('status', $request->string('status'));
+            $query->where('status', $this->normalizeStatus($request->input('status')));
         }
         $rows = $query->orderBy('id')->get();
 
@@ -236,7 +238,7 @@ class OperationalControlController extends Controller
     {
         return [
             'site_id' => 'nullable|exists:sites,id',
-            'process_id' => 'required|exists:processes,id',
+            'process_id' => 'nullable|exists:processes,id',
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'control_points' => 'nullable|array',
@@ -253,7 +255,7 @@ class OperationalControlController extends Controller
     {
         return [
             'site_id' => 'sometimes|nullable|exists:sites,id',
-            'process_id' => 'sometimes|exists:processes,id',
+            'process_id' => 'sometimes|nullable|exists:processes,id',
             'title' => 'sometimes|string|max:255',
             'description' => 'sometimes|nullable|string',
             'control_points' => 'sometimes|nullable|array',
@@ -307,6 +309,46 @@ class OperationalControlController extends Controller
         );
     }
 
+    private function normalizeInput(Request $request): void
+    {
+        $merge = [];
+
+        // Statut : accepte les labels FR du frontend (« Planifié », « Non conforme », …).
+        if ($request->filled('status')) {
+            $merge['status'] = $this->normalizeStatus($request->input('status'));
+        }
+
+        // process_id : le frontend l'envoie en texte libre (id ou nom) ou null.
+        if ($request->has('process_id')) {
+            $merge['process_id'] = $this->normalizeProcessId($request->input('process_id'));
+        }
+
+        // Alias frontend : criteria -> acceptance_criteria.
+        if (!$request->filled('acceptance_criteria') && $request->filled('criteria')) {
+            $merge['acceptance_criteria'] = trim((string) $request->input('criteria'));
+        }
+
+        if ($merge !== []) {
+            $request->merge($merge);
+        }
+    }
+
+    private function normalizeProcessId(mixed $value): ?int
+    {
+        if ($value === null || trim((string) $value) === '') {
+            return null;
+        }
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+        // Recherche par code ou titre (saisie texte libre côté frontend).
+        $id = \App\Modules\Processes\Models\Process::query()
+            ->where('code', (string) $value)
+            ->orWhereRaw('LOWER(title) = ?', [mb_strtolower(trim((string) $value))])
+            ->value('id');
+        return $id !== null ? (int) $id : null;
+    }
+
     private function nullIfEmpty(mixed $value): ?string
     {
         $normalized = trim((string) ($value ?? ''));
@@ -315,12 +357,15 @@ class OperationalControlController extends Controller
 
     private function normalizeStatus(mixed $value): string
     {
-        $normalized = strtolower(trim((string) ($value ?? '')));
+        $normalized = mb_strtolower(trim((string) ($value ?? '')));
+        $normalized = str_replace(['é', 'è', 'ê'], 'e', $normalized);
         $map = [
-            'planifié' => 'planifie', 'planifiee' => 'planifie', 'planifie' => 'planifie',
+            'planifie' => 'planifie', 'planifiee' => 'planifie',
             'conforme' => 'conforme',
             'non conforme' => 'non_conforme', 'non_conforme' => 'non_conforme',
+            'non-conforme' => 'non_conforme',
             'actif' => 'active', 'active' => 'active',
+            'archive' => 'archived', 'archived' => 'archived',
         ];
         $status = $map[$normalized] ?? 'planifie';
         return in_array($status, self::STATUSES, true) ? $status : 'planifie';

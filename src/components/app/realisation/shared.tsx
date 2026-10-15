@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { Component, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   Eye,
@@ -31,17 +31,22 @@ import {
   statusBadge,
 } from "../planning/shared";
 import {
+  assertSpreadsheetBlob,
   downloadBlob,
   exportRealisationXlsx,
-  importRealisationXlsx,
+  normalizeRealisationPayload,
+  spreadsheetExtension,
+  statusKeyOf,
+  statusLabelOf,
   templateRealisationXlsx,
   useRealisationList,
   useRealisationMutations,
   type RealisationItem,
   type RealisationKey,
 } from "@/integrations/backend/realisation";
+import { useProcesses } from "@/integrations/backend/context";
 
-export type RealisationFieldType = "text" | "textarea" | "select" | "date" | "number";
+export type RealisationFieldType = "text" | "textarea" | "select" | "date" | "number" | "process";
 
 export type RealisationField = {
   key: string;
@@ -85,7 +90,66 @@ function firstOf(item: RealisationItem, keys: string[]): string {
   return "";
 }
 
+/** Capte les crashs de rendu d'une page CH8 au lieu de casser toute la rubrique. */
+export class RealisationErrorBoundary extends Component<
+  { children: ReactNode; title?: string },
+  { error: Error | null }
+> {
+  override state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: unknown): { error: Error } {
+    return { error: error instanceof Error ? error : new Error("Erreur d'affichage.") };
+  }
+
+  override componentDidCatch(error: Error): void {
+    console.error("[Realisation] Impossible d'afficher la page.", error);
+  }
+
+  private handleRetry = (): void => {
+    this.setState({ error: null });
+  };
+
+  override render(): ReactNode {
+    const { error } = this.state;
+    if (error) {
+      return (
+        <div className="mx-auto max-w-3xl p-4 md:p-8">
+          <div className={`${card} p-8 text-center`}>
+            <p className="text-xs font-bold uppercase tracking-wide text-primary">
+              Réalisation des activités
+            </p>
+            <h1 className="mt-2 font-display text-2xl font-extrabold">
+              {this.props.title ?? "Cette page ne peut pas s'afficher"}
+            </h1>
+            <p className={`mx-auto mt-3 max-w-xl ${muted}`}>
+              Une erreur inattendue a empêché l&apos;affichage. Vous pouvez réessayer : vos
+              données sont conservées côté serveur.
+            </p>
+            <p className="mx-auto mt-4 max-w-xl break-words rounded-xl bg-background p-3 text-xs text-muted-foreground">
+              {error.message}
+            </p>
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+              <button type="button" onClick={this.handleRetry} className={primary}>
+                Réessayer
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export function RealisationPage(config: RealisationPageConfig) {
+  return (
+    <RealisationErrorBoundary title={config.title}>
+      <RealisationPageInner config={config} />
+    </RealisationErrorBoundary>
+  );
+}
+
+function RealisationPageInner({ config }: { config: RealisationPageConfig }) {
   const {
     resource,
     eyebrow,
@@ -98,7 +162,10 @@ export function RealisationPage(config: RealisationPageConfig) {
     clientFilter,
     filePrefix,
   } = config;
-  const statusKey = config.statusKey ?? "status";
+  // Clé de statut centralisée (codes backend <-> libellés FR) ; un statusKey
+  // explicite reste supporté pour les cas particuliers.
+  const statusKey = config.statusKey ?? statusKeyOf(resource);
+  void statusKey;
   const titleKeys = config.titleKeys ?? ["title", "name", "label"];
   const codeKeys = config.codeKeys ?? ["code", "reference", "ref"];
 
@@ -119,14 +186,39 @@ export function RealisationPage(config: RealisationPageConfig) {
     () => ({ site_id: siteId || undefined, search: query.trim() || undefined }),
     [siteId, query],
   );
-  const { data: items = [], isLoading } = useRealisationList(resource, filters);
+  // Pas de site => pas d'appel (les créations exigent un site côté backend).
+  const {
+    data: items = [],
+    isLoading,
+    isError,
+    error: listError,
+    refetch,
+  } = useRealisationList(resource, filters, { enabled: !!siteId });
   const mutations = useRealisationMutations(resource, siteId);
+
+  // Options du champ "processus" (sélecteur plutôt que saisie libre : le
+  // backend exige un `process_id` existant pour la maîtrise opérationnelle).
+  const { data: processResources = [] } = useProcesses(siteId);
+  const processOptions = useMemo(
+    () =>
+      (processResources as Record<string, unknown>[])
+        .map((source) => {
+          const item = (source ?? {}) as Record<string, unknown>;
+          const id = item["id"];
+          const name = str(item["title"] ?? item["name"] ?? item["code"]);
+          return { id: id == null ? "" : String(id), name: name || `#${String(id ?? "")}` };
+        })
+        .filter((option) => option.id !== ""),
+    [processResources],
+  );
+
+  const displayStatus = (item: RealisationItem): string => statusLabelOf(resource, item);
 
   const visible = useMemo(() => {
     const base = clientFilter ? items.filter(clientFilter) : items;
     const q = query.trim().toLowerCase();
     return base.filter((item) => {
-      if (statusFilter !== "all" && str(item[statusKey]).toLowerCase() !== statusFilter)
+      if (statusFilter !== "all" && statusLabelOf(resource, item).toLowerCase() !== statusFilter)
         return false;
       if (q) {
         const haystack =
@@ -135,16 +227,16 @@ export function RealisationPage(config: RealisationPageConfig) {
       }
       return true;
     });
-  }, [items, clientFilter, query, statusFilter, statusKey, titleKeys, codeKeys]);
+  }, [items, clientFilter, query, statusFilter, resource, titleKeys, codeKeys]);
 
   const stats = useMemo(() => {
     const perStatus = new Map<string, number>();
     visible.forEach((item) => {
-      const s = str(item[statusKey]) || "—";
+      const s = statusLabelOf(resource, item) || "—";
       perStatus.set(s, (perStatus.get(s) ?? 0) + 1);
     });
     return { total: visible.length, perStatus: [...perStatus.entries()].slice(0, 3) };
-  }, [visible, statusKey]);
+  }, [visible, resource]);
 
   const resetFilters = (): void => {
     setQuery("");
@@ -169,7 +261,8 @@ export function RealisationPage(config: RealisationPageConfig) {
       next[f.key] = str(item[f.key]);
     });
     setForm(next);
-    setFormStatus(str(item[statusKey]) || (statuses[0] ?? ""));
+    // L'item porte un code backend : reconvertir vers le libellé FR du formulaire.
+    setFormStatus(statusLabelOf(resource, item) || (statuses[0] ?? ""));
     setDetail(null);
     setFormOpen(true);
   };
@@ -190,17 +283,19 @@ export function RealisationPage(config: RealisationPageConfig) {
     }
     setBusy(true);
     try {
-      const payload: Record<string, unknown> = { ...(defaults ?? {}) };
+      const raw: Record<string, unknown> = { ...(defaults ?? {}) };
       fields.forEach((field) => {
         const value = (form[field.key] ?? "").trim();
-        payload[field.key] = field.type === "number" ? value === "" ? null : Number(value) : value || null;
+        raw[field.key] = field.type === "number" ? value === "" ? null : Number(value) : value || null;
       });
       const mainTitleKey = titleKeys[0] ?? "title";
-      if (!payload[mainTitleKey] || !str(payload[mainTitleKey]).trim()) {
-        payload[mainTitleKey] =
-          str(payload["description"]).slice(0, 120) || `${title} ${new Date().toLocaleDateString("fr-FR")}`;
+      if (!raw[mainTitleKey] || !str(raw[mainTitleKey]).trim()) {
+        raw[mainTitleKey] =
+          str(raw["description"]).slice(0, 120) || `${title} ${new Date().toLocaleDateString("fr-FR")}`;
       }
-      payload[statusKey] = formStatus || null;
+      // Aligne le payload sur le contrat backend : clés inconnues retirées,
+      // identifiants coercés, enums FR converties, statut FR -> code backend.
+      const payload = normalizeRealisationPayload(resource, raw, formStatus);
       if (editing) {
         await mutations.update.mutateAsync({ id: editing.id, payload });
       } else {
@@ -230,9 +325,12 @@ export function RealisationPage(config: RealisationPageConfig) {
   const doExport = async (): Promise<void> => {
     setBusy(true);
     try {
-      const blob = await exportRealisationXlsx(resource, siteId || undefined);
-      downloadBlob(blob, `${filePrefix}-${siteId || "tous"}.xlsx`);
-      toast.success("Export Excel téléchargé.");
+      const blob = await assertSpreadsheetBlob(
+        await exportRealisationXlsx(resource, siteId || undefined),
+        "export",
+      );
+      downloadBlob(blob, `${filePrefix}-${siteId || "tous"}.${spreadsheetExtension(blob)}`);
+      toast.success("Export téléchargé.");
     } catch (error) {
       toast.error(errorMessage(error, "Export impossible."));
     } finally {
@@ -243,8 +341,8 @@ export function RealisationPage(config: RealisationPageConfig) {
   const doTemplate = async (): Promise<void> => {
     setBusy(true);
     try {
-      const blob = await templateRealisationXlsx(resource);
-      downloadBlob(blob, `modele-${filePrefix}.xlsx`);
+      const blob = await assertSpreadsheetBlob(await templateRealisationXlsx(resource), "modèle");
+      downloadBlob(blob, `modele-${filePrefix}.${spreadsheetExtension(blob)}`);
       toast.success("Modèle d'import téléchargé.");
     } catch (error) {
       toast.error(errorMessage(error, "Téléchargement du modèle impossible."));
@@ -260,10 +358,10 @@ export function RealisationPage(config: RealisationPageConfig) {
     }
     setBusy(true);
     try {
-      await importRealisationXlsx(resource, siteId, file);
-      toast.success("Import terminé.");
-    } catch (error) {
-      toast.error(errorMessage(error, "Import impossible."));
+      // Via la mutation : invalide la liste après import (rafraîchit l'affichage).
+      await mutations.importFile.mutateAsync(file);
+    } catch {
+      // Message déjà affiché par la mutation (erreur FR du backend).
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -289,6 +387,23 @@ export function RealisationPage(config: RealisationPageConfig) {
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-8">
       {!siteId && <SiteNotice />}
+      {isError && (
+        <div
+          className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
+          role="alert"
+        >
+          <p className="font-bold">Impossible de charger les données de cette page.</p>
+          <p className="mt-1">{errorMessage(listError, "Une erreur inattendue est survenue.")}</p>
+          <button
+            type="button"
+            className={`${secondary} mt-3`}
+            disabled={busy}
+            onClick={() => void refetch()}
+          >
+            Réessayer
+          </button>
+        </div>
+      )}
       <Header eyebrow={eyebrow} title={title} description={description} icon={Icon}>
         <button type="button" className={secondary} disabled={busy} onClick={() => void doTemplate()}>
           <FileWarning className="h-4 w-4" /> Modèle
@@ -374,6 +489,10 @@ export function RealisationPage(config: RealisationPageConfig) {
           <div className="mt-4">
             <PageSkeleton rows={4} />
           </div>
+        ) : !siteId ? (
+          <div className="py-10 text-center">
+            <p className={muted}>Sélectionnez un site pour afficher les données.</p>
+          </div>
         ) : visible.length === 0 ? (
           <div className="py-10 text-center">
             <p className={muted}>
@@ -398,8 +517,8 @@ export function RealisationPage(config: RealisationPageConfig) {
                   <span className="text-xs font-bold text-muted-foreground">
                     {firstOf(item, codeKeys) || `#${String(item.id)}`}
                   </span>
-                  <span className={statusBadge(item[statusKey])}>
-                    {str(item[statusKey]) || "—"}
+                  <span className={statusBadge(displayStatus(item))}>
+                    {displayStatus(item) || "—"}
                   </span>
                 </div>
                 <h3 className="mt-2 font-display font-bold">
@@ -434,8 +553,8 @@ export function RealisationPage(config: RealisationPageConfig) {
                       {firstOf(item, titleKeys) || "—"}
                     </td>
                     <td className="px-3 py-2">
-                      <span className={statusBadge(item[statusKey])}>
-                        {str(item[statusKey]) || "—"}
+                      <span className={statusBadge(displayStatus(item))}>
+                        {displayStatus(item) || "—"}
                       </span>
                     </td>
                     <td className="px-3 py-2">{formatDateFR(item["updated_at"])}</td>
@@ -515,6 +634,30 @@ export function RealisationPage(config: RealisationPageConfig) {
                         </option>
                       ))}
                     </select>
+                  ) : field.type === "process" ? (
+                    processOptions.length > 0 ? (
+                      <select
+                        className={input}
+                        value={form[field.key] ?? ""}
+                        onChange={(e) => touch(field.key, e.target.value)}
+                      >
+                        <option value="">—</option>
+                        {processOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        className={input}
+                        placeholder="Identifiant du processus"
+                        value={form[field.key] ?? ""}
+                        onChange={(e) => touch(field.key, e.target.value)}
+                      />
+                    )
                   ) : (
                     <input
                       type={field.type === "date" ? "date" : field.type === "number" ? "number" : "text"}
@@ -565,8 +708,8 @@ export function RealisationPage(config: RealisationPageConfig) {
               </button>
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <span className={statusBadge(detail[statusKey])}>
-                {str(detail[statusKey]) || "—"}
+              <span className={statusBadge(displayStatus(detail))}>
+                {displayStatus(detail) || "—"}
               </span>
               <span className={`text-xs ${muted}`}>
                 Mise à jour : {formatDateFR(detail["updated_at"])}

@@ -33,7 +33,7 @@ class NonconformingOutputController extends Controller
             $query->where('status', $request->string('status'));
         }
         if ($request->filled('severity')) {
-            $query->where('severity', $request->string('severity'));
+            $query->where('severity', $this->normalizeSeverity($request->input('severity')));
         }
         if ($request->filled('search')) {
             $term = '%' . trim((string) $request->string('search')) . '%';
@@ -49,8 +49,9 @@ class NonconformingOutputController extends Controller
 
     public function store(Request $request)
     {
+        $this->normalizeInput($request);
         $validated = $request->validate([
-            'site_id' => 'required|exists:sites,id',
+            'site_id' => 'nullable|exists:sites,id',
             'process_id' => 'nullable|exists:processes,id',
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
@@ -62,6 +63,17 @@ class NonconformingOutputController extends Controller
             'decision' => 'nullable|in:correction,derogation,rebut,retour',
             'responsible_id' => 'nullable|exists:users,id',
         ]);
+
+        $validated['site_id'] = $validated['site_id'] ?? $request->user()?->site_id;
+        if (empty($validated['site_id'])) {
+            return response()->json([
+                'message' => 'Le site est obligatoire.',
+                'errors' => ['site_id' => ['Le site est obligatoire.']],
+            ], 422);
+        }
+
+        $validated['severity'] = $validated['severity'] ?? 'minor';
+        $validated['status'] = $validated['status'] ?? 'detected';
 
         $output = NonconformingOutput::create($validated);
 
@@ -80,6 +92,7 @@ class NonconformingOutputController extends Controller
 
     public function update(Request $request, NonconformingOutput $nonconformingOutput)
     {
+        $this->normalizeInput($request);
         $validated = $request->validate([
             'site_id' => 'sometimes|exists:sites,id',
             'process_id' => 'nullable|exists:processes,id',
@@ -333,6 +346,36 @@ class NonconformingOutputController extends Controller
         ]);
     }
 
+    private function normalizeInput(Request $request): void
+    {
+        $merge = [];
+
+        // Alias frontend : impact (Faible / Moyen / Fort) -> severity.
+        if (!$request->filled('severity') && $request->filled('impact')) {
+            $merge['severity'] = $this->normalizeSeverity($request->input('impact'));
+        } elseif ($request->filled('severity')) {
+            $merge['severity'] = $this->normalizeSeverity($request->input('severity'));
+        }
+
+        // decision : texte libre côté frontend -> code (ou null si inclassable).
+        if ($request->has('decision')) {
+            $merge['decision'] = $this->normalizeDecision($request->input('decision'));
+        }
+
+        if ($merge !== []) {
+            $request->merge($merge);
+        }
+    }
+
+    private function unaccent(string $value): string
+    {
+        return str_replace(
+            ['é', 'è', 'ê', 'ë', 'à', 'â', 'î', 'ï', 'ô', 'û', 'ù', 'ç'],
+            ['e', 'e', 'e', 'e', 'a', 'a', 'i', 'i', 'o', 'u', 'u', 'c'],
+            $value
+        );
+    }
+
     private function appendComment(?string $current, ?string $comment, string $label): ?string
     {
         $comment = trim((string) ($comment ?? ''));
@@ -363,14 +406,37 @@ class NonconformingOutputController extends Controller
 
     private function normalizeSeverity(mixed $value): string
     {
-        $normalized = strtolower(trim((string) ($value ?? '')));
-        return in_array($normalized, ['minor', 'major', 'critical'], true) ? $normalized : 'minor';
+        $normalized = $this->unaccent(mb_strtolower(trim((string) ($value ?? ''))));
+        return match ($normalized) {
+            'minor', 'mineur', 'mineure', 'faible' => 'minor',
+            'major', 'majeur', 'majeure', 'moyen', 'moyenne' => 'major',
+            'critical', 'critique', 'fort', 'forte' => 'critical',
+            default => 'minor',
+        };
     }
 
     private function normalizeDecision(mixed $value): ?string
     {
-        $normalized = strtolower(trim((string) ($value ?? '')));
-        return in_array($normalized, ['correction', 'derogation', 'rebut', 'retour'], true) ? $normalized : null;
+        if ($value === null || trim((string) $value) === '') {
+            return null;
+        }
+        $normalized = $this->unaccent(mb_strtolower(trim((string) $value)));
+        foreach ([
+            'correction' => ['correct', 'reprise', 'retouche'],
+            'derogation' => ['derog', 'concession', 'acceptation en l'],
+            'rebut' => ['rebut', 'destruction', 'mise au rebut'],
+            'retour' => ['retour', 'renvoi'],
+        ] as $code => $keywords) {
+            if ($normalized === $code) {
+                return $code;
+            }
+            foreach ($keywords as $keyword) {
+                if (str_contains($normalized, $keyword)) {
+                    return $code;
+                }
+            }
+        }
+        return null;
     }
 
     private function normalizeDate(mixed $value): ?string

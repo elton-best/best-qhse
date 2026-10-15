@@ -48,8 +48,9 @@ class ProductServiceRequirementController extends Controller
 
     public function store(Request $request)
     {
+        $this->normalizeInput($request);
         $validated = $request->validate([
-            'site_id' => 'required|exists:sites,id',
+            'site_id' => 'nullable|exists:sites,id',
             'title' => 'required|string|max:255',
             'requirement_type' => 'nullable|in:client,legal,regulatory,normative,contractual,internal',
             'source' => 'nullable|string|max:255',
@@ -60,6 +61,16 @@ class ProductServiceRequirementController extends Controller
             'responsible_id' => 'nullable|exists:users,id',
             'deadline' => 'nullable|date',
         ]);
+
+        $validated['site_id'] = $validated['site_id'] ?? $request->user()?->site_id;
+        if (empty($validated['site_id'])) {
+            return response()->json([
+                'message' => 'Le site est obligatoire.',
+                'errors' => ['site_id' => ['Le site est obligatoire.']],
+            ], 422);
+        }
+        $validated['requirement_type'] = $validated['requirement_type'] ?? 'client';
+        $validated['compliance_status'] = $validated['compliance_status'] ?? 'not_applicable';
 
         $requirement = ProductServiceRequirement::create($validated);
 
@@ -78,6 +89,7 @@ class ProductServiceRequirementController extends Controller
 
     public function update(Request $request, ProductServiceRequirement $productServiceRequirement)
     {
+        $this->normalizeInput($request);
         $validated = $request->validate([
             'site_id' => 'sometimes|exists:sites,id',
             'title' => 'sometimes|string|max:255',
@@ -110,6 +122,9 @@ class ProductServiceRequirementController extends Controller
      */
     public function review(Request $request, ProductServiceRequirement $productServiceRequirement)
     {
+        if ($request->filled('review_status')) {
+            $request->merge(['review_status' => $this->normalizeReviewStatus($request->input('review_status'))]);
+        }
         $validated = $request->validate([
             'review_status' => 'required|in:reviewed,approved',
             'review_comment' => 'nullable|string',
@@ -255,6 +270,52 @@ class ProductServiceRequirementController extends Controller
         return response()->download($tempPath, $filename)->deleteFileAfterSend(true);
     }
 
+    private function normalizeInput(Request $request): void
+    {
+        $merge = [];
+
+        // Alias frontend : origin (Client / Réglementaire / Interne) -> requirement_type.
+        if (!$request->filled('requirement_type') && $request->filled('origin')) {
+            $merge['requirement_type'] = $this->normalizeRequirementType($request->input('origin'));
+        } elseif ($request->filled('requirement_type')) {
+            $merge['requirement_type'] = $this->normalizeRequirementType($request->input('requirement_type'));
+        }
+
+        // Alias frontend : client -> source (et exigences client si vide).
+        if (!$request->filled('source') && $request->filled('client')) {
+            $merge['source'] = trim((string) $request->input('client'));
+        }
+        if (!$request->filled('customer_requirements') && $request->filled('client')) {
+            $merge['customer_requirements'] = trim((string) $request->input('client'));
+        }
+
+        if ($request->filled('compliance_status')) {
+            $merge['compliance_status'] = $this->normalizeComplianceStatus($request->input('compliance_status'));
+        }
+
+        if ($merge !== []) {
+            $request->merge($merge);
+        }
+    }
+
+    private function normalizeReviewStatus(mixed $value): string
+    {
+        $normalized = $this->unaccent(mb_strtolower(trim((string) ($value ?? ''))));
+        return match ($normalized) {
+            'reviewed', 'revu', 'revue' => 'reviewed',
+            'approved', 'approuve', 'valide' => 'approved',
+            default => trim((string) ($value ?? '')),
+        };
+    }
+
+    private function unaccent(string $value): string
+    {
+        return str_replace(
+            ['é', 'è', 'ê', 'ë', 'à', 'â', 'î', 'ï', 'ô', 'û', 'ù', 'ç'],
+            ['e', 'e', 'e', 'e', 'a', 'a', 'i', 'i', 'o', 'u', 'u', 'c'],
+            $value
+        );
+    }
     private function normalizeStringOrNull(mixed $value): ?string
     {
         $normalized = trim((string) ($value ?? ''));
@@ -263,19 +324,25 @@ class ProductServiceRequirementController extends Controller
 
     private function normalizeRequirementType(mixed $value): string
     {
-        $normalized = strtolower(trim((string) ($value ?? '')));
-        return in_array($normalized, ['client', 'legal', 'regulatory', 'normative', 'contractual', 'internal'], true)
-            ? $normalized
-            : 'client';
+        $normalized = $this->unaccent(mb_strtolower(trim((string) ($value ?? ''))));
+        return match ($normalized) {
+            'client' => 'client',
+            'legal', 'legale', 'legaux' => 'legal',
+            'regulatory', 'reglementaire' => 'regulatory',
+            'normative', 'normatif' => 'normative',
+            'contractual', 'contractuel', 'contractuelle' => 'contractual',
+            'internal', 'interne' => 'internal',
+            default => 'client',
+        };
     }
 
     private function normalizeComplianceStatus(mixed $value): string
     {
-        $normalized = strtolower(trim((string) ($value ?? '')));
+        $normalized = $this->unaccent(mb_strtolower(trim((string) ($value ?? ''))));
         return match ($normalized) {
-            'compliant', 'conforme' => 'compliant',
-            'partial', 'partiellement conforme' => 'partial',
-            'non_compliant', 'non conforme' => 'non_compliant',
+            'compliant', 'conforme', 'satisfaite', 'satisfait' => 'compliant',
+            'partial', 'partiel', 'partielle', 'partiellement conforme' => 'partial',
+            'non_compliant', 'non conforme', 'non-conforme' => 'non_compliant',
             default => 'not_applicable',
         };
     }

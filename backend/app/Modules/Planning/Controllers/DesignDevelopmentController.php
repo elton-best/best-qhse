@@ -46,8 +46,9 @@ class DesignDevelopmentController extends Controller
 
     public function store(Request $request)
     {
+        $this->normalizeInput($request);
         $validated = $request->validate([
-            'site_id' => 'required|exists:sites,id',
+            'site_id' => 'nullable|exists:sites,id',
             'title' => 'required|string|max:255',
             'project_code' => 'nullable|string|max:100',
             'stage' => 'nullable|in:planning,inputs,controls,outputs,changes',
@@ -61,6 +62,16 @@ class DesignDevelopmentController extends Controller
             'planned_date' => 'nullable|date',
             'actual_date' => 'nullable|date',
         ]);
+
+        $validated['site_id'] = $validated['site_id'] ?? $request->user()?->site_id;
+        if (empty($validated['site_id'])) {
+            return response()->json([
+                'message' => 'Le site est obligatoire.',
+                'errors' => ['site_id' => ['Le site est obligatoire.']],
+            ], 422);
+        }
+        $validated['status'] = $validated['status'] ?? 'draft';
+        $validated['stage'] = $validated['stage'] ?? 'planning';
 
         $design = DesignDevelopment::create($validated);
 
@@ -79,6 +90,7 @@ class DesignDevelopmentController extends Controller
 
     public function update(Request $request, DesignDevelopment $designDevelopment)
     {
+        $this->normalizeInput($request);
         $validated = $request->validate([
             'site_id' => 'sometimes|exists:sites,id',
             'title' => 'sometimes|string|max:255',
@@ -94,6 +106,13 @@ class DesignDevelopmentController extends Controller
             'planned_date' => 'nullable|date',
             'actual_date' => 'nullable|date',
         ]);
+
+        if (array_key_exists('status', $validated) && $validated['status'] === null) {
+            unset($validated['status']);
+        }
+        if (array_key_exists('stage', $validated) && $validated['stage'] === null) {
+            unset($validated['stage']);
+        }
 
         $designDevelopment->update($validated);
 
@@ -114,6 +133,7 @@ class DesignDevelopmentController extends Controller
      */
     public function transition(Request $request, DesignDevelopment $designDevelopment)
     {
+        $this->normalizeInput($request);
         $validated = $request->validate([
             'stage' => 'nullable|in:planning,inputs,controls,outputs,changes',
             'status' => 'nullable|in:draft,in_progress,in_review,validated,closed',
@@ -282,6 +302,102 @@ class DesignDevelopmentController extends Controller
         return response()->download($tempPath, $filename)->deleteFileAfterSend(true);
     }
 
+    private function normalizeInput(Request $request): void
+    {
+        $merge = [];
+
+        // Statut générique du frontend (Planification, Entrées, Revue, Vérification, Validé)
+        // dispatché vers stage ou status quand ces derniers sont absents.
+        if ($request->filled('status') && !$request->filled('stage') && !$request->filled('status_code')) {
+            $generic = $this->normalizeGenericStatus($request->input('status'));
+            if (isset($generic['stage'])) {
+                $merge['stage'] = $generic['stage'];
+                // Ne pas laisser le label générique échouer la validation du statut backend.
+                if (!$this->isKnownStatus($request->input('status'))) {
+                    $merge['status'] = 'draft';
+                }
+            } elseif (isset($generic['status'])) {
+                $merge['status'] = $generic['status'];
+            }
+        }
+
+        if ($request->filled('stage')) {
+            $merge['stage'] = $this->normalizeStage($request->input('stage'));
+        }
+        if (array_key_exists('status', $merge) && $merge['status'] === null) {
+            // Statut générique déjà dispatché vers stage : rien à valider.
+        } elseif ($request->filled('status') && !isset($merge['status'])) {
+            $merge['status'] = $this->normalizeStatus($request->input('status'));
+        }
+
+        // Alias frontend : needs -> inputs, due_date -> planned_date.
+        if (!$request->filled('inputs') && $request->filled('needs')) {
+            $merge['inputs'] = trim((string) $request->input('needs'));
+        }
+        if (!$request->filled('planned_date') && $request->filled('due_date')) {
+            $merge['planned_date'] = $request->input('due_date');
+        }
+        // Alias frontend : pilot_id (nom ou id) -> responsible_id.
+        if (!$request->filled('responsible_id') && $request->filled('pilot_id')) {
+            $merge['responsible_id'] = $this->resolveUserId($request->input('pilot_id'));
+        }
+
+        if ($merge !== []) {
+            $request->merge($merge);
+        }
+    }
+
+    /**
+     * Dispatch un label générique du frontend vers stage ou status backend.
+     */
+    private function normalizeGenericStatus(mixed $value): array
+    {
+        $normalized = $this->unaccent(mb_strtolower(trim((string) ($value ?? ''))));
+        return match ($normalized) {
+            'planification', 'planning' => ['stage' => 'planning'],
+            'entrees', 'inputs' => ['stage' => 'inputs'],
+            'verification', 'controls', 'controles' => ['stage' => 'controls'],
+            'sorties', 'outputs' => ['stage' => 'outputs'],
+            'modifications', 'changes' => ['stage' => 'changes'],
+            'revue', 'in_review' => ['status' => 'in_review'],
+            'valide', 'validated' => ['status' => 'validated'],
+            'cloture', 'closed' => ['status' => 'closed'],
+            'brouillon', 'draft' => ['status' => 'draft'],
+            'en cours', 'in_progress' => ['status' => 'in_progress'],
+            default => [],
+        };
+    }
+
+    private function isKnownStatus(mixed $value): bool
+    {
+        $normalized = $this->unaccent(mb_strtolower(trim((string) ($value ?? ''))));
+        return in_array($normalized, [
+            'draft', 'brouillon', 'in_progress', 'en cours',
+            'in_review', 'revue', 'en revue', 'validated', 'valide',
+            'closed', 'cloture',
+        ], true);
+    }
+
+    private function unaccent(string $value): string
+    {
+        return str_replace(
+            ['é', 'è', 'ê', 'ë', 'à', 'â', 'î', 'ï', 'ô', 'û', 'ù', 'ç'],
+            ['e', 'e', 'e', 'e', 'a', 'a', 'i', 'i', 'o', 'u', 'u', 'c'],
+            $value
+        );
+    }
+
+    private function resolveUserId(mixed $value): ?int
+    {
+        if ($value === null || trim((string) $value) === '') {
+            return null;
+        }
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+        return $this->resolveUserIdFromName($value);
+    }
+
     private function normalizeStringOrNull(mixed $value): ?string
     {
         $normalized = trim((string) ($value ?? ''));
@@ -290,14 +406,30 @@ class DesignDevelopmentController extends Controller
 
     private function normalizeStage(mixed $value): string
     {
-        $normalized = strtolower(trim((string) ($value ?? '')));
-        return in_array($normalized, DesignDevelopment::STAGES, true) ? $normalized : 'planning';
+        $normalized = $this->unaccent(mb_strtolower(trim((string) ($value ?? ''))));
+        $map = [
+            'planning', 'planification' => 'planning',
+            'inputs', 'entrees' => 'inputs',
+            'controls', 'controles', 'verification' => 'controls',
+            'outputs', 'sorties' => 'outputs',
+            'changes', 'modifications' => 'changes',
+        ];
+        $stage = $map[$normalized] ?? 'planning';
+        return in_array($stage, DesignDevelopment::STAGES, true) ? $stage : 'planning';
     }
 
     private function normalizeStatus(mixed $value): string
     {
-        $normalized = strtolower(trim((string) ($value ?? '')));
-        return in_array($normalized, DesignDevelopment::STATUSES, true) ? $normalized : 'draft';
+        $normalized = $this->unaccent(mb_strtolower(trim((string) ($value ?? ''))));
+        $map = [
+            'draft', 'brouillon' => 'draft',
+            'in_progress', 'en cours' => 'in_progress',
+            'in_review', 'revue', 'en revue' => 'in_review',
+            'validated', 'valide' => 'validated',
+            'closed', 'cloture' => 'closed',
+        ];
+        $status = $map[$normalized] ?? 'draft';
+        return in_array($status, DesignDevelopment::STATUSES, true) ? $status : 'draft';
     }
 
     private function normalizeDate(mixed $value): ?string

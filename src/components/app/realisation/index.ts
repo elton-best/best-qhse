@@ -8,3 +8,5 @@ export { ReleasePage } from "./ReleasePage";
 export { NonconformingPage } from "./NonconformingPage";
 export { ProceduresPage } from "./ProceduresPage";
 export { RealisationOverviewPage } from "./RealisationOverviewPage";
+export { ObligationsPage } from "./ObligationsPage";
+export { FournisseursPage } from "./FournisseursPage";

@@ -40,7 +40,9 @@ import { ActionsPage } from "@/components/app/planning/ActionsPage";
 import { SmPlanPage } from "@/components/app/planning/SmPlanPage";
 import {
   DesignPage,
+  FournisseursPage,
   NonconformingPage,
+  ObligationsPage,
   OperationalControlPage,
   ProceduresPage,
   RealisationOverviewPage,
@@ -98,6 +100,16 @@ const CUSTOM = [
   "boite-reception",
   "habilitations",
   "support",
+  "procedures",
+  "maitrise-operationnelle",
+  "exigences",
+  "obligations",
+  "conception",
+  "fournisseurs",
+  "production",
+  "realisation",
+  "liberation",
+  "sorties-non-conformes",
 ];
 
 type Search = {
@@ -233,8 +245,13 @@ function SectionPage() {
       return <OperationalControlPage />;
     case "exigences":
       return <RequirementsPage />;
+    case "obligations":
+      return <ObligationsPage />;
     case "conception":
       return <DesignPage />;
+    case "fournisseurs":
+      return <FournisseursPage />;
+    case "production":
     case "realisation":
       return <RealisationOverviewPage />;
     case "liberation":

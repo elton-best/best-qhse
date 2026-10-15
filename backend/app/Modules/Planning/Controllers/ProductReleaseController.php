@@ -24,7 +24,7 @@ class ProductReleaseController extends Controller
         $this->applyScope($request, $query);
 
         if ($request->filled('status')) {
-            $query->where('status', $request->string('status'));
+            $query->where('status', $this->normalizeDecision($request->input('status')));
         }
         if ($request->filled('production_operation_id')) {
             $query->where('production_operation_id', (int) $request->integer('production_operation_id'));
@@ -45,6 +45,7 @@ class ProductReleaseController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $this->normalizeStoreInput($request);
         $validated = $request->validate($this->rules(), $this->messages());
 
         $operation = ProductionOperation::findOrFail($validated['production_operation_id']);
@@ -80,6 +81,7 @@ class ProductReleaseController extends Controller
             ], 422);
         }
 
+        $this->normalizeStoreInput($request);
         $validated = $request->validate($this->updateRules(), $this->messages());
         unset($validated['status']);
         $productRelease->update($validated);
@@ -118,6 +120,13 @@ class ProductReleaseController extends Controller
             ], 422);
         }
 
+        if ($request->filled('decision')) {
+            $request->merge(['decision' => $this->normalizeDecision($request->input('decision'))]);
+        }
+        // Alias frontend : description -> decision_notes.
+        if (!$request->filled('decision_notes') && $request->filled('description')) {
+            $request->merge(['decision_notes' => trim((string) $request->input('description'))]);
+        }
         $validated = $request->validate([
             'decision' => 'required|in:' . implode(',', ProductRelease::DECISIONS),
             'authorized_by' => 'required|string|max:255',
@@ -144,7 +153,7 @@ class ProductReleaseController extends Controller
         $query = ProductRelease::query()->with(['site:id,name', 'productionOperation:id,title,client_order,status']);
         $this->applyScope($request, $query);
         if ($request->filled('status')) {
-            $query->where('status', $request->string('status'));
+            $query->where('status', $this->normalizeDecision($request->input('status')));
         }
         $rows = $query->orderBy('id')->get();
 
@@ -371,6 +380,85 @@ class ProductReleaseController extends Controller
             403,
             'Accès refusé à cette libération.'
         );
+    }
+
+    /**
+     * Normalise les alias du frontend avant validation (création / modification) :
+     * title -> batch_number, operation_id -> production_operation_id,
+     * date -> release_date, description -> decision_notes.
+     */
+    private function normalizeStoreInput(Request $request): void
+    {
+        $merge = [];
+
+        if (!$request->filled('batch_number') && $request->filled('title')) {
+            $merge['batch_number'] = trim((string) $request->input('title'));
+        }
+        if (!$request->filled('production_operation_id') && $request->filled('operation_id')) {
+            $merge['production_operation_id'] = $this->normalizeOperationId($request->input('operation_id'));
+        } elseif ($request->has('production_operation_id') && !is_numeric($request->input('production_operation_id'))) {
+            $merge['production_operation_id'] = $this->normalizeOperationId($request->input('production_operation_id'));
+        }
+
+        $resolvedOpId = $merge['production_operation_id'] ?? $request->input('production_operation_id');
+        if (empty($resolvedOpId) || !is_numeric($resolvedOpId)) {
+            $user = $request->user();
+            if ($user && $user->enterprise_id) {
+                $opTitle = trim((string) ($request->input('operation_id') ?: $request->input('title') ?: $request->input('batch_number') ?: 'Opération standard'));
+                $op = ProductionOperation::firstOrCreate(
+                    [
+                        'enterprise_id' => $user->enterprise_id,
+                        'site_id' => $request->integer('site_id') ?: $user->site_id,
+                        'title' => $opTitle,
+                    ],
+                    [
+                        'status' => ProductionOperation::STATUS_PLANIFIEE,
+                    ]
+                );
+                $merge['production_operation_id'] = $op->id;
+            }
+        }
+        if (!$request->filled('release_date') && $request->filled('date')) {
+            $merge['release_date'] = $request->input('date');
+        }
+        if (!$request->filled('decision_notes') && $request->filled('description')) {
+            $merge['decision_notes'] = trim((string) $request->input('description'));
+        }
+
+        if ($merge !== []) {
+            $request->merge($merge);
+        }
+    }
+
+    private function normalizeOperationId(mixed $value): mixed
+    {
+        if ($value === null || trim((string) $value) === '') {
+            return null;
+        }
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+        // Recherche par numéro de lot / titre d'opération (saisie texte libre).
+        $id = ProductionOperation::query()
+            ->where('title', (string) $value)
+            ->orWhere('client_order', (string) $value)
+            ->value('id');
+        return $id !== null ? (int) $id : $value;
+    }
+
+    private function normalizeDecision(mixed $value): string
+    {
+        $normalized = str_replace(
+            ['é', 'è', 'ê', 'ë'],
+            'e',
+            mb_strtolower(trim((string) ($value ?? '')))
+        );
+        return match ($normalized) {
+            'libere', 'liberation', 'libere conforme' => 'libere',
+            'derogation' => 'derogation',
+            'rejete', 'rejet' => 'rejete',
+            default => trim((string) ($value ?? '')),
+        };
     }
 
     private function nullIfEmpty(mixed $value): ?string

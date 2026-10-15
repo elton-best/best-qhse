@@ -57,6 +57,7 @@ function rawAction(overrides: Record<string, unknown> = {}) {
 
 let serverStatus = "in_progress";
 let serverResponsible = 2;
+let serverExtra = 0;
 let lastStatusBody: unknown = null;
 
 function setupApi() {
@@ -68,10 +69,18 @@ function setupApi() {
       return rawAction({ status: serverStatus, responsible_id: serverResponsible });
     }
     if (url.startsWith("actions?")) {
-      return {
-        data: [rawAction({ status: serverStatus, responsible_id: serverResponsible })],
-        current_page: 1,
-      };
+      const rows = [rawAction({ status: serverStatus, responsible_id: serverResponsible })];
+      for (let i = 0; i < serverExtra; i++) {
+        rows.push(
+          rawAction({
+            id: 100 + i,
+            reference: `ACT-2026-1${String(i).padStart(2, "0")}`,
+            title: `Action extra ${i + 1}`,
+            status: "assigned",
+          }),
+        );
+      }
+      return { data: rows, current_page: 1 };
     }
     if (url.startsWith("users?") || url.startsWith("sites?")) return { data: [] };
     if (url.startsWith("processes?")) return { data: [] };
@@ -113,29 +122,38 @@ beforeEach(() => {
   mockRequest.mockReset();
   serverStatus = "in_progress";
   serverResponsible = 2;
+  serverExtra = 0;
   lastStatusBody = null;
   window.localStorage.clear();
   setupApi();
 });
 
 describe("ActionsPage — board ReUI + changement de statut", () => {
-  it("affiche 4 colonnes avec la carte dans En cours", async () => {
+  it("affiche 2 colonnes avec la carte dans À suivre", async () => {
     renderPage();
     await screen.findByText("Action de test");
     const board = document.querySelector("[data-slot='kanban-board']");
     expect(board).not.toBeNull();
-    const scope = within(board as HTMLElement);
-    const headers = Array.from(
-      board.querySelectorAll("p.text-sm.font-bold"),
-    ).map((el) => el.textContent);
-    for (const label of ["Brouillon", "Assignée", "En cours", "Terminées"]) {
-      expect(headers).toContain(label);
-    }
-    const colHeader = scope
-      .getAllByText("En cours")
-      .find((el) => el.tagName === "P" && el.className.includes("font-bold"));
-    const col = colHeader?.closest("[data-slot='kanban-column']");
+    const headers = Array.from(board!.querySelectorAll("p.text-sm.font-bold")).map(
+      (el) => el.textContent,
+    );
+    expect(headers).toEqual(["À suivre", "Terminées"]);
+    const col = board!.querySelector("[data-slot='kanban-column']");
     expect(col?.textContent).toContain("Action de test");
+  }, 15000);
+
+  it("pagine les colonnes à 4 cartes par page", async () => {
+    serverExtra = 5;
+    renderPage();
+    await screen.findByText("Action de test");
+    expect(screen.getByText("Action extra 3")).toBeInTheDocument();
+    expect(screen.queryByText("Action extra 4")).not.toBeInTheDocument();
+    expect(screen.getByText("Page 1 / 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Page suivante/ }));
+    expect(await screen.findByText("Action extra 4")).toBeInTheDocument();
+    expect(screen.getByText("Action extra 5")).toBeInTheDocument();
+    expect(screen.queryByText("Action extra 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Page 2 / 2")).toBeInTheDocument();
   }, 15000);
 
   it("change le statut via le détail et déplace la carte en Terminées", async () => {

@@ -176,18 +176,16 @@ function dueClass(item: PlanActionItem): string {
 
 // ---------- Carte kanban (ReUI + thème projet) ----------
 
-type BoardColumnKey = "draft" | "assigned" | "in_progress" | "done";
+type BoardColumnKey = "open" | "done";
 
 const BOARD_COLUMNS: { key: BoardColumnKey; label: string; hint: string }[] = [
-  { key: "draft", label: "Brouillon", hint: "À qualifier" },
-  { key: "assigned", label: "Assignée", hint: "Prête à démarrer" },
-  { key: "in_progress", label: "En cours", hint: "Suivi actif" },
+  { key: "open", label: "À suivre", hint: "Brouillon · Assignée · En cours" },
   { key: "done", label: "Terminées", hint: "Terminée · Annulée" },
 ];
 
+const PAGE_SIZE = 4;
+
 function columnKeyOf(status: string): BoardColumnKey {
-  if (status === "assigned") return "assigned";
-  if (status === "in_progress") return "in_progress";
   if (
     status === "completed" ||
     status === "verified" ||
@@ -195,14 +193,11 @@ function columnKeyOf(status: string): BoardColumnKey {
     status === "cancelled"
   )
     return "done";
-  return "draft";
+  return "open";
 }
 
 function dropStatusOf(column: BoardColumnKey): PlanActionItem["status"] {
-  if (column === "assigned") return "assigned";
-  if (column === "in_progress") return "in_progress";
-  if (column === "done") return "completed";
-  return "draft";
+  return column === "done" ? "completed" : "in_progress";
 }
 
 function priorityBadgeVariant(
@@ -1350,6 +1345,7 @@ export function ActionsPage() {
 
   const deleteMutation = useDeletePlanAction();
   const importMutation = useImportActionPlan();
+  const statusMutation = usePlanActionStatus();
 
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
@@ -1367,6 +1363,7 @@ export function ActionsPage() {
   const [quickItem, setQuickItem] = useState<PlanActionItem | null>(null);
   const [quickPreset, setQuickPreset] = useState<PlanActionItem["status"]>("in_progress");
   const [myId, setMyId] = useState("");
+  const [myUserType, setMyUserType] = useState("");
   const [myPermissions, setMyPermissions] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const autoOpened = useRef(false);
@@ -1379,6 +1376,7 @@ export function ActionsPage() {
       .then((profile) => {
         if (!off) {
           setMyId(String(profile.id ?? ""));
+          setMyUserType(String(profile.user_type ?? profile.account_type ?? ""));
           setMyPermissions(Array.isArray(profile.permissions) ? profile.permissions : []);
         }
       })
@@ -1388,13 +1386,26 @@ export function ActionsPage() {
     };
   }, []);
 
-  // Changement de statut autorisé : responsable de l'action ou droit global.
-  // Le backend reste l'arbitre (périmètre, workflow fermé) : ceci n'est qu'un
-  // garde-fou d'affichage pour éviter les 403 incompris.
+  // Changement de statut autorisé : responsable de l'action ou rôle admin / permission.
   const canChangeStatus = (item: PlanActionItem): boolean => {
     if (myId === "") return true;
+    if (
+      myUserType === "super_admin" ||
+      myUserType === "admin" ||
+      myUserType === "enterprise" ||
+      myUserType === "company_admin"
+    ) {
+      return true;
+    }
     if (String(item.responsible_id ?? "") === myId) return true;
-    return myPermissions.some((p) => p === "actions.update" || p === "actions.manage");
+    if (myPermissions.includes("*") || myPermissions.includes("all")) return true;
+    return myPermissions.some(
+      (p) =>
+        p === "actions.update" ||
+        p === "actions.manage" ||
+        p === "actions.*" ||
+        p.includes("action"),
+    );
   };
 
   const items = useMemo(() => actionsQuery.data ?? [], [actionsQuery.data]);
@@ -1467,18 +1478,43 @@ export function ActionsPage() {
     return sorted;
   }, [items, filters, sortBy]);
 
-  // Colonnes du board ReUI (4) : les statuts vérifiée/clôturée rejoignent
-  // « Terminées », qui accueille aussi les annulées.
+  // Colonnes du board ReUI (2) : les statuts vérifiée/clôturée rejoignent
+  // « Terminées », qui accueille aussi les annulées. Pagination : 4 cartes
+  // par colonne et par page.
   const boardColumns = useMemo(() => {
-    const groups: Record<BoardColumnKey, PlanActionItem[]> = {
-      draft: [],
-      assigned: [],
-      in_progress: [],
-      done: [],
-    };
+    const groups: Record<BoardColumnKey, PlanActionItem[]> = { open: [], done: [] };
     for (const item of filtered) groups[columnKeyOf(item.status)].push(item);
     return groups;
   }, [filtered]);
+
+  const [columnPages, setColumnPages] = useState<Record<BoardColumnKey, number>>({
+    open: 1,
+    done: 1,
+  });
+
+  // Quand les filtres changent, on revient à la première page de chaque colonne.
+  useEffect(() => {
+    setColumnPages({ open: 1, done: 1 });
+  }, [filters]);
+
+  const pagedColumns = useMemo(() => {
+    const pages: Record<BoardColumnKey, PlanActionItem[]> = { open: [], done: [] };
+    (Object.keys(boardColumns) as BoardColumnKey[]).forEach((key) => {
+      const total = Math.max(1, Math.ceil(boardColumns[key].length / PAGE_SIZE));
+      const page = Math.min(Math.max(1, columnPages[key]), total);
+      pages[key] = boardColumns[key].slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    });
+    return pages;
+  }, [boardColumns, columnPages]);
+
+  const pageCountOf = (key: BoardColumnKey): number =>
+    Math.max(1, Math.ceil(boardColumns[key].length / PAGE_SIZE));
+
+  const setColumnPage = (key: BoardColumnKey, page: number) =>
+    setColumnPages((prev) => ({
+      ...prev,
+      [key]: Math.min(Math.max(1, page), pageCountOf(key)),
+    }));
 
   const detailItem =
     detailId === null ? null : (items.find((item) => item.id === detailId) ?? null);
@@ -1515,24 +1551,37 @@ export function ActionsPage() {
   // que la carte déplacée reste visible (sinon elle « disparaît » de la vue).
   const revealAfterStatusChange = () => setFilter("status", "all");
 
-  // Déplacement inter-colonnes (ReUI `onMove`) : on n'applique jamais le
-  // déplacement localement (la valeur du board est dérivée des données) ;
-  // on ouvre l'invite de statut avec commentaire (traçabilité).
+  // Déplacement inter-colonnes (ReUI `onMove`) : applique immédiatement la mutation
+  // de statut vers la colonne cible et rafraîchit les données.
   const handleKanbanMove = (event: KanbanMoveEvent) => {
     if (event.activeContainer === event.overContainer) return;
     const from =
-      boardColumns[event.activeContainer as BoardColumnKey] ??
+      pagedColumns[event.activeContainer as BoardColumnKey] ??
       ([] as PlanActionItem[]);
-    const target = from[event.activeIndex];
-    if (!target) return;
-    if (columnKeyOf(target.status) === event.overContainer) return;
+    const moved = from[event.activeIndex];
+    if (!moved) return;
+    const target = items.find((item) => item.id === moved.id) ?? moved;
+    const targetCol = event.overContainer as BoardColumnKey;
+    if (columnKeyOf(target.status) === targetCol) return;
     if (!canChangeStatus(target)) {
       toast.error(
         "Changement impossible : réservé au responsable de l'action (ou droit actions.update).",
       );
       return;
     }
-    openQuickStatus(target, dropStatusOf(event.overContainer as BoardColumnKey));
+    const nextStatus = dropStatusOf(targetCol);
+    statusMutation.mutate(
+      { id: target.id, status: nextStatus, comments: "Déplacement sur le kanban" },
+      {
+        onSuccess: () => {
+          toast.success(`Action passée en « ${planActionStatusLabel(nextStatus)} »`);
+          revealAfterStatusChange();
+        },
+        onError: (error) => {
+          toast.error(errorMessage(error, "Changement de statut impossible."));
+        },
+      },
+    );
   };
 
   const overlayItem = (id: string | number): PlanActionItem | null => {
@@ -1869,14 +1918,17 @@ export function ActionsPage() {
                 </label>
               </div>
               <Kanban
-                value={boardColumns}
+                value={pagedColumns}
                 onValueChange={() => {}}
                 getItemValue={(item) => String(item.id)}
                 onMove={handleKanbanMove}
               >
-                <KanbanBoard className="grid auto-rows-fr grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <KanbanBoard className="grid auto-rows-fr grid-cols-1 gap-4 lg:grid-cols-2">
                   {BOARD_COLUMNS.map((column) => {
-                    const tasks = boardColumns[column.key];
+                    const tasks = pagedColumns[column.key];
+                    const total = boardColumns[column.key].length;
+                    const pages = pageCountOf(column.key);
+                    const page = Math.min(columnPages[column.key], pages);
                     return (
                       <KanbanColumn key={column.key} value={column.key}>
                         <Card className="flex h-full flex-col">
@@ -1889,12 +1941,12 @@ export function ActionsPage() {
                                 {column.hint}
                               </p>
                             </div>
-                            <Badge variant="outline">{tasks.length}</Badge>
+                            <Badge variant="outline">{total}</Badge>
                           </CardHeader>
-                          <CardContent className="flex-1">
+                          <CardContent className="flex flex-1 flex-col gap-2.5">
                             <KanbanColumnContent
                               value={column.key}
-                              className="flex min-h-24 flex-col gap-2.5"
+                              className="flex min-h-24 flex-1 flex-col gap-2.5"
                             >
                               {tasks.map((item) => (
                                 <ActionKanbanCard
@@ -1912,6 +1964,31 @@ export function ActionsPage() {
                                 </p>
                               )}
                             </KanbanColumnContent>
+                            {pages > 1 && (
+                              <div className="flex items-center justify-between border-t border-border pt-2.5 text-xs font-semibold text-muted-foreground">
+                                <button
+                                  type="button"
+                                  disabled={page <= 1}
+                                  onClick={() => setColumnPage(column.key, page - 1)}
+                                  className="rounded-lg px-2 py-1 hover:bg-muted disabled:opacity-40"
+                                  aria-label={`Page précédente — ${column.label}`}
+                                >
+                                  ← Précédent
+                                </button>
+                                <span>
+                                  Page {page} / {pages}
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={page >= pages}
+                                  onClick={() => setColumnPage(column.key, page + 1)}
+                                  className="rounded-lg px-2 py-1 hover:bg-muted disabled:opacity-40"
+                                  aria-label={`Page suivante — ${column.label}`}
+                                >
+                                  Suivant →
+                                </button>
+                              </div>
+                            )}
                           </CardContent>
                         </Card>
                       </KanbanColumn>
