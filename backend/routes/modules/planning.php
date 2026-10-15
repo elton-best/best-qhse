@@ -9,6 +9,10 @@ use App\Modules\Planning\Controllers\SmPlanHierarchicalController;
 use App\Modules\Planning\Controllers\OperationalPlanningController;
 use App\Modules\Planning\Controllers\PlanSMController;
 use App\Modules\Planning\Controllers\ModificationController;
+use App\Modules\Planning\Controllers\OperationalControlController;
+use App\Modules\Planning\Controllers\ProductReleaseController;
+use App\Modules\Planning\Controllers\ProductionOperationController;
+use App\Modules\Planning\Controllers\DesignDevelopmentController;
 use App\Modules\Planning\Controllers\MethodologyGuideController;
 use App\Modules\Improvement\Controllers\PlanController;
 
@@ -113,4 +117,33 @@ Route::delete('operational-project-activities/{activity}', [OperationalPlanningC
 Route::post('operational-project-activities/{activity}/tasks', [OperationalPlanningController::class, 'storeTask']);
 Route::put('operational-project-tasks/{task}', [OperationalPlanningController::class, 'updateTask']);
 Route::delete('operational-project-tasks/{task}', [OperationalPlanningController::class, 'destroyTask']);
+
+// Conception & Développement (§8.3)
+Route::get('design-developments/template', [DesignDevelopmentController::class, 'downloadTemplate']);
+Route::get('design-developments/export-xlsx', [DesignDevelopmentController::class, 'exportXlsx']);
+Route::post('design-developments/import-xlsx', [DesignDevelopmentController::class, 'importXlsx']);
+Route::post('design-developments/{designDevelopment}/transition', [DesignDevelopmentController::class, 'transition']);
+Route::apiResource('design-developments', DesignDevelopmentController::class)->parameters([
+    'design-developments' => 'designDevelopment',
+]);
+
+// Maîtrise opérationnelle (§8.1 / §8.5 — kind React : opcontrol)
+Route::get('operational-controls/export-xlsx', [OperationalControlController::class, 'exportXlsx']);
+Route::get('operational-controls/template', [OperationalControlController::class, 'downloadTemplate']);
+Route::post('operational-controls/import-xlsx', [OperationalControlController::class, 'importXlsx']);
+Route::apiResource('operational-controls', OperationalControlController::class)->parameters(['operational-controls' => 'operationalControl']);
+
+// Production & prestation (§8.5 — kind React : operation)
+Route::get('production-operations/export-xlsx', [ProductionOperationController::class, 'exportXlsx']);
+Route::get('production-operations/template', [ProductionOperationController::class, 'downloadTemplate']);
+Route::post('production-operations/import-xlsx', [ProductionOperationController::class, 'importXlsx']);
+Route::post('production-operations/{productionOperation}/transition', [ProductionOperationController::class, 'transition']);
+Route::apiResource('production-operations', ProductionOperationController::class)->parameters(['production-operations' => 'productionOperation']);
+
+// Libération des produits & services (§8.6 — kind React : release)
+Route::get('product-releases/export-xlsx', [ProductReleaseController::class, 'exportXlsx']);
+Route::get('product-releases/template', [ProductReleaseController::class, 'downloadTemplate']);
+Route::post('product-releases/import-xlsx', [ProductReleaseController::class, 'importXlsx']);
+Route::post('product-releases/{productRelease}/validate', [ProductReleaseController::class, 'validateRelease']);
+Route::apiResource('product-releases', ProductReleaseController::class)->parameters(['product-releases' => 'productRelease']);
 

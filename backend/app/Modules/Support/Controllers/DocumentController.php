@@ -1847,6 +1847,57 @@ class DocumentController extends Controller
     }
 
     /**
+     * Inventaire des procédures (§7.5) : documents de type procédure (PRC).
+     *
+     * Délègue à index() en forçant le filtre sur l'abréviation PRC,
+     * sans modifier le comportement de index() existant.
+     */
+    public function procedures(Request $request)
+    {
+        $request->merge(['type' => 'PRC']);
+
+        return $this->index($request);
+    }
+
+    /**
+     * Modèle XLSX pour l'inventaire des procédures.
+     */
+    public function proceduresTemplate()
+    {
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Procedures');
+
+        $headers = ['N°', 'Type', 'Nom', 'Code', 'Version', 'État', 'Processus', 'Observation'];
+        $sheet->fromArray($headers, null, 'A1');
+
+        $examples = [
+            [1, 'procedure', 'Gestion documentaire', 'PRC_2026_001', '1.0', 'brouillon', 'Pilotage', 'Exemple de procédure'],
+            [2, 'procedure', 'Maîtrise des enregistrements', '', '1.0', 'en revue', 'Pilotage', 'Le code peut être auto-généré'],
+        ];
+        $sheet->fromArray($examples, null, 'A2');
+
+        foreach (range('A', 'H') as $column) {
+            $sheet->getColumnDimension($column)->setAutoSize(true);
+        }
+
+        $sheet->getStyle('A1:H1')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => [
+                'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                'startColor' => ['rgb' => '1976D2'],
+            ],
+        ]);
+
+        $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+        $fileName = 'template_procedures.xlsx';
+        $tempPath = storage_path('app/temp_' . uniqid('procedures_', true) . '.xlsx');
+        $writer->save($tempPath);
+
+        return response()->download($tempPath, $fileName)->deleteFileAfterSend(true);
+    }
+
+    /**
      * Get active norms for the current site (for inventory filtering).
      */
     public function getActiveNorms(Request $request)

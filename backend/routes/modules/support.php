@@ -48,6 +48,10 @@ Route::get('documents/pyramide/export-complete', [DocumentController::class, 'ex
 Route::get('documents/pyramide/stats', [DocumentController::class, 'getPyramideStats']);
 Route::get('documents/stats', [DocumentController::class, 'getStats']);
 
+// Procédures (§7.5) : inventaire filtré type=procedure + modèle d'import
+Route::get('procedures/template', [DocumentController::class, 'proceduresTemplate']);
+Route::get('procedures', [DocumentController::class, 'procedures']);
+
 // Workflow de validation des documents
 Route::post('documents/{document}/confirm-code', [DocumentWorkflowController::class, 'confirmCode'])
     ->middleware('document.workflow.rate.limit');
