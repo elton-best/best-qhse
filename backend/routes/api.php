@@ -1,9 +1,10 @@
 <?php
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\SsoLoginController;
 use App\Http\Controllers\QRCodeVerificationController;
+use App\Modules\Hse\Controllers\AwarenessPublicController;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
@@ -37,10 +38,18 @@ Route::get('/verify/{hash}', [QRCodeVerificationController::class, 'verify']);
 Route::prefix('/v1/')->group(function () {
 
     // 1. Authentification, formulaires publics, notifications & RGPD
-    require __DIR__ . '/modules/auth.php';
+    require __DIR__.'/modules/auth.php';
 
     // 2. Espace SuperAdmin
-    require __DIR__ . '/modules/superadmin.php';
+    require __DIR__.'/modules/superadmin.php';
+
+    // Sensibilisation : accès d'une personne extérieure invitée, par lien personnel (aucune autre donnée exposée)
+    Route::prefix('public/awareness/{token}')->middleware('throttle:30,1')->group(function () {
+        Route::get('/', [AwarenessPublicController::class, 'show']);
+        Route::post('/materials/{materialId}/read', [AwarenessPublicController::class, 'read'])->whereNumber('materialId');
+        Route::post('/materials/{materialId}/quiz', [AwarenessPublicController::class, 'quiz'])->whereNumber('materialId');
+        Route::get('/attestation', [AwarenessPublicController::class, 'attestation']);
+    });
 
     // 3. Utilisateur connecté courant
     Route::get('/user', function (Request $request) {
@@ -56,14 +65,14 @@ Route::prefix('/v1/')->group(function () {
         'check.subscription',
         'ensure.ownership',
     ])->group(function () {
-        require __DIR__ . '/modules/enterprise.php';
-        require __DIR__ . '/modules/leadership.php';
-        require __DIR__ . '/modules/processes.php';
-        require __DIR__ . '/modules/planning.php';
-        require __DIR__ . '/modules/hse.php';
-        require __DIR__ . '/modules/support.php';
-        require __DIR__ . '/modules/evaluation.php';
-        require __DIR__ . '/modules/improvement.php';
-        require __DIR__ . '/modules/clientb.php';
+        require __DIR__.'/modules/enterprise.php';
+        require __DIR__.'/modules/leadership.php';
+        require __DIR__.'/modules/processes.php';
+        require __DIR__.'/modules/planning.php';
+        require __DIR__.'/modules/hse.php';
+        require __DIR__.'/modules/support.php';
+        require __DIR__.'/modules/evaluation.php';
+        require __DIR__.'/modules/improvement.php';
+        require __DIR__.'/modules/clientb.php';
     });
 });

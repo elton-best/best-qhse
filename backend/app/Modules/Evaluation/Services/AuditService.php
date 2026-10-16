@@ -2,16 +2,17 @@
 
 namespace App\Modules\Evaluation\Services;
 
-use App\Models\Audit;
-use App\Models\AuditFinding;
-use App\Models\NonConformity;
+use App\Jobs\GenerateAuditReport;
 use App\Models\TaskTracking;
 use App\Models\User;
+use App\Modules\Evaluation\Models\Audit;
+use App\Modules\Evaluation\Models\AuditFinding;
+use App\Modules\Improvement\Models\NonConformity;
 use App\Notifications\SiteEventNotification;
 use App\Services\Core\DynamicFieldService;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
 
 class AuditService
 {
@@ -23,7 +24,7 @@ class AuditService
     {
         if (($data['type'] ?? null) === 'internal') {
             foreach ($this->dynamicFieldService->getInternalAuditRequiredFields() as $requiredField) {
-                if (!filled($data[$requiredField] ?? null)) {
+                if (! filled($data[$requiredField] ?? null)) {
                     throw ValidationException::withMessages([
                         $requiredField => "Le champ {$requiredField} est obligatoire pour un audit interne.",
                     ]);
@@ -113,14 +114,16 @@ class AuditService
         activity()
             ->performedOn($audit)
             ->causedBy(auth()->user())
-            ->log('Checklist d\'audit ajoutée (' . count($checklistItems) . ' items)');
+            ->log('Checklist d\'audit ajoutée ('.count($checklistItems).' items)');
 
         return $audit->fresh();
     }
 
     public function addFinding(Audit $audit, array $finding): AuditFinding
     {
-        // Créer un AuditFinding dans la base de données
+        // Un constat « conforme » ou « point fort » n'a pas de gravité : les valeurs par défaut s'appliquent.
+        $finding = array_filter($finding, fn ($value, $key) => ! in_array($key, ['severity', 'priority'], true) || $value !== null, ARRAY_FILTER_USE_BOTH);
+
         $auditFinding = $audit->findings()->create(array_merge($finding, [
             'audit_id' => $audit->id,
             'detected_by' => auth()->id(),
@@ -141,7 +144,7 @@ class AuditService
         // Calculer le taux de conformité depuis la checklist
         $checklist = $audit->checklist ?? [];
         if (count($checklist) > 0) {
-            $conformCount = count(array_filter($checklist, fn($item) => ($item['conformity'] ?? null) === 'conform'));
+            $conformCount = count(array_filter($checklist, fn ($item) => ($item['conformity'] ?? null) === 'conform'));
             $conformityRate = round(($conformCount / count($checklist)) * 100);
             $audit->update(['conformity_rate' => $conformityRate]);
         }
@@ -157,7 +160,7 @@ class AuditService
 
         // Queue le job de génération de rapport si format spécifié
         if (isset($reportData['format'])) {
-            dispatch(new \App\Jobs\GenerateAuditReport($audit, $reportData['format']));
+            dispatch(new GenerateAuditReport($audit, $reportData['format']));
         }
 
         activity()
@@ -178,7 +181,7 @@ class AuditService
         }
 
         // Génération automatique du rapport à la clôture.
-        dispatch(new \App\Jobs\GenerateAuditReport($audit, 'pdf', auth()->user()));
+        dispatch(new GenerateAuditReport($audit, 'pdf', auth()->user()));
 
         $audit->update([
             'report_source' => 'auto',
@@ -378,7 +381,7 @@ class AuditService
             ->orderBy('ref', 'desc')
             ->first();
 
-        if (!$lastAudit) {
+        if (! $lastAudit) {
             return "AUD-{$year}-001";
         }
 
@@ -391,12 +394,14 @@ class AuditService
     /**
      * Génère checklist automatique basée sur processus et clauses ISO
      */
-    public function generateChecklist(Audit $audit, array $isoClauses = [], bool $includeProcessRisks = true): array
+    public function generateChecklist(Audit $audit, array $isoClauses = [], bool $includeProcessRisks = true, ?string $norm = null): array
     {
         $checklist = [];
 
-        // 1. Questions standards par clause ISO
-        $standardQuestions = $this->getStandardIsoQuestions($isoClauses);
+        // 1. Questions standards par clause ISO (ISO 14001 : questions environnementales dédiées)
+        $standardQuestions = $norm !== null && str_contains($norm, '14001')
+            ? app(AuditEnvironmentalService::class)->checklistQuestions($isoClauses)
+            : $this->getStandardIsoQuestions($isoClauses);
         foreach ($standardQuestions as $question) {
             $checklist[] = $question;
         }
@@ -409,7 +414,7 @@ class AuditService
                 'clause_iso' => '4.4',
                 'conformity' => null,
                 'evidence' => '',
-                'notes' => ''
+                'notes' => '',
             ];
 
             // Intégrer risques du processus
@@ -422,7 +427,7 @@ class AuditService
                         'clause_iso' => '6.1',
                         'conformity' => null,
                         'evidence' => '',
-                        'notes' => ''
+                        'notes' => '',
                     ];
                 }
             }
@@ -443,32 +448,32 @@ class AuditService
             '4.4' => [
                 'La cartographie des processus est-elle à jour ?',
                 'Les interactions entre processus sont-elles identifiées ?',
-                'Les ressources nécessaires sont-elles disponibles ?'
+                'Les ressources nécessaires sont-elles disponibles ?',
             ],
             '6.1' => [
                 'Les risques et opportunités ont-ils été identifiés ?',
-                'Des actions ont-elles été planifiées pour traiter les risques ?'
+                'Des actions ont-elles été planifiées pour traiter les risques ?',
             ],
             '7.1.5' => [
                 'Les ressources de surveillance et de mesure sont-elles adéquates ?',
-                'Les équipements sont-ils étalonnés/vérifiés ?'
+                'Les équipements sont-ils étalonnés/vérifiés ?',
             ],
             '8.1' => [
                 'Les exigences pour les produits/services sont-elles déterminées ?',
-                'Les processus opérationnels sont-ils maîtrisés ?'
+                'Les processus opérationnels sont-ils maîtrisés ?',
             ],
             '9.1' => [
                 'La surveillance et la mesure sont-elles efficaces ?',
-                'Les indicateurs de performance sont-ils suivis ?'
+                'Les indicateurs de performance sont-ils suivis ?',
             ],
             '9.2' => [
                 'Le programme d\'audits internes est-il établi ?',
-                'Les audits sont-ils conduits de manière planifiée ?'
+                'Les audits sont-ils conduits de manière planifiée ?',
             ],
             '10.2' => [
                 'Les non-conformités sont-elles traitées ?',
-                'Les actions correctives sont-elles efficaces ?'
-            ]
+                'Les actions correctives sont-elles efficaces ?',
+            ],
         ];
 
         $result = [];
@@ -480,7 +485,7 @@ class AuditService
                         'clause_iso' => $clause,
                         'conformity' => null,
                         'evidence' => '',
-                        'notes' => ''
+                        'notes' => '',
                     ];
                 }
             }
@@ -503,7 +508,7 @@ class AuditService
             'planned' => $audits->where('status', 'planned')->count(),
             'avg_conformity_rate' => round($audits->whereNotNull('conformity_rate')->avg('conformity_rate') ?? 0, 1),
             'by_type' => $audits->groupBy('type')->map->count(),
-            'total_findings' => $audits->sum(fn($a) => count($a->findings ?? [])),
+            'total_findings' => $audits->sum(fn ($a) => count($a->findings ?? [])),
             'nc_major_count' => 0,
             'nc_minor_count' => 0,
             'observations_count' => 0,
@@ -512,9 +517,15 @@ class AuditService
         // Compter findings par type
         foreach ($audits as $audit) {
             foreach ($audit->findings ?? [] as $finding) {
-                if ($finding['type'] === 'major') $stats['nc_major_count']++;
-                if ($finding['type'] === 'minor') $stats['nc_minor_count']++;
-                if ($finding['type'] === 'observation') $stats['observations_count']++;
+                if ($finding['type'] === 'major') {
+                    $stats['nc_major_count']++;
+                }
+                if ($finding['type'] === 'minor') {
+                    $stats['nc_minor_count']++;
+                }
+                if ($finding['type'] === 'observation') {
+                    $stats['observations_count']++;
+                }
             }
         }
 

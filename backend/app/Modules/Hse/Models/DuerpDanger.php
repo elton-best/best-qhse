@@ -2,9 +2,8 @@
 
 namespace App\Modules\Hse\Models;
 
-use App\Models\Risk;
-
 use App\Models\Process;
+use App\Models\Risk;
 use App\Models\User;
 use App\Traits\HasAuditFields;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -13,7 +12,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class DuerpDanger extends Model
 {
-    use HasFactory, SoftDeletes, HasAuditFields;
+    use HasAuditFields, HasFactory, SoftDeletes;
 
     protected $table = 'duerp_dangers';
 
@@ -80,6 +79,14 @@ class DuerpDanger extends Model
         'existing_measures',
         'actions',
         'applicable_norms',
+        'exposed_workers_count',
+        'prevention_type',
+        'action_done_at',
+        'assessed_risk_score',
+        'assessed_risk_level',
+        'residual_mitigation_coef',
+        'needs_review',
+        'review_reason',
     ];
 
     protected $casts = [
@@ -95,51 +102,25 @@ class DuerpDanger extends Model
         'exposed_workers' => 'array',
         'actions' => 'array',
         'applicable_norms' => 'array',
+        'exposed_workers_count' => 'integer',
+        'action_done_at' => 'date',
+        'assessed_risk_score' => 'integer',
+        'residual_mitigation_coef' => 'float',
+        'needs_review' => 'boolean',
         'probability_score' => 'integer',
         'severity_score' => 'integer',
         'criticality_score' => 'integer',
     ];
 
+    /**
+     * Les scores sont calculés par DuerpScoringService selon les échelles de l'entreprise.
+     * Ce repli ne sert que si un enregistrement est créé sans passer par le service.
+     */
     protected static function booted()
     {
         static::saving(function (DuerpDanger $danger) {
-            // DUERP Canevas: Raw Risk Score = Gravity * Frequency
-            if ($danger->gravity !== null || $danger->frequency !== null) {
-                $g = (int) ($danger->gravity ?? 1);
-                $f = (int) ($danger->frequency ?? 1);
-                $danger->raw_risk_score = $g * $f;
-                $danger->raw_risk_level = match (true) {
-                    $danger->raw_risk_score <= 3 => 'Faible',
-                    $danger->raw_risk_score <= 8 => 'Moyen',
-                    default => 'Significatif',
-                };
-            } elseif ($danger->probability_score !== null || $danger->severity_score !== null) {
-                $prob = $danger->probability_score ?? 0;
-                $sev = $danger->severity_score ?? 0;
-                $danger->criticality_score = $prob * $sev;
-                $danger->criticality_level = match (true) {
-                    $danger->criticality_score <= 4 => 'acceptable',
-                    $danger->criticality_score <= 8 => 'tolerable',
-                    default => 'unacceptable',
-                };
-            }
-
-            // Residual calculation if residual values provided or computed from mitigation
-            if ($danger->residual_gravity !== null && $danger->residual_frequency !== null) {
-                $rg = (int) $danger->residual_gravity;
-                $rf = (int) $danger->residual_frequency;
-                $danger->residual_risk_score = $rg * $rf;
-            } elseif ($danger->raw_risk_score !== null && $danger->mitigation_coef !== null) {
-                $coef = (float) $danger->mitigation_coef;
-                $danger->residual_risk_score = (int) max(1, round($danger->raw_risk_score * $coef));
-            }
-
-            if ($danger->residual_risk_score !== null) {
-                $danger->residual_risk_level = match (true) {
-                    $danger->residual_risk_score <= 3 => 'Faible',
-                    $danger->residual_risk_score <= 8 => 'Moyen',
-                    default => 'Significatif',
-                };
+            if ($danger->raw_risk_score === null && $danger->gravity !== null && $danger->frequency !== null) {
+                $danger->raw_risk_score = (int) $danger->gravity * (int) $danger->frequency;
             }
         });
     }
@@ -169,4 +150,3 @@ class DuerpDanger extends Model
         return $this->belongsTo(User::class, 'responsible_id');
     }
 }
-

@@ -1,5 +1,5 @@
 import {
-  Award, BarChart3, Briefcase, BookOpen, Building2, ClipboardCheck, CreditCard, FileText, Gauge, GitBranch,
+  Award, Rocket, BarChart3, Briefcase, BookOpen, Building2, ClipboardCheck, CreditCard, FileText, Gauge, GitBranch,
   GraduationCap, Landmark, LayoutDashboard, MapPin, MessageSquareWarning, ShieldAlert, ShieldCheck, Target,
   Truck, Users, Wrench, Factory, ListChecks, CheckSquare, BadgeCheck, Stamp, Crown, Lightbulb, Settings,
   Leaf, HardHat, Zap, UtensilsCrossed, Lock, Megaphone, Network, Siren, ScrollText, SlidersHorizontal,
@@ -20,6 +20,8 @@ export type NavGroup = { id: string; label: string; icon: LucideIcon; items: Nav
 
 /** Top-level shortcuts (Vue d'ensemble is /app). */
 export const TOP_ITEMS: NavItem[] = [
+  { slug: "demarrage", label: "Démarrage guidé", icon: Rocket },
+  { slug: "preparation-certification", label: "Préparation à la certification", icon: Award, norms: ["ISO 14001"] },
   { slug: "systeme-integre", label: "Système intégré", icon: Layers, minNorms: 2 },
   { slug: "taches", label: "Mes tâches", icon: CheckSquare },
   { slug: "mes-actions", label: "Mes actions", icon: ListChecks },
@@ -58,6 +60,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { slug: "objectifs", label: "Objectifs qualité", icon: Target },
       { slug: "actions", label: "Plans d'actions", icon: ListChecks },
       { slug: "plan-sm", label: "Plan du SM & modifications", icon: ClipboardCheck },
+      { slug: "changements", label: "Gestion des changements", icon: GitBranch },
       { slug: "aspects-environnementaux", label: "Aspects environnementaux", icon: Leaf, norms: ["ISO 14001"] },
       { slug: "dangers", label: "DUERP & dangers", icon: HardHat, norms: ["ISO 45001"] },
       { slug: "energie", label: "Revue énergétique", icon: Zap, norms: ["ISO 50001"] },
@@ -74,6 +77,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { slug: "equipements", label: "Ressources", icon: Wrench },
       { slug: "competences", label: "Compétences", icon: GraduationCap },
       { slug: "sensibilisation", label: "Sensibilisation", icon: Lightbulb },
+      { slug: "campagnes-sensibilisation", label: "Campagnes de sensibilisation", icon: Megaphone },
       { slug: "communication", label: "Communication", icon: Megaphone },
       { slug: "documents", label: "Information documentée", icon: FileText },
     ],
@@ -102,6 +106,7 @@ export const NAV_GROUPS: NavGroup[] = [
     id: "evaluation", label: "Évaluation des performances", icon: BarChart3,
     items: [
       { slug: "indicateurs", label: "Indicateurs", icon: BarChart3 },
+      { slug: "performance-environnementale", label: "Performance environnementale", icon: Activity, norms: ["ISO 14001"] },
       { slug: "enquetes", label: "Évaluations PIP", icon: Smile },
       { slug: "revue-processus", label: "Revue des processus", icon: RefreshCw },
       { slug: "audits", label: "Audits internes", icon: ClipboardCheck },
@@ -179,6 +184,8 @@ export const ACCESS_CODES: Record<string, string[]> = {
   "plan-sm": ["plans_action"],
   "aspects-environnementaux": ["aspects_environnementaux"],
   obligations: ["obligations_conformite"],
+  changements: ["gestion_changements"],
+  "performance-environnementale": ["performance_environnementale"],
   dangers: ["duerp", "identification_dangers_sst"],
   energie: ["revue_energetique"],
   "securite-information": ["evaluation_risques_si"],
@@ -189,6 +196,7 @@ export const ACCESS_CODES: Record<string, string[]> = {
   equipements: ["ressources"],
   competences: ["competences"],
   sensibilisation: ["sensibilisation"],
+  "campagnes-sensibilisation": ["campagnes_sensibilisation"],
   communication: ["communication"],
   documents: ["documents"],
   "maitrise-operationnelle": ["planification_maitrise_operationnelle"],

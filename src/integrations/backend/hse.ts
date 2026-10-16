@@ -149,7 +149,7 @@ export function useDuerpWorkflowMutations() {
       mutationFn: (input: { id: string | number; comment?: string }) =>
         backendApi.request(`duerp/${input.id}/reject`, {
           method: "POST",
-          body: JSON.stringify({ comment: input.comment }),
+          body: JSON.stringify({ reason: input.comment }),
         }),
       onSuccess: invalidate,
     }),

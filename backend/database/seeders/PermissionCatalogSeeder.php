@@ -403,6 +403,7 @@ class PermissionCatalogSeeder extends Seeder
             'sst.duerp.update',
             'sst.duerp.delete',
             'sst.duerp.export',
+            'sst.duerp.approve',
 
             // Identification des dangers SST
             'sst.identification_dangers.read',
@@ -469,6 +470,25 @@ class PermissionCatalogSeeder extends Seeder
             'environnement.urgences.create',
             'environnement.urgences.update',
             'environnement.urgences.delete',
+
+            // Gestion des changements (6.3)
+            'planification.changements.read',
+            'planification.changements.create',
+            'planification.changements.update',
+            'planification.changements.delete',
+            'planification.changements.approve',
+
+            // Performance environnementale (9.1.1)
+            'evaluation.performance_environnementale.read',
+            'evaluation.performance_environnementale.create',
+            'evaluation.performance_environnementale.update',
+            'evaluation.performance_environnementale.delete',
+
+            // Campagnes de sensibilisation (7.3)
+            'support.campagnes_sensibilisation.read',
+            'support.campagnes_sensibilisation.create',
+            'support.campagnes_sensibilisation.update',
+            'support.campagnes_sensibilisation.delete',
         ];
     }
 
@@ -659,11 +679,12 @@ class PermissionCatalogSeeder extends Seeder
                 } else {
                     $existing++;
                 }
+
                 continue;
             }
 
             Permission::create([
-                'name'       => $permissionName,
+                'name' => $permissionName,
                 'guard_name' => 'web',
             ]);
             $created++;

@@ -31,6 +31,9 @@ Schedule::command('formations:check-reminders')->dailyAt('08:30');
 Schedule::command('risks:check-reassessments')->monthlyOn(1, '09:00');
 Schedule::command('compliance:alert-expirations')->dailyAt('07:30');
 Schedule::command('emergency:check-reminders')->dailyAt('07:45');
+Schedule::command('monitoring:check-reminders')->dailyAt('07:50');
+Schedule::command('improvement:escalate-delays')->dailyAt('08:15');
+Schedule::command('management-review:check-schedule')->weeklyOn(1, '08:00');
 
 // Nouveaux jobs - Documents personnalisés
 Schedule::job(new CheckExpiredCertifications)->daily();

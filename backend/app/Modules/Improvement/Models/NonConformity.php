@@ -9,7 +9,6 @@ use App\Models\Process;
 use App\Models\Risk;
 use App\Models\Site;
 use App\Models\User;
-
 use App\Traits\BelongsToEnterprise;
 use App\Traits\HasActions;
 use App\Traits\HasAuditFields;
@@ -23,11 +22,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Laravel\Scout\Searchable;
+use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
 class NonConformity extends Model
 {
-    use HasFactory, SoftDeletes, HasAuditFields, HasReference, HasAxes, HasWorkflowStates, HasActions, LogsActivity, Searchable, BelongsToEnterprise;
+    use BelongsToEnterprise, HasActions, HasAuditFields, HasAxes, HasFactory, HasReference, HasWorkflowStates, LogsActivity, Searchable, SoftDeletes;
 
     protected $fillable = [
         'ref',
@@ -64,6 +64,10 @@ class NonConformity extends Model
         'rq_signature_date',
         'cost_impact',
         'status',
+        'report_source', 'location', 'photos', 'client_uuid', 'environmental_impact', 'immediate_action', 'immediate_action_at',
+        'immediate_action_by', 'consequences_treatment', 'impact_mitigation', 'corrective_decision', 'decision_justification',
+        'decided_by', 'decided_at', 'root_cause_method', 'five_whys', 'cause_effect', 'is_recurrent', 'similar_ids',
+        'resources_needed', 'sme_update_required', 'sme_update_note', 'sme_update_done', 'escalation_level', 'escalated_at',
     ];
 
     protected $casts = [
@@ -74,6 +78,17 @@ class NonConformity extends Model
         'detected_at' => 'date',
         'effectiveness_verified' => 'boolean',
         'investigator_user_ids' => 'array',
+        'photos' => 'array',
+        'five_whys' => 'array',
+        'cause_effect' => 'array',
+        'similar_ids' => 'array',
+        'environmental_impact' => 'boolean',
+        'is_recurrent' => 'boolean',
+        'sme_update_required' => 'boolean',
+        'sme_update_done' => 'boolean',
+        'immediate_action_at' => 'datetime',
+        'decided_at' => 'datetime',
+        'escalated_at' => 'datetime',
         'root_cause_analysis' => 'array',
         'cause_analysis' => 'array',
         'impacts' => 'array',
@@ -84,6 +99,11 @@ class NonConformity extends Model
     {
         static::created(function (NonConformity $nc) {
             if ($nc->actions()->exists()) {
+                return;
+            }
+
+            // Déclaration rapide (ISO 14001 §10.2) : l'action corrective suit la décision, elle n'est pas automatique.
+            if ($nc->report_source !== null) {
                 return;
             }
 
@@ -101,7 +121,7 @@ class NonConformity extends Model
                 'site_id' => $nc->site_id,
                 'process_id' => $nc->process_id,
                 'type' => 'corrective',
-                'title' => $nc->title ?: 'Action corrective - NC ' . $nc->ref,
+                'title' => $nc->title ?: 'Action corrective - NC '.$nc->ref,
                 'description' => $nc->description ?? 'Action corrective générée automatiquement.',
                 'source' => 'non_conformity',
                 'initiator_id' => $nc->detected_by,
@@ -115,11 +135,12 @@ class NonConformity extends Model
     }
 
     protected static $logAttributes = ['ref', 'status', 'severity', 'effectiveness_verified'];
+
     protected static $logOnlyDirty = true;
 
-    public function getActivitylogOptions(): \Spatie\Activitylog\LogOptions
+    public function getActivitylogOptions(): LogOptions
     {
-        return \Spatie\Activitylog\LogOptions::defaults()
+        return LogOptions::defaults()
             ->logOnly(['ref', 'status', 'severity', 'effectiveness_verified'])
             ->logOnlyDirty();
     }
@@ -138,7 +159,7 @@ class NonConformity extends Model
     {
         return $this->belongsTo(User::class, 'responsible_id');
     }
-    
+
     public function audit(): BelongsTo
     {
         return $this->belongsTo(Audit::class);
@@ -173,7 +194,7 @@ class NonConformity extends Model
 
     public function isOverdue(): bool
     {
-        return $this->deadline && $this->deadline->isPast() && !$this->resolution_date;
+        return $this->deadline && $this->deadline->isPast() && ! $this->resolution_date;
     }
 
     /**

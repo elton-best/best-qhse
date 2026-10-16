@@ -2,32 +2,34 @@
 
 namespace App\Modules\Evaluation\Controllers;
 
-use App\Models\Document;
-use App\Models\User;
-use App\Services\DocumentSyncService;
-
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AddAuditFindingRequest;
 use App\Http\Requests\StoreAuditRequest;
 use App\Http\Requests\UpdateAuditRequest;
+use App\Jobs\GenerateAuditReport;
 use App\Models\Audit;
 use App\Models\AuditProgram;
 use App\Models\EvaluationCriteria;
 use App\Models\EvaluationRequest;
+use App\Models\User;
+use App\Modules\Evaluation\Services\AuditIndependenceService;
+use App\Notifications\AuditInvitation;
 use App\Services\AuditService;
 use App\Services\Core\DynamicFieldService;
+use App\Services\DocumentSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class AuditController extends Controller
 {
     public function __construct(
         protected AuditService $service,
-        protected DynamicFieldService $dynamicFieldService
+        protected DynamicFieldService $dynamicFieldService,
+        protected AuditIndependenceService $independence
     ) {}
 
     private function scopedAuditQuery()
@@ -35,9 +37,10 @@ class AuditController extends Controller
         $query = Audit::query();
         $user = auth()->user();
 
-        if ($user && !$user->isSuperAdmin()) {
-            if (!$user->enterprise_id) {
+        if ($user && ! $user->isSuperAdmin()) {
+            if (! $user->enterprise_id) {
                 $query->whereRaw('1 = 0');
+
                 return $query;
             }
 
@@ -60,7 +63,7 @@ class AuditController extends Controller
     {
         $query = $this->scopedAuditQuery();
 
-        if (!empty($with)) {
+        if (! empty($with)) {
             $query->with($with);
         }
 
@@ -110,7 +113,7 @@ class AuditController extends Controller
         $this->authorize('create', Audit::class);
 
         $validated = $request->validated();
-        $isInternalFlow = !in_array(($validated['type'] ?? null), ['external', 'certification'], true);
+        $isInternalFlow = ! in_array(($validated['type'] ?? null), ['external', 'certification'], true);
 
         if ($isInternalFlow) {
             $programId = (int) ($validated['audit_program_id'] ?? 0);
@@ -118,7 +121,7 @@ class AuditController extends Controller
 
             if ($programId > 0) {
                 $program = AuditProgram::query()->find($programId);
-                if (!$program) {
+                if (! $program) {
                     return response()->json([
                         'message' => "Le programme d'audit sélectionné est introuvable.",
                     ], 422);
@@ -142,6 +145,13 @@ class AuditController extends Controller
                 ], 422);
             }
         }
+
+        $this->independence->assertIndependent(
+            $validated['lead_auditor_id'],
+            array_merge($validated['team_members'] ?? [], $validated['auditor_ids'] ?? []),
+            $validated['auditee_ids'] ?? [],
+            $validated['process_ids'] ?? $validated['processes'] ?? [],
+        );
 
         $audit = $this->service->create($validated);
 
@@ -327,8 +337,8 @@ class AuditController extends Controller
 
         $user = auth()->user();
 
-        /** @var \App\Models\User $auditor */
-        $auditor = \App\Models\User::query()
+        /** @var User $auditor */
+        $auditor = User::query()
             ->where('enterprise_id', $user->enterprise_id)
             ->findOrFail((int) $validated['auditor_user_id']);
 
@@ -355,8 +365,8 @@ class AuditController extends Controller
             'subject' => $validated['subject'] ?? "Évaluation auditeur - {$audit->ref}",
             'message' => $validated['message'] ?? "Merci de compléter l'évaluation liée à l'audit {$audit->ref}.",
             'expires_at' => $validated['expires_at'] ?? null,
-            'status' => !empty($validated['send_immediately']) ? 'sent' : 'draft',
-            'sent_at' => !empty($validated['send_immediately']) ? now() : null,
+            'status' => ! empty($validated['send_immediately']) ? 'sent' : 'draft',
+            'sent_at' => ! empty($validated['send_immediately']) ? now() : null,
             'requestable_type' => Audit::class,
             'requestable_id' => $audit->id,
             'created_by' => $user->id,
@@ -398,12 +408,12 @@ class AuditController extends Controller
         $this->authorize('update', $audit);
 
         $format = (string) ($request->input('format', 'pdf'));
-        if (!in_array($format, ['pdf', 'docx'], true)) {
+        if (! in_array($format, ['pdf', 'docx'], true)) {
             $format = 'pdf';
         }
 
         $process = $audit->processes()->first();
-        $document = app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
+        $document = app(DocumentSyncService::class)->syncGeneratedProcessDocument([
             'site_id' => $audit->site_id,
             'process_id' => $process?->id,
             'process_code' => $process?->code ?? $process?->abbreviation ?? null,
@@ -424,7 +434,7 @@ class AuditController extends Controller
             ],
         ]);
 
-        dispatch(new \App\Jobs\GenerateAuditReport($audit, $format, $request->user(), $document->id));
+        dispatch(new GenerateAuditReport($audit, $format, $request->user(), $document->id));
 
         $audit->update([
             'status' => 'report_draft',
@@ -475,7 +485,7 @@ class AuditController extends Controller
         $user = auth()->user();
         $filters = $request->only(['site_id', 'axes', 'year']);
 
-        if ($user && !$user->isSuperAdmin()) {
+        if ($user && ! $user->isSuperAdmin()) {
             $filters['enterprise_id'] = $user->enterprise_id;
         }
 
@@ -492,7 +502,8 @@ class AuditController extends Controller
         $checklist = $this->service->generateChecklist(
             $audit,
             $request->input('iso_clauses', []),
-            $request->input('include_process_risks', true)
+            $request->input('include_process_risks', true),
+            $request->input('norm')
         );
 
         return response()->json([
@@ -511,11 +522,11 @@ class AuditController extends Controller
         $audit->load(['auditors', 'auditees']);
 
         foreach ($audit->auditors as $auditor) {
-            $auditor->notify(new \App\Notifications\AuditInvitation($audit, 'auditor'));
+            $auditor->notify(new AuditInvitation($audit, 'auditor'));
         }
 
         foreach ($audit->auditees as $auditee) {
-            $auditee->notify(new \App\Notifications\AuditInvitation($audit, 'auditee'));
+            $auditee->notify(new AuditInvitation($audit, 'auditee'));
         }
 
         return response()->json(['message' => 'Invitations envoyées avec succès']);
@@ -714,7 +725,7 @@ class AuditController extends Controller
                     'pending' => $pendingActions,
                 ],
             ],
-            'findings' => $audit->nonConformities->map(fn($nc) => [
+            'findings' => $audit->nonConformities->map(fn ($nc) => [
                 'ref' => $nc->ref,
                 'type' => $nc->type,
                 'severity' => $nc->severity,
@@ -755,7 +766,7 @@ class AuditController extends Controller
         $audit->update($validated);
 
         // Create reminder entries
-        if ($validated['reminder_enabled'] && !empty($validated['reminder_days_before'])) {
+        if ($validated['reminder_enabled'] && ! empty($validated['reminder_days_before'])) {
             foreach ($validated['reminder_days_before'] as $days) {
                 $reminderDate = $audit->planned_date->subDays($days);
 

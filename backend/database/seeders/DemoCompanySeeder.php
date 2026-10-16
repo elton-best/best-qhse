@@ -113,6 +113,8 @@ class DemoCompanySeeder extends Seeder
                 ],
             );
 
+            $user->forceFill(['email_verified_at' => $user->email_verified_at ?? now()])->save();
+
             $enterprise->forceFill([
                 'owner_user_id' => $user->id,
                 'created_by' => $user->id,
@@ -142,8 +144,8 @@ class DemoCompanySeeder extends Seeder
         $credentials = $this->provision();
 
         $this->command?->info('Compte entreprise démo provisionné dans Laravel.');
-        $this->command?->line('Email: ' . $credentials['email']);
-        $this->command?->line('Username: ' . $credentials['username']);
-        $this->command?->line('Mot de passe: ' . $credentials['password']);
+        $this->command?->line('Email: '.$credentials['email']);
+        $this->command?->line('Username: '.$credentials['username']);
+        $this->command?->line('Mot de passe: '.$credentials['password']);
     }
 }

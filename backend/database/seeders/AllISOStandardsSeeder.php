@@ -112,31 +112,34 @@ class AllISOStandardsSeeder extends Seeder
             }
         }
 
-        // Registre des obligations de conformité (ISO 14001 §6.1.3 / §9.1.2) : sous-module commun à toutes les normes.
+        // Sous-modules communs ISO 14001:2026 : obligations de conformité (6.1.3) et gestion des changements (6.3).
         $planificationId = DB::table('modules')->where('code', 'planification')->value('id');
+        $commonSubModules = [
+            ['code' => 'obligations_conformite', 'name' => 'Obligations de conformité', 'description' => 'Registre des obligations de conformité et évaluation périodique.', 'icon' => 'scale', 'route' => 'obligations', 'order' => 40],
+            ['code' => 'gestion_changements', 'name' => 'Gestion des changements', 'description' => 'Changements planifiés ou subis et analyse d\'impact (ISO 14001 §6.3).', 'icon' => 'git-branch', 'route' => 'changements', 'order' => 45],
+            ['code' => 'performance_environnementale', 'module' => 'evaluation', 'common' => false, 'name' => 'Performance environnementale', 'description' => 'Indicateurs, relevés traçables et instruments de mesure (ISO 14001 §9.1.1).', 'icon' => 'activity', 'route' => 'performance-environnementale', 'order' => 30],
+            ['code' => 'campagnes_sensibilisation', 'module' => 'support', 'name' => 'Campagnes de sensibilisation', 'description' => 'Campagnes, supports avec accusé de lecture, causeries et attestations (ISO 14001 §7.3).', 'icon' => 'megaphone', 'route' => 'campagnes-sensibilisation', 'order' => 35],
+        ];
         if ($planificationId) {
-            DB::table('sub_modules')->updateOrInsert(
-                ['code' => 'obligations_conformite'],
-                [
-                    'module_id' => $planificationId,
-                    'name' => 'Obligations de conformité',
-                    'description' => 'Registre des obligations de conformité et évaluation périodique.',
-                    'icon' => 'scale',
-                    'route' => 'obligations',
-                    'order' => 40,
-                    'is_active' => true,
-                    'is_common' => true,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ],
-            );
-            $obligationsId = DB::table('sub_modules')->where('code', 'obligations_conformite')->value('id');
-            foreach ([$iso9001, $iso14001, $iso45001, $iso27001, $iso22000, $iso50001] as $norm) {
-                if ($norm && $obligationsId) {
-                    DB::table('norm_sub_module')->updateOrInsert(
-                        ['norm_id' => (int) $norm->id, 'sub_module_id' => (int) $obligationsId],
-                        ['created_at' => now(), 'updated_at' => now()],
-                    );
+            foreach ($commonSubModules as $definition) {
+                $isCommon = $definition['common'] ?? true;
+                $moduleId = isset($definition['module']) ? DB::table('modules')->where('code', $definition['module'])->value('id') : $planificationId;
+                unset($definition['common'], $definition['module']);
+                if (! $moduleId) {
+                    continue;
+                }
+                DB::table('sub_modules')->updateOrInsert(
+                    ['code' => $definition['code']],
+                    $definition + ['module_id' => $moduleId, 'is_active' => true, 'is_common' => $isCommon, 'created_at' => now(), 'updated_at' => now()],
+                );
+                $subModuleId = DB::table('sub_modules')->where('code', $definition['code'])->value('id');
+                foreach ($isCommon ? [$iso9001, $iso14001, $iso45001, $iso27001, $iso22000, $iso50001] : [$iso14001] as $norm) {
+                    if ($norm && $subModuleId) {
+                        DB::table('norm_sub_module')->updateOrInsert(
+                            ['norm_id' => (int) $norm->id, 'sub_module_id' => (int) $subModuleId],
+                            ['created_at' => now(), 'updated_at' => now()],
+                        );
+                    }
                 }
             }
         }

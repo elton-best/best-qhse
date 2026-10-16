@@ -5,7 +5,6 @@ namespace App\Modules\Improvement\Models;
 use App\Models\Process;
 use App\Models\Site;
 use App\Models\User;
-
 use App\Traits\HasAuditFields;
 use App\Traits\HasReference;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -15,7 +14,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class ImprovementSuggestion extends Model
 {
-    use HasFactory, SoftDeletes, HasAuditFields, HasReference;
+    use HasAuditFields, HasFactory, HasReference, SoftDeletes;
 
     protected $fillable = [
         'ref',
@@ -31,12 +30,14 @@ class ImprovementSuggestion extends Model
         'follow_up',
         'validation_comment',
         'proposed_at',
+        'source_type', 'source_ref', 'source_id', 'decision_note', 'decided_by', 'decided_at', 'action_id',
     ];
 
     protected function casts(): array
     {
         return [
             'proposed_at' => 'date',
+            'decided_at' => 'datetime',
             'normes' => 'array',
         ];
     }

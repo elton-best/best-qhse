@@ -3,18 +3,17 @@
 namespace App\Modules\Improvement\Services;
 
 use App\Models\Action;
-use App\Models\Risk;
-
 use App\Models\NonConformity;
+use App\Models\Plainte;
+use App\Models\Reclamation;
+use App\Models\Risk;
 use App\Models\TaskTracking;
 use App\Models\User;
 use App\Notifications\SiteEventNotification;
-use App\Models\WorkflowState;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
 class NonConformityService
@@ -86,8 +85,8 @@ class NonConformityService
                     }
 
                     // Link to risk and update risk statistics
-                    if (!empty($data['risk_id'])) {
-                        $risk = \App\Models\Risk::find($data['risk_id']);
+                    if (! empty($data['risk_id'])) {
+                        $risk = Risk::find($data['risk_id']);
                         if ($risk) {
                             $risk->increment('actual_occurrences');
                             $risk->last_occurrence_at = now();
@@ -248,9 +247,9 @@ class NonConformityService
         activity()
             ->performedOn($nc)
             ->causedBy(auth()->user())
-            ->log('Efficacité vérifiée : ' . ($verificationData['is_effective'] ? 'OUI' : 'NON'));
+            ->log('Efficacité vérifiée : '.($verificationData['is_effective'] ? 'OUI' : 'NON'));
 
-        if (!empty($verificationData['is_effective'])) {
+        if (! empty($verificationData['is_effective'])) {
             $this->syncNonConformityTracking($nc, 'termine', 100, 'Efficacité vérifiée');
             $this->notifyNonConformityStakeholders($nc, 'non_conformity_verified');
         } else {
@@ -263,6 +262,16 @@ class NonConformityService
 
     public function close(NonConformity $nc): NonConformity
     {
+        // ISO 14001 §10.2 : l'efficacité des actions est vérifiée avant toute clôture, sauf si aucune action corrective n'a été jugée nécessaire.
+        if ($nc->corrective_decision !== 'not_required') {
+            if ($nc->effectiveness_verified !== true) {
+                throw ValidationException::withMessages(['effectiveness' => 'Clôture impossible : l\'efficacité des actions doit être vérifiée et jugée satisfaisante.']);
+            }
+            if ($nc->sme_update_required && ! $nc->sme_update_done) {
+                throw ValidationException::withMessages(['sme_update' => 'Clôture impossible : la mise à jour du système de management demandée n\'est pas faite.']);
+            }
+        }
+
         $openActions = $nc->actions()
             ->whereNotIn('status', ['completed', 'closed', 'verified'])
             ->count();
@@ -338,6 +347,7 @@ class NonConformityService
         $ncCloturees = $allNcs->filter(function ($nc) {
             $status = strtolower((string) ($nc->status ?? ''));
             $wf = strtolower((string) ($nc->workflowState?->code ?? ''));
+
             return in_array($status, ['closed', 'verified', 'termine'], true)
                 || in_array($wf, ['closed', 'verified'], true)
                 || (bool) $nc->effectiveness_verified;
@@ -346,7 +356,7 @@ class NonConformityService
         $ncEnCours = max(0, $total - $ncCloturees);
 
         $bySeverity = $allNcs->groupBy('severity')->map->count();
-        $byStatus = $allNcs->groupBy(fn($nc) => $nc->workflowState?->code ?? $nc->status)->map->count();
+        $byStatus = $allNcs->groupBy(fn ($nc) => $nc->workflowState?->code ?? $nc->status)->map->count();
         $byAxe = [];
 
         foreach ($allNcs as $nc) {
@@ -358,30 +368,30 @@ class NonConformityService
         $overdueCount = $allNcs->filter->isOverdue()->count();
         $verifiedCount = $allNcs->where('effectiveness_verified', true)->count();
         $avgResolutionDays = $allNcs->whereNotNull('resolution_date')
-            ->map(fn($nc) => $nc->detected_at ? $nc->detected_at->diffInDays($nc->resolution_date) : 0)
+            ->map(fn ($nc) => $nc->detected_at ? $nc->detected_at->diffInDays($nc->resolution_date) : 0)
             ->avg();
 
         // Actions issues des non-conformités
         $ncIds = $allNcs->pluck('id')->all();
         $actionsQuery = Action::query()->where(function ($q) use ($ncIds) {
-            if (!empty($ncIds)) {
+            if (! empty($ncIds)) {
                 $q->whereIn('non_conformity_id', $ncIds)
-                  ->orWhere(function ($sub) use ($ncIds) {
-                      $sub->whereIn('source_type', ['non_conformity', 'nc'])
-                          ->whereIn('source_id', $ncIds);
-                  })
-                  ->orWhere(function ($sub) use ($ncIds) {
-                      $sub->where('source', 'non_conformity')
-                          ->whereIn('process_id', function ($pQuery) use ($ncIds) {
-                              $pQuery->select('process_id')
-                                  ->from('non_conformities')
-                                  ->whereIn('id', $ncIds)
-                                  ->whereNotNull('process_id');
-                          });
-                  });
+                    ->orWhere(function ($sub) use ($ncIds) {
+                        $sub->whereIn('source_type', ['non_conformity', 'nc'])
+                            ->whereIn('source_id', $ncIds);
+                    })
+                    ->orWhere(function ($sub) use ($ncIds) {
+                        $sub->where('source', 'non_conformity')
+                            ->whereIn('process_id', function ($pQuery) use ($ncIds) {
+                                $pQuery->select('process_id')
+                                    ->from('non_conformities')
+                                    ->whereIn('id', $ncIds)
+                                    ->whereNotNull('process_id');
+                            });
+                    });
             } else {
                 $q->where('source', 'non_conformity')
-                  ->orWhere('source_type', 'non_conformity');
+                    ->orWhere('source_type', 'non_conformity');
             }
         });
 
@@ -393,6 +403,7 @@ class NonConformityService
         $actionsTotal = $actions->count();
         $actionsRealisees = $actions->filter(function ($act) {
             $st = strtolower((string) ($act->status ?? ''));
+
             return in_array($st, ['completed', 'verified', 'closed', 'termine'], true)
                 || (float) ($act->progress_percentage ?? $act->progress ?? 0) >= 100
                 || (bool) $act->effectiveness_verified;
@@ -401,8 +412,8 @@ class NonConformityService
         $tauxRealisation = $actionsTotal > 0 ? round(($actionsRealisees / $actionsTotal) * 100, 1) : 0.0;
 
         // Plaintes et Réclamations
-        $reclamationQuery = \App\Models\Reclamation::query();
-        $plainteQuery = \App\Models\Plainte::query();
+        $reclamationQuery = Reclamation::query();
+        $plainteQuery = Plainte::query();
 
         if (isset($filters['site_id'])) {
             $reclamationQuery->where('site_id', $filters['site_id']);
@@ -421,7 +432,8 @@ class NonConformityService
         $reclamationsTotal = $reclamations->count();
         $reclamationsCloturees = $reclamations->filter(function ($r) {
             $st = strtolower((string) ($r->status ?? ''));
-            return in_array($st, ['closed', 'cloture', 'traitee', 'resolved'], true) || !empty($r->closed_date);
+
+            return in_array($st, ['closed', 'cloture', 'traitee', 'resolved'], true) || ! empty($r->closed_date);
         })->count();
         $reclamationsEnCours = max(0, $reclamationsTotal - $reclamationsCloturees);
 
@@ -429,7 +441,8 @@ class NonConformityService
         $plaintesTotal = $plaintes->count();
         $plaintesCloturees = $plaintes->filter(function ($p) {
             $st = strtolower((string) ($p->status ?? ''));
-            return in_array($st, ['closed', 'cloture', 'traitee', 'resolved'], true) || !empty($p->closed_date);
+
+            return in_array($st, ['closed', 'cloture', 'traitee', 'resolved'], true) || ! empty($p->closed_date);
         })->count();
         $plaintesEnCours = max(0, $plaintesTotal - $plaintesCloturees);
 
@@ -625,6 +638,7 @@ class NonConformityService
             $sqlState = $exception->errorInfo[0] ?? null;
             if ($sqlState === '23505') {
                 $message = $exception->getMessage();
+
                 return str_contains($message, 'non_conformities_ref_unique');
             }
         }
