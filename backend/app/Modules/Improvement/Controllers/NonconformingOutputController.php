@@ -24,7 +24,7 @@ class NonconformingOutputController extends Controller
 {
     public function index(Request $request)
     {
-        $query = NonconformingOutput::with(['site:id,name', 'responsible:id,name']);
+        $query = NonconformingOutput::with(['site:id,name', 'responsible:id,name', 'process:id,title,code']);
 
         if ($request->filled('site_id')) {
             $query->where('site_id', $request->integer('site_id'));
@@ -34,6 +34,9 @@ class NonconformingOutputController extends Controller
         }
         if ($request->filled('severity')) {
             $query->where('severity', $this->normalizeSeverity($request->input('severity')));
+        }
+        if ($request->filled('process_id')) {
+            $query->where('process_id', $request->integer('process_id'));
         }
         if ($request->filled('search')) {
             $term = '%' . trim((string) $request->string('search')) . '%';
@@ -78,7 +81,7 @@ class NonconformingOutputController extends Controller
         $output = NonconformingOutput::create($validated);
 
         return response()->json(
-            $output->load(['site:id,name', 'responsible:id,name']),
+            $output->load(['site:id,name', 'responsible:id,name', 'process:id,title,code']),
             201
         );
     }
@@ -86,7 +89,7 @@ class NonconformingOutputController extends Controller
     public function show(NonconformingOutput $nonconformingOutput)
     {
         return response()->json(
-            $nonconformingOutput->load(['site:id,name', 'responsible:id,name', 'closedBy:id,name'])
+            $nonconformingOutput->load(['site:id,name', 'responsible:id,name', 'closedBy:id,name', 'process:id,title,code'])
         );
     }
 
@@ -110,7 +113,7 @@ class NonconformingOutputController extends Controller
         $nonconformingOutput->update($validated);
 
         return response()->json(
-            $nonconformingOutput->fresh()->load(['site:id,name', 'responsible:id,name', 'closedBy:id,name'])
+            $nonconformingOutput->fresh()->load(['site:id,name', 'responsible:id,name', 'closedBy:id,name', 'process:id,title,code'])
         );
     }
 
@@ -137,7 +140,7 @@ class NonconformingOutputController extends Controller
             'description' => $this->appendComment($nonconformingOutput->description, $validated['comment'] ?? null, 'Isolement'),
         ]);
 
-        return response()->json($nonconformingOutput->fresh()->load(['site:id,name', 'responsible:id,name']));
+        return response()->json($nonconformingOutput->fresh()->load(['site:id,name', 'responsible:id,name', 'process:id,title,code']));
     }
 
     /**
@@ -156,7 +159,7 @@ class NonconformingOutputController extends Controller
             'corrective_action' => $validated['corrective_action'],
         ]);
 
-        return response()->json($nonconformingOutput->fresh()->load(['site:id,name', 'responsible:id,name']));
+        return response()->json($nonconformingOutput->fresh()->load(['site:id,name', 'responsible:id,name', 'process:id,title,code']));
     }
 
     /**
@@ -178,7 +181,7 @@ class NonconformingOutputController extends Controller
             'description' => $this->appendComment($nonconformingOutput->description, $validated['comment'] ?? null, 'Dérogation'),
         ]);
 
-        return response()->json($nonconformingOutput->fresh()->load(['site:id,name', 'responsible:id,name']));
+        return response()->json($nonconformingOutput->fresh()->load(['site:id,name', 'responsible:id,name', 'process:id,title,code']));
     }
 
     /**
@@ -196,7 +199,7 @@ class NonconformingOutputController extends Controller
             'description' => $this->appendComment($nonconformingOutput->description, $validated['comment'] ?? null, 'Rebut'),
         ]);
 
-        return response()->json($nonconformingOutput->fresh()->load(['site:id,name', 'responsible:id,name']));
+        return response()->json($nonconformingOutput->fresh()->load(['site:id,name', 'responsible:id,name', 'process:id,title,code']));
     }
 
     /**
@@ -240,12 +243,13 @@ class NonconformingOutputController extends Controller
             'Gravite (minor, major, critical)',
             'Decision (correction, derogation, rebut, retour)',
             'Responsable (nom)',
+            'Processus (id)',
         ], null, 'A3');
         $sheet->fromArray([
-            ['Lot produit X non conforme', 'Défaut dimensionnel', 'Contrôle final', '2026-10-01', 50, 'pcs', 'major', 'correction', 'Nom responsable'],
+            ['Lot produit X non conforme', 'Défaut dimensionnel', 'Contrôle final', '2026-10-01', 50, 'pcs', 'major', 'correction', 'Nom responsable', 1],
         ], null, 'A4');
 
-        foreach (range('A', 'I') as $column) {
+        foreach (range('A', 'J') as $column) {
             $sheet->getColumnDimension($column)->setAutoSize(true);
         }
 
@@ -254,7 +258,7 @@ class NonconformingOutputController extends Controller
 
     public function exportXlsx(Request $request)
     {
-        $query = NonconformingOutput::with(['responsible:id,name'])->orderBy('id');
+        $query = NonconformingOutput::with(['responsible:id,name', 'process:id,title,code'])->orderBy('id');
 
         if ($request->filled('site_id')) {
             $query->where('site_id', $request->integer('site_id'));
@@ -266,7 +270,7 @@ class NonconformingOutputController extends Controller
         $sheet->fromArray([
             'Ref', 'Titre', 'Description', 'Source detection', 'Date detection',
             'Quantite', 'Unite', 'Gravite', 'Decision', 'Statut',
-            'Responsable', 'Action corrective', 'Reference derogation',
+            'Responsable', 'Action corrective', 'Reference derogation', 'Processus',
         ], null, 'A1');
 
         $row = 2;
@@ -285,10 +289,11 @@ class NonconformingOutputController extends Controller
                 $item->responsible?->name,
                 $item->corrective_action,
                 $item->derogation_reference,
+                $item->process?->title ?? '',
             ], null, 'A' . $row++);
         }
 
-        foreach (range('A', 'M') as $column) {
+        foreach (range('A', 'N') as $column) {
             $sheet->getColumnDimension($column)->setAutoSize(true);
         }
 
@@ -332,6 +337,7 @@ class NonconformingOutputController extends Controller
                     'severity' => $this->normalizeSeverity($row['G'] ?? null),
                     'decision' => $this->normalizeDecision($row['H'] ?? null),
                     'responsible_id' => $this->resolveUserIdFromName($row['I'] ?? null),
+                    'process_id' => is_numeric($row['J'] ?? null) ? (int) $row['J'] : null,
                 ]);
                 $imported++;
             } catch (\Throwable $e) {

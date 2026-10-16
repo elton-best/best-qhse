@@ -13,7 +13,7 @@ export function ProductionPage() {
       filePrefix="production-prestation"
       fields={[
         { key: "title", label: "Produit / service", type: "text", required: true },
-        { key: "process_id", label: "Processus", type: "text" },
+        { key: "process_id", label: "Processus", type: "process" },
         { key: "client", label: "Client / commande", type: "text" },
         { key: "date", label: "Date prévue", type: "date" },
         { key: "equipment_id", label: "Équipement", type: "text" },

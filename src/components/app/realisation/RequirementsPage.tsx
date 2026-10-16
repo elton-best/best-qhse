@@ -21,7 +21,7 @@ export function RequirementsPage() {
           required: true,
         },
         { key: "client", label: "Client / source", type: "text" },
-        { key: "process_id", label: "Processus", type: "text" },
+        { key: "process_id", label: "Processus", type: "process" },
         { key: "description", label: "Description", type: "textarea", full: true },
       ]}
     />

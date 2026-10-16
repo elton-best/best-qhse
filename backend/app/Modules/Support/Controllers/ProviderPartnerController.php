@@ -324,6 +324,40 @@ class ProviderPartnerController extends Controller
         )->deleteFileAfterSend(true);
     }
 
+    public function downloadTemplate(Request $request)
+    {
+        $enterpriseId = $this->resolveEnterpriseId($request);
+
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Modele import');
+        $sheet->setCellValue('A1', "MODELE D'IMPORT - BASE PRESTATAIRES");
+        $sheet->fromArray([
+            'Désignation',
+            'Type de prestataire (personne_morale, personne_physique, autre)',
+            'Forme juridique',
+            'Offres',
+            'Téléphone 1',
+            'Téléphone 2',
+            'Email',
+            'IFU',
+            'Années expérience',
+            'Observation',
+        ], null, 'A3');
+        $sheet->fromArray([
+            ['Prestataire Exemple', 'personne_morale', 'SARL', 'Maintenance', '01 23 45 67 89', '01 23 45 67 88', 'contact@exemple.com', '123456789', 5, 'Bon rapport qualité/prix'],
+        ], null, 'A4');
+
+        foreach (range('A', 'J') as $column) {
+            $sheet->getColumnDimension($column)->setAutoSize(true);
+        }
+
+        $tempPath = tempnam(sys_get_temp_dir(), 'prest_') . '.xlsx';
+        (new Xlsx($spreadsheet))->save($tempPath);
+
+        return response()->download($tempPath, 'modele_import_base_prestataires.xlsx')->deleteFileAfterSend(true);
+    }
+
     private function persistImportedRows(array $rows, int $enterpriseId, Request $request): array
     {
         $created = 0;

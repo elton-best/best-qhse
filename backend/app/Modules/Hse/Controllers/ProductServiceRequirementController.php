@@ -20,7 +20,7 @@ class ProductServiceRequirementController extends Controller
 {
     public function index(Request $request)
     {
-        $query = ProductServiceRequirement::with(['site:id,name', 'responsible:id,name', 'reviewer:id,name']);
+        $query = ProductServiceRequirement::with(['site:id,name', 'responsible:id,name', 'reviewer:id,name', 'process:id,title,code']);
 
         if ($request->filled('site_id')) {
             $query->where('site_id', $request->integer('site_id'));
@@ -33,6 +33,9 @@ class ProductServiceRequirementController extends Controller
         }
         if ($request->filled('compliance_status')) {
             $query->where('compliance_status', $request->string('compliance_status'));
+        }
+        if ($request->filled('process_id')) {
+            $query->where('process_id', $request->integer('process_id'));
         }
         if ($request->filled('search')) {
             $term = '%' . trim((string) $request->string('search')) . '%';
@@ -60,19 +63,13 @@ class ProductServiceRequirementController extends Controller
             'compliance_status' => 'nullable|in:compliant,partial,non_compliant,not_applicable',
             'responsible_id' => 'nullable|exists:users,id',
             'deadline' => 'nullable|date',
+            'process_id' => 'nullable|exists:processes,id',
         ]);
 
-        $validated['site_id'] = $validated['site_id'] ?? $request->user()?->site_id;
-        if (empty($validated['site_id'])) {
-            return response()->json([
-                'message' => 'Le site est obligatoire.',
-                'errors' => ['site_id' => ['Le site est obligatoire.']],
-            ], 422);
-        }
-        $validated['requirement_type'] = $validated['requirement_type'] ?? 'client';
-        $validated['compliance_status'] = $validated['compliance_status'] ?? 'not_applicable';
-
-        $requirement = ProductServiceRequirement::create($validated);
+        $requirement = ProductServiceRequirement::create([
+            ...$validated,
+            'site_id' => $validated['site_id'] ?? $request->user()?->site_id,
+        ]);
 
         return response()->json(
             $requirement->load(['site:id,name', 'responsible:id,name']),
@@ -83,7 +80,7 @@ class ProductServiceRequirementController extends Controller
     public function show(ProductServiceRequirement $productServiceRequirement)
     {
         return response()->json(
-            $productServiceRequirement->load(['site:id,name', 'responsible:id,name', 'reviewer:id,name'])
+            $productServiceRequirement->load(['site:id,name', 'responsible:id,name', 'reviewer:id,name', 'process:id,title,code'])
         );
     }
 
@@ -101,6 +98,7 @@ class ProductServiceRequirementController extends Controller
             'compliance_status' => 'sometimes|in:compliant,partial,non_compliant,not_applicable',
             'responsible_id' => 'nullable|exists:users,id',
             'deadline' => 'nullable|date',
+            'process_id' => 'nullable|exists:processes,id',
         ]);
 
         $productServiceRequirement->update($validated);
