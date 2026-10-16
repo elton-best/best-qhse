@@ -1,24 +1,44 @@
-# LOGIQUALI
+# LOGIQUALI / BestQHSE
 
-Je veux creer un saas et on va commencer par la landing page et les inscription et autre
+Plateforme QHSE multi-normes (ISO 9001, 14001, 45001, 27001, 22000, 50001).
 
-This project was built with [Lovable](https://lovable.dev).
+## Architecture
 
-## Build with Lovable
+- `src/` : frontend React (TanStack Start, TanStack Router/Query, Tailwind v4, shadcn/ui).
+- `backend/` : API Laravel (PHP 8, PostgreSQL), exposée sous `/api/v1`.
+- `frontend1/` : ancien frontend Vue, conservé pour référence uniquement.
 
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/86066861-50a0-4646-8f36-30eff54cae80).
+## Développement
 
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
+Prérequis : Node.js 22+, PHP 8.3+, PostgreSQL 16.
 
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+Stack locale complète (Postgres 55432, Laravel 8000, Vite 5173) :
 
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
+bash scripts/dev-servers.sh
 ```
+
+Ou séparément :
+
+```sh
+# Frontend
+npm install
+npm run dev        # proxy /api vers BACKEND_URL (défaut http://127.0.0.1:8000)
+
+# Backend
+cd backend
+composer install
+php artisan migrate
+php artisan serve
+```
+
+## Vérifications
+
+```sh
+npm run lint
+npm test
+npm run build
+cd backend && php artisan test
+```
+
+Configuration locale : copier `.env.example` vers `.env` (frontend) et adapter `backend/.env`.
