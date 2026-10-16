@@ -21,7 +21,7 @@ class DesignDevelopmentController extends Controller
 {
     public function index(Request $request)
     {
-        $query = DesignDevelopment::with(['site:id,name', 'responsible:id,name', 'validator:id,name']);
+        $query = DesignDevelopment::with(['site:id,name', 'responsible:id,name', 'validator:id,name', 'process:id,title,code']);
 
         if ($request->filled('site_id')) {
             $query->where('site_id', $request->integer('site_id'));
@@ -31,6 +31,9 @@ class DesignDevelopmentController extends Controller
         }
         if ($request->filled('status')) {
             $query->where('status', $request->string('status'));
+        }
+        if ($request->filled('process_id')) {
+            $query->where('process_id', $request->integer('process_id'));
         }
         if ($request->filled('search')) {
             $term = '%' . trim((string) $request->string('search')) . '%';
@@ -61,6 +64,7 @@ class DesignDevelopmentController extends Controller
             'responsible_id' => 'nullable|exists:users,id',
             'planned_date' => 'nullable|date',
             'actual_date' => 'nullable|date',
+            'process_id' => 'nullable|exists:processes,id',
         ]);
 
         $validated['site_id'] = $validated['site_id'] ?? $request->user()?->site_id;
@@ -76,7 +80,7 @@ class DesignDevelopmentController extends Controller
         $design = DesignDevelopment::create($validated);
 
         return response()->json(
-            $design->load(['site:id,name', 'responsible:id,name']),
+            $design->load(['site:id,name', 'responsible:id,name', 'process:id,title,code']),
             201
         );
     }
@@ -84,7 +88,7 @@ class DesignDevelopmentController extends Controller
     public function show(DesignDevelopment $designDevelopment)
     {
         return response()->json(
-            $designDevelopment->load(['site:id,name', 'responsible:id,name', 'validator:id,name'])
+            $designDevelopment->load(['site:id,name', 'responsible:id,name', 'validator:id,name', 'process:id,title,code'])
         );
     }
 
@@ -105,6 +109,7 @@ class DesignDevelopmentController extends Controller
             'responsible_id' => 'nullable|exists:users,id',
             'planned_date' => 'nullable|date',
             'actual_date' => 'nullable|date',
+            'process_id' => 'nullable|exists:processes,id',
         ]);
 
         if (array_key_exists('status', $validated) && $validated['status'] === null) {
@@ -117,7 +122,7 @@ class DesignDevelopmentController extends Controller
         $designDevelopment->update($validated);
 
         return response()->json(
-            $designDevelopment->fresh()->load(['site:id,name', 'responsible:id,name', 'validator:id,name'])
+            $designDevelopment->fresh()->load(['site:id,name', 'responsible:id,name', 'validator:id,name', 'process:id,title,code'])
         );
     }
 
@@ -164,7 +169,7 @@ class DesignDevelopmentController extends Controller
         $designDevelopment->update($payload);
 
         return response()->json(
-            $designDevelopment->fresh()->load(['site:id,name', 'responsible:id,name', 'validator:id,name'])
+            $designDevelopment->fresh()->load(['site:id,name', 'responsible:id,name', 'validator:id,name', 'process:id,title,code'])
         );
     }
 

@@ -35,7 +35,7 @@ export function ProceduresPage() {
       clientFilter={isProcedure}
       fields={[
         { key: "title", label: "Intitulé de la procédure", type: "text", required: true },
-        { key: "process_id", label: "Processus", type: "text" },
+        { key: "process_id", label: "Processus", type: "process" },
         { key: "version", label: "Version", type: "text" },
         { key: "pilot_id", label: "Responsable", type: "text" },
         { key: "users", label: "Utilisateurs concernés", type: "text", full: true },

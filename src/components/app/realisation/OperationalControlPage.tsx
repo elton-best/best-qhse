@@ -13,7 +13,7 @@ export function OperationalControlPage() {
       filePrefix="maitrise-operationnelle"
       fields={[
         { key: "title", label: "Activité / contrôle", type: "text", required: true },
-        { key: "process_id", label: "Processus", type: "text" },
+        { key: "process_id", label: "Processus", type: "process" },
         { key: "pilot_id", label: "Responsable", type: "text" },
         { key: "date", label: "Date prévue", type: "date" },
         { key: "criteria", label: "Critères", type: "textarea", required: true, full: true },

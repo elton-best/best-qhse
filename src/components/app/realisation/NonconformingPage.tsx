@@ -13,6 +13,7 @@ export function NonconformingPage() {
       filePrefix="sorties-non-conformes"
       fields={[
         { key: "title", label: "Défaut constaté", type: "text", required: true },
+        { key: "process_id", label: "Processus", type: "process" },
         { key: "operation_id", label: "Opération", type: "text" },
         {
           key: "impact",

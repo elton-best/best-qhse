@@ -105,6 +105,7 @@ Route::post('provider-evaluations/export-pdf', [EmployeeEvaluationController::cl
 Route::get('templates/procedure-evaluation-pip', [EmployeeEvaluationController::class, 'downloadProcedureTemplate']);
 
 // Prestataires externes (ISO §8.4)
+Route::get('provider-partners/template', [ProviderPartnerController::class, 'downloadTemplate']);
 Route::get('provider-partners/export-xlsx', [ProviderPartnerController::class, 'exportXlsx']);
 Route::apiResource('provider-partners', ProviderPartnerController::class)
     ->parameters(['provider-partners' => 'providerPartner']);

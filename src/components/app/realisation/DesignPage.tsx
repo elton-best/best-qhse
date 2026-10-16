@@ -15,7 +15,7 @@ export function DesignPage() {
         { key: "title", label: "Projet", type: "text", required: true },
         { key: "pilot_id", label: "Responsable de projet", type: "text" },
         { key: "team", label: "Équipe projet", type: "text", full: true },
-        { key: "process_id", label: "Processus", type: "text" },
+        { key: "process_id", label: "Processus", type: "process" },
         { key: "due_date", label: "Échéance", type: "date" },
         { key: "needs", label: "Besoins", type: "textarea", full: true },
         { key: "outputs", label: "Éléments de sortie", type: "textarea", full: true },
