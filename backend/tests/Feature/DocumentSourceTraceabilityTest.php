@@ -6,9 +6,9 @@ use App\Http\Middleware\CheckSubscriptionStatus;
 use App\Http\Middleware\ForceCompanySetup;
 use App\Http\Middleware\ForcePasswordChange;
 use App\Http\Middleware\ForceSignatureUpload;
-use App\Models\CodeStructurePart;
+use App\Models\DocumentTypeCatalog;
 use App\Models\Document;
-use App\Models\DocumentTypeConfiguration;
+use App\Models\NomenclatureTemplate;
 use App\Models\Enterprise;
 use App\Models\Process;
 use App\Models\Site;
@@ -46,43 +46,27 @@ class DocumentSourceTraceabilityTest extends TestCase
             'site_id' => $site->id,
             'pilot_id' => $user->id,
         ]);
-        $config = DocumentTypeConfiguration::query()
-            ->where('enterprise_id', $enterprise->id)
-            ->where('abbreviation', 'PRC')
-            ->first();
-
-        if (!$config) {
-            $config = DocumentTypeConfiguration::factory()->create([
-                'enterprise_id' => $enterprise->id,
-                'site_id' => $site->id,
-                'scope' => 'site',
-                'abbreviation' => 'PRC',
-                'is_active' => true,
-            ]);
-        }
-
-        if (!$config->structureParts()->exists()) {
-            CodeStructurePart::create([
-                'document_type_configuration_id' => $config->id,
-                'part_order' => 1,
-                'part_name' => 'Type',
-                'part_type' => 'fixed_abbreviation',
-                'part_length' => 3,
-                'separator_after' => '-',
-                'is_required' => true,
-                'sequence_scope' => null,
-            ]);
-            CodeStructurePart::create([
-                'document_type_configuration_id' => $config->id,
-                'part_order' => 2,
-                'part_name' => 'Sequence',
-                'part_type' => 'sequence',
-                'part_length' => 3,
-                'separator_after' => null,
-                'is_required' => true,
-                'sequence_scope' => 'global',
-            ]);
-        }
+        $catalog = DocumentTypeCatalog::query()->create([
+            'enterprise_id' => $enterprise->id,
+            'site_id' => $site->id,
+            'name' => 'Procédure',
+            'abbreviation' => 'PRC',
+            'is_active' => true,
+        ]);
+        NomenclatureTemplate::query()->create([
+            'enterprise_id' => $enterprise->id,
+            'site_id' => $site->id,
+            'document_type_catalog_id' => $catalog->id,
+            'name' => 'Template PRC',
+            'version' => 1,
+            'status' => 'published',
+            'is_active' => true,
+            'separator' => '-',
+            'format_structure' => [
+                ['order' => 1, 'type' => 'document_type', 'label' => 'Type', 'length' => 3],
+                ['order' => 2, 'type' => 'sequential_number', 'label' => 'Sequence', 'length' => 3],
+            ],
+        ]);
 
         $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/documents', [
