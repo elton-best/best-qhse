@@ -39,6 +39,8 @@ export type Aes = {
   impact_scale: "local" | "regional" | "global" | null;
   impact_kind: "direct" | "indirect" | "cumulative" | null;
   group_label: string | null;
+  group_members: string[] | null;
+  group_characteristics: string | null;
   legal_criterion: boolean;
   stakeholder_criterion: boolean;
   is_emergency_potential: boolean;
@@ -65,7 +67,7 @@ export type Aes = {
 type AesInputKey =
   | "process_id" | "sub_process" | "aspect_number" | "situation" | "activity" | "aspect" | "impact" | "risk"
   | "existing_controls" | "gravity" | "frequency" | "sensitivity" | "mastery" | "lifecycle_phase"
-  | "control_level" | "aspect_type" | "impact_nature" | "impact_scale" | "impact_kind" | "group_label"
+  | "control_level" | "aspect_type" | "impact_nature" | "impact_scale" | "impact_kind" | "group_label" | "group_members" | "group_characteristics"
   | "legal_criterion" | "stakeholder_criterion" | "is_emergency_potential" | "additional_actions"
   | "responsible_id" | "deadline" | "effectiveness_criterion" | "efficiency_criterion" | "observations";
 

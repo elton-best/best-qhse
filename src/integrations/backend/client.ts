@@ -263,6 +263,7 @@ async function refreshToken(): Promise<boolean> {
 async function request<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
+  headers.set("Accept-Language", typeof window !== "undefined" && window.localStorage.getItem("lq-interface-locale") === "en" ? "en" : "fr");
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }

@@ -8,10 +8,12 @@ use App\Modules\Hse\Models\EmergencyProcedure;
 use App\Modules\Hse\Models\EnvironmentalAspect;
 use App\Modules\Hse\Services\AesSignificanceService;
 use App\Modules\Hse\Services\AesWorkbookService;
+use App\Modules\Hse\Services\HseExportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Aspects environnementaux et AES — ISO 14001:2026 §6.1.2.
@@ -53,13 +55,15 @@ class EnvironmentalAspectController extends Controller
             }
         }
         if ($request->filled('search')) {
-            $term = '%' . trim((string) $request->query('search')) . '%';
+            $term = '%'.trim((string) $request->query('search')).'%';
             $query->where(function ($inner) use ($term) {
                 $inner->where('activity', 'ilike', $term)
                     ->orWhere('aspect', 'ilike', $term)
                     ->orWhere('impact', 'ilike', $term)
                     ->orWhere('risk', 'ilike', $term)
-                    ->orWhere('aspect_number', 'ilike', $term);
+                    ->orWhere('aspect_number', 'ilike', $term)
+                    ->orWhere('group_label', 'ilike', $term)
+                    ->orWhere('group_characteristics', 'ilike', $term);
             });
         }
 
@@ -90,6 +94,7 @@ class EnvironmentalAspectController extends Controller
     {
         $this->assertTenant($request);
         $validated = $request->validate($this->rules($request, true));
+        $this->assertGrouping($validated, null);
         $site = $this->resolveSite($request, isset($validated['site_id']) ? (int) $validated['site_id'] : null);
         $this->assertOwnedByEnterprise($this->ownedTargets(), $validated, (int) $site->enterprise_id);
         $this->assertCoherence($validated, null, (int) $site->enterprise_id);
@@ -122,6 +127,7 @@ class EnvironmentalAspectController extends Controller
         abort_if($aspect->status === 'archived', 422, 'Un aspect archivé doit être rouvert avant modification.');
 
         $validated = $request->validate($this->rules($request, false));
+        $this->assertGrouping($validated, $aspect);
         if (isset($validated['site_id']) && (int) $validated['site_id'] !== (int) $aspect->site_id) {
             $this->resolveSite($request, (int) $validated['site_id']);
         }
@@ -258,7 +264,7 @@ class EnvironmentalAspectController extends Controller
 
         $heatmap = [];
         foreach ($all->whereNotNull('gravity') as $aspect) {
-            $key = $aspect->gravity . '-' . $aspect->frequency;
+            $key = $aspect->gravity.'-'.$aspect->frequency;
             $heatmap[$key] = ($heatmap[$key] ?? 0) + 1;
         }
 
@@ -301,7 +307,7 @@ class EnvironmentalAspectController extends Controller
         }
 
         $groups = $query->orderBy('site_id')->orderBy('process_id')->get()
-            ->groupBy(fn ($a) => ($a->site?->name ?? 'Sans site') . '||' . ($a->process?->title ?? 'Sans processus'))
+            ->groupBy(fn ($a) => ($a->site?->name ?? 'Sans site').'||'.($a->process?->title ?? 'Sans processus'))
             ->map(function ($items, $key) {
                 [$site, $process] = explode('||', $key);
 
@@ -412,11 +418,11 @@ class EnvironmentalAspectController extends Controller
             'is_significant' => $request->filled('is_significant') ? filter_var($request->query('is_significant'), FILTER_VALIDATE_BOOLEAN) : null,
         ];
 
-        $tempFile = app(\App\Modules\Hse\Services\HseExportService::class)
+        $tempFile = app(HseExportService::class)
             ->exportEnvironmentalAspectsXlsx((int) $user->enterprise_id, $filters);
         $siteSuffix = ! empty($filters['site_id']) ? "_site_{$filters['site_id']}" : '_tous_sites';
 
-        return response()->download($tempFile, 'aes_iso14001' . $siteSuffix . '_' . date('Ymd_His') . '.xlsx', [
+        return response()->download($tempFile, 'aes_iso14001'.$siteSuffix.'_'.date('Ymd_His').'.xlsx', [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ])->deleteFileAfterSend(true);
     }
@@ -453,7 +459,10 @@ class EnvironmentalAspectController extends Controller
             'impact_nature' => 'nullable|in:negative,beneficial',
             'impact_scale' => 'nullable|in:local,regional,global',
             'impact_kind' => 'nullable|in:direct,indirect,cumulative',
-            'group_label' => 'nullable|string|max:255',
+            'group_label' => 'required_with:group_members|nullable|string|max:255',
+            'group_members' => 'nullable|array|min:2|max:100',
+            'group_members.*' => 'required|string|max:255|distinct:ignore_case',
+            'group_characteristics' => 'required_with:group_members|nullable|string|max:5000',
             'legal_criterion' => 'nullable|boolean',
             'stakeholder_criterion' => 'nullable|boolean',
             'is_emergency_potential' => 'nullable|boolean',
@@ -468,6 +477,25 @@ class EnvironmentalAspectController extends Controller
             'action_ids' => 'nullable|array',
             'action_ids.*' => 'integer',
         ];
+    }
+
+    /** @param array<string, mixed> $data */
+    private function assertGrouping(array $data, ?EnvironmentalAspect $existing): void
+    {
+        $members = array_key_exists('group_members', $data) ? $data['group_members'] : $existing?->group_members;
+        if (empty($members)) {
+            return;
+        }
+        $errors = [];
+        foreach (['group_label', 'group_characteristics'] as $field) {
+            $value = array_key_exists($field, $data) ? $data[$field] : $existing?->{$field};
+            if (! filled($value)) {
+                $errors[$field] = ['Décrivez le regroupement et les caractéristiques communes des activités ou produits.'];
+            }
+        }
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
     }
 
     /**
@@ -542,7 +570,7 @@ class EnvironmentalAspectController extends Controller
             'aspect_id' => $aspect->id,
             'responsible_id' => $aspect->responsible_id,
             'emergency_type' => 'À définir',
-            'title' => 'Urgence — ' . $aspect->aspect,
+            'title' => 'Urgence — '.$aspect->aspect,
             'hazard_nature' => $aspect->impact,
             'status' => 'planifie',
         ]);

@@ -41,7 +41,10 @@ class DocumentTypeConfigurationApiTest extends TestCase
             'site_id' => $this->site->id
         ]);
         
-        $this->user->givePermissionTo(['view_nomenclature', 'configure_nomenclature']);
+        foreach (['support.documents.read', 'support.documents.configure_nomenclature'] as $name) {
+            Permission::findOrCreate($name, 'web');
+        }
+        $this->user->givePermissionTo(['support.documents.read', 'support.documents.configure_nomenclature']);
         
         Sanctum::actingAs($this->user);
     }
@@ -62,53 +65,6 @@ class DocumentTypeConfigurationApiTest extends TestCase
 
         $response->assertStatus(200)
                  ->assertJsonStructure(['data']);
-    }
-
-    /** @test */
-    public function it_creates_configuration()
-    {
-        $data = [
-            'type_code' => 'TEST',
-            'type_label' => 'Test Configuration',
-            'scope' => 'site',
-            'is_active' => true,
-            'code_structure' => [
-                ['part_type' => 'type_code', 'order' => 1],
-                ['part_type' => 'year', 'order' => 2],
-                ['part_type' => 'sequence', 'order' => 3, 'length' => 4, 'sequence_scope' => 'by_type_year'],
-            ],
-        ];
-
-        $response = $this->postJson('/api/v1/document-type-configurations', $data);
-
-        $response->assertStatus(201);
-        $this->assertDatabaseHas('document_type_configurations', [
-            'abbreviation' => 'TEST',
-            'enterprise_id' => $this->enterprise->id
-        ]);
-    }
-
-    /** @test */
-    public function it_creates_configuration_with_modern_schema()
-    {
-        $typeCode = 'PRC' . random_int(10, 99);
-        $data = [
-            'type_code' => $typeCode,
-            'type_label' => 'Procedure',
-            'scope' => 'site',
-            'is_active' => true,
-            'code_structure' => [
-                ['part_type' => 'type_code', 'order' => 1],
-                ['part_type' => 'year', 'order' => 2],
-                ['part_type' => 'sequence', 'order' => 3, 'length' => 4, 'sequence_scope' => 'by_type_year'],
-            ],
-        ];
-
-        $response = $this->postJson('/api/v1/document-type-configurations', $data);
-
-        $response->assertStatus(201)
-            ->assertJsonPath('data.type_code', $typeCode)
-            ->assertJsonPath('data.type_label', 'Procedure');
     }
 
     /** @test */
@@ -140,76 +96,6 @@ class DocumentTypeConfigurationApiTest extends TestCase
 
         $response->assertStatus(200)
             ->assertJsonPath('data.preview', fn ($value) => is_string($value) && str_contains($value, 'PRC'));
-    }
-
-    /** @test */
-    public function it_updates_configuration()
-    {
-        $config = DocumentTypeConfiguration::factory()->create([
-            'enterprise_id' => $this->enterprise->id,
-            'name' => 'Original'
-        ]);
-
-        $response = $this->putJson("/api/v1/document-type-configurations/{$config->id}", [
-            'type_label' => 'Updated'
-        ]);
-
-        $response->assertStatus(200);
-        $this->assertDatabaseHas('document_type_configurations', [
-            'id' => $config->id,
-            'name' => 'Updated'
-        ]);
-    }
-
-    /** @test */
-    public function it_deletes_configuration()
-    {
-        $config = DocumentTypeConfiguration::factory()->create([
-            'enterprise_id' => $this->enterprise->id
-        ]);
-
-        $response = $this->deleteJson("/api/v1/document-type-configurations/{$config->id}");
-
-        $response->assertStatus(200);
-        $this->assertSoftDeleted('document_type_configurations', ['id' => $config->id]);
-    }
-
-    /** @test */
-    public function it_toggles_active_status()
-    {
-        $config = DocumentTypeConfiguration::factory()->create([
-            'enterprise_id' => $this->enterprise->id,
-            'is_active' => true
-        ]);
-
-        $response = $this->postJson("/api/v1/document-type-configurations/{$config->id}/toggle-active");
-
-        $response->assertStatus(200);
-        $this->assertDatabaseHas('document_type_configurations', [
-            'id' => $config->id,
-            'is_active' => false
-        ]);
-    }
-
-    /** @test */
-    public function it_duplicates_configuration()
-    {
-        $config = DocumentTypeConfiguration::factory()->create([
-            'enterprise_id' => $this->enterprise->id,
-            'abbreviation' => 'ORIG',
-            'name' => 'Original'
-        ]);
-
-        $response = $this->postJson("/api/v1/document-type-configurations/{$config->id}/duplicate", [
-            'type_code' => 'DUP',
-            'type_label' => 'Duplicate'
-        ]);
-
-        $response->assertStatus(201);
-        $this->assertDatabaseHas('document_type_configurations', [
-            'abbreviation' => 'DUP',
-            'name' => 'Duplicate'
-        ]);
     }
 
     /** @test */
@@ -248,80 +134,6 @@ class DocumentTypeConfigurationApiTest extends TestCase
         $response = $this->getJson('/api/v1/document-type-configurations');
 
         $response->assertStatus(403);
-    }
-
-    /** @test */
-    public function it_validates_required_fields_on_create()
-    {
-        $response = $this->postJson('/api/v1/document-type-configurations', []);
-
-        $response->assertStatus(422)
-                 ->assertJsonValidationErrors(['type_code', 'type_label', 'code_structure']);
-    }
-
-    /** @test */
-    public function it_shares_configuration_with_sites()
-    {
-        $config = DocumentTypeConfiguration::factory()->create([
-            'enterprise_id' => $this->enterprise->id
-        ]);
-
-        $site1 = Site::factory()->create(['enterprise_id' => $this->enterprise->id]);
-        $site2 = Site::factory()->create(['enterprise_id' => $this->enterprise->id]);
-
-        $response = $this->postJson("/api/v1/document-type-configurations/{$config->id}/share-with-sites", [
-            'site_ids' => [$site1->id, $site2->id]
-        ]);
-
-        $response->assertStatus(200)
-                 ->assertJsonStructure(['data' => ['success', 'errors']]);
-    }
-
-    /** @test */
-    public function it_skips_existing_site_configuration_when_conflict_strategy_is_skip()
-    {
-        $source = DocumentTypeConfiguration::factory()->create([
-            'enterprise_id' => $this->enterprise->id,
-            'site_id' => $this->site->id,
-            'abbreviation' => 'SKP',
-            'name' => 'Source config',
-        ]);
-
-        $response = $this->postJson("/api/v1/document-type-configurations/{$source->id}/share-with-sites", [
-            'site_ids' => [$this->site->id],
-            'conflict_strategy' => 'skip',
-        ]);
-
-        $response->assertStatus(200)
-            ->assertJsonPath('data.success.0.action', 'skipped')
-            ->assertJsonPath('data.success.0.config_id', $source->id);
-    }
-
-    /** @test */
-    public function it_overrides_existing_site_configuration_when_conflict_strategy_is_override()
-    {
-        $source = DocumentTypeConfiguration::factory()->create([
-            'enterprise_id' => $this->enterprise->id,
-            'site_id' => $this->site->id,
-            'abbreviation' => 'OVR',
-            'name' => 'New canonical name',
-            'description' => 'Source description',
-        ]);
-
-        $response = $this->postJson("/api/v1/document-type-configurations/{$source->id}/share-with-sites", [
-            'site_ids' => [$this->site->id],
-            'conflict_strategy' => 'override',
-        ]);
-
-        $response->assertStatus(200)
-            ->assertJsonPath('data.success.0.action', 'overridden')
-            ->assertJsonPath('data.success.0.config_id', $source->id);
-
-        $this->assertDatabaseHas('document_type_configurations', [
-            'id' => $source->id,
-            'name' => 'New canonical name',
-            'description' => 'Source description',
-        ]);
     }
 
     /** @test */
@@ -377,38 +189,29 @@ class DocumentTypeConfigurationApiTest extends TestCase
         $response->assertStatus(200);
     }
 
-    /** @test */
-    public function it_notifies_other_sites_when_site_configuration_is_updated()
-    {
-        $otherSite = Site::factory()->create(['enterprise_id' => $this->enterprise->id]);
-        $recipient = User::factory()->create([
-            'enterprise_id' => $this->enterprise->id,
-            'site_id' => $otherSite->id,
-            'role' => 'site_manager',
-            'is_active' => true,
-            'collaborator_approval_status' => 'approved',
-        ]);
 
+    /** @test */
+    public function it_keeps_legacy_configurations_read_only()
+    {
         $config = DocumentTypeConfiguration::factory()->create([
             'enterprise_id' => $this->enterprise->id,
-            'site_id' => $this->site->id,
-            'scope' => 'site',
-            'abbreviation' => 'NTF' . random_int(10, 99),
+            'name' => 'Original',
+            'is_active' => true,
         ]);
+        $url = '/api/v1/document-type-configurations';
 
-        $this->putJson("/api/v1/document-type-configurations/{$config->id}", [
-            'type_label' => 'Config modifiée',
-        ])->assertStatus(200);
+        $this->postJson($url, ['type_code' => 'TEST', 'type_label' => 'Test'])->assertStatus(409);
+        $this->putJson("{$url}/{$config->id}", ['type_label' => 'Updated'])->assertStatus(409);
+        $this->deleteJson("{$url}/{$config->id}")->assertStatus(409);
+        $this->postJson("{$url}/{$config->id}/toggle-active")->assertStatus(409);
+        $this->postJson("{$url}/{$config->id}/duplicate", ['type_code' => 'DUP', 'type_label' => 'Dup'])->assertStatus(409);
+        $this->postJson("{$url}/{$config->id}/share-with-sites", ['site_ids' => [$this->site->id]])->assertStatus(409);
 
-        $notification = DatabaseNotification::query()
-            ->where('notifiable_id', $recipient->id)
-            ->where('notifiable_type', User::class)
-            ->latest('id')
-            ->first();
-
-        $this->assertNotNull($notification);
-        $this->assertSame('nomenclature_propagation', data_get($notification->data, 'quick_action.type'));
-        $this->assertSame($config->id, (int) data_get($notification->data, 'quick_action.configuration_id'));
-        $this->assertSame($otherSite->id, (int) data_get($notification->data, 'quick_action.target_site_id'));
+        $this->assertDatabaseHas('document_type_configurations', [
+            'id' => $config->id,
+            'name' => 'Original',
+            'is_active' => true,
+            'deleted_at' => null,
+        ]);
     }
 }

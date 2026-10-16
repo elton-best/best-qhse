@@ -8,6 +8,7 @@ const FIELD_LABEL: Record<string, string> = {
   gravity: "Gravité", frequency: "Fréquence", sensitivity: "Sensibilité", mastery: "Maîtrise",
   criticality_score: "Cr", is_significant: "Significatif", significance_basis: "Base de significativité",
   status: "Statut", existing_controls: "Mesures existantes", additional_actions: "Actions complémentaires",
+  group_label: "Regroupement", group_members: "Activités ou produits regroupés", group_characteristics: "Caractéristiques communes",
   activity: "Activité", aspect: "Aspect", impact: "Impact", aspect_number: "N°",
 };
 

@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class EnvironmentalAspect extends Model
 {
-    use BelongsToEnterprise, HasFactory, SoftDeletes, HasAuditFields;
+    use BelongsToEnterprise, HasAuditFields, HasFactory, SoftDeletes;
 
     protected $table = 'environmental_aspects';
 
@@ -60,7 +60,7 @@ class EnvironmentalAspect extends Model
         'impact_nature',
         'impact_scale',
         'impact_kind',
-        'group_label',
+        'group_label', 'group_members', 'group_characteristics',
         'legal_criterion',
         'stakeholder_criterion',
         'significance_basis',
@@ -75,6 +75,7 @@ class EnvironmentalAspect extends Model
     ];
 
     protected $casts = [
+        'group_members' => 'array',
         'gravity' => 'integer',
         'frequency' => 'integer',
         'sensitivity' => 'integer',
@@ -165,4 +166,3 @@ class EnvironmentalAspect extends Model
         return $this->belongsTo(EmergencyProcedure::class, 'emergency_procedure_id');
     }
 }
-

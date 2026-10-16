@@ -7,6 +7,7 @@ use App\Modules\Hse\Models\EnvironmentalAspect;
 use App\Modules\Hse\Models\ManagementChange;
 use App\Modules\Hse\Models\ManagementChangeTask;
 use App\Notifications\SiteEventNotification;
+use App\Services\ScopeReviewService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -325,6 +326,9 @@ class ManagementChangeController extends ManagedRecordController
      */
     private function launch(ManagementChange $change): void
     {
+        app(ScopeReviewService::class)->flagChange(
+            (int) $change->site_id, "Changement approuvé {$change->ref} : {$change->title}",
+        );
         $dueDate = $change->planned_start_date && $change->planned_start_date->isFuture() ? $change->planned_start_date : today()->addDays(30);
         $created = 0;
         foreach (ManagementChange::DIMENSIONS as $key => $label) {

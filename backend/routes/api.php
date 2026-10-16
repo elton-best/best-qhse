@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\SsoLoginController;
 use App\Http\Controllers\QRCodeVerificationController;
 use App\Modules\Hse\Controllers\AwarenessPublicController;
+use App\Modules\Leadership\Controllers\ScopePublicationController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -50,6 +51,9 @@ Route::prefix('/v1/')->group(function () {
         Route::post('/materials/{materialId}/quiz', [AwarenessPublicController::class, 'quiz'])->whereNumber('materialId');
         Route::get('/attestation', [AwarenessPublicController::class, 'attestation']);
     });
+
+    Route::get('public/scopes/{token}', [ScopePublicationController::class, 'publicShow'])
+        ->where('token', '[A-Za-z0-9]{64}')->middleware('throttle:30,1');
 
     // 3. Utilisateur connecté courant
     Route::get('/user', function (Request $request) {

@@ -1,3 +1,4 @@
+import { LanguageSelect } from "@/lib/i18n";
 import { getRouteApi, Link, useRouter } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -2106,6 +2107,7 @@ export function PreferencesPage() {
         title="Préférences"
         desc="Vos préférences personnelles : elles ne modifient pas l'affichage des autres utilisateurs."
       />
+      <LanguageSelect />
       <div className="divide-y divide-border rounded-2xl border border-border bg-card">
         {(Object.keys(PREF_LABELS) as (keyof Prefs)[]).map((k) => (
           <label

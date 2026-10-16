@@ -92,7 +92,7 @@ class AuditTaskTrackingNotificationTest extends TestCase
 
         $this->assertDatabaseHas('task_tracking', [
             'user_id' => $this->admin->id,
-            'trackable_type' => \App\Models\Audit::class,
+            'trackable_type' => \App\Modules\Evaluation\Models\Audit::class,
             'trackable_id' => $auditId,
             'status' => 'non_demarre',
             'progress_rate' => 0,
@@ -100,11 +100,11 @@ class AuditTaskTrackingNotificationTest extends TestCase
 
         $this->assertDatabaseHas('notifications', [
             'notifiable_id' => $this->auditor->id,
-            'notifiable_type' => User::class,
+            'notifiable_type' => (new \App\Models\User)->getMorphClass(),
         ]);
         $this->assertDatabaseHas('notifications', [
             'notifiable_id' => $this->auditee->id,
-            'notifiable_type' => User::class,
+            'notifiable_type' => (new \App\Models\User)->getMorphClass(),
         ]);
 
         $this->actingAs($this->admin, 'sanctum')
@@ -115,7 +115,7 @@ class AuditTaskTrackingNotificationTest extends TestCase
 
         $this->assertDatabaseHas('task_tracking', [
             'user_id' => $this->admin->id,
-            'trackable_type' => \App\Models\Audit::class,
+            'trackable_type' => \App\Modules\Evaluation\Models\Audit::class,
             'trackable_id' => $auditId,
             'status' => 'en_cours',
             'progress_rate' => 50,
@@ -124,7 +124,7 @@ class AuditTaskTrackingNotificationTest extends TestCase
         if (Schema::hasColumn('task_tracking', 'deleted_at')) {
             $this->assertDatabaseMissing('task_tracking', [
                 'user_id' => $this->admin->id,
-                'trackable_type' => \App\Models\Audit::class,
+                'trackable_type' => \App\Modules\Evaluation\Models\Audit::class,
                 'trackable_id' => $auditId,
                 'status' => 'non_demarre',
                 'progress_rate' => 0,

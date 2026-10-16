@@ -192,8 +192,8 @@ class HseExportService
         $sheet->setCellValue('A1', 'ANALYSE ENVIRONNEMENTALE & ASPECTS ENVIRONNEMENTAUX SIGNIFICATIFS (AES) — ISO 14001');
         $sheet->setCellValue('A2', "Entreprise : {$enterpriseName}{$siteName} | Seuil de significativité standard : 343 | Date d'extraction : ".date('d/m/Y H:i'));
 
-        $sheet->mergeCells('A1:Q1');
-        $sheet->mergeCells('A2:Q2');
+        $sheet->mergeCells('A1:T1');
+        $sheet->mergeCells('A2:T2');
 
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->setColor(new Color('FFFFFF'));
         $sheet->getStyle('A1')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF166534'); // Green 800
@@ -221,15 +221,18 @@ class HseExportService
             'O4' => 'Actions de Maîtrise Complémentaires',
             'P4' => 'Responsable',
             'Q4' => 'Délai / Échéance',
+            'R4' => 'Regroupement',
+            'S4' => 'Activités / produits regroupés',
+            'T4' => 'Caractéristiques communes',
         ];
 
         foreach ($headers as $cell => $val) {
             $sheet->setCellValue($cell, $val);
         }
 
-        $sheet->getStyle('A4:Q4')->getFont()->setBold(true)->setColor(new Color('FFFFFF'));
-        $sheet->getStyle('A4:Q4')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF15803D'); // Green 700
-        $sheet->getStyle('A4:Q4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getStyle('A4:T4')->getFont()->setBold(true)->setColor(new Color('FFFFFF'));
+        $sheet->getStyle('A4:T4')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF15803D'); // Green 700
+        $sheet->getStyle('A4:T4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
         $sheet->getRowDimension(4)->setRowHeight(28);
 
         // Rows
@@ -254,6 +257,10 @@ class HseExportService
             $sheet->setCellValue("P{$row}", $aspect->responsible?->name ?: ($aspect->responsible_name ?: 'Non assigné'));
             $sheet->setCellValue("Q{$row}", $aspect->deadline ? $aspect->deadline->format('d/m/Y') : '—');
 
+            $sheet->setCellValue("R{$row}", $aspect->group_label);
+            $sheet->setCellValue("S{$row}", implode("\n", $aspect->group_members ?? []));
+            $sheet->setCellValue("T{$row}", $aspect->group_characteristics);
+
             // Alignment
             $sheet->getStyle("A{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             $sheet->getStyle("D{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
@@ -272,10 +279,10 @@ class HseExportService
 
         // Borders
         $lastRow = max(5, $row - 1);
-        $sheet->getStyle("A4:Q{$lastRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->setColor(new Color('CBD5E1'));
+        $sheet->getStyle("A4:T{$lastRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->setColor(new Color('CBD5E1'));
 
         // Auto-fit
-        foreach (range('A', 'Q') as $col) {
+        foreach (range('A', 'T') as $col) {
             $sheet->getColumnDimension($col)->setAutoSize(true);
         }
 

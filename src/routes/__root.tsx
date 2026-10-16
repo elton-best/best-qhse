@@ -10,6 +10,8 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
+import { I18nProvider, useI18n } from "@/lib/i18n";
+
 import appCss from "../styles.css?url";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -109,7 +111,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="fr">
+    <I18nProvider>
+      <LocalizedDocument>{children}</LocalizedDocument>
+    </I18nProvider>
+  );
+}
+
+function LocalizedDocument({ children }: { children: ReactNode }) {
+  const { locale } = useI18n();
+  return (
+    <html lang={locale}>
       <head>
         <HeadContent />
       </head>

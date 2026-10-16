@@ -23,6 +23,13 @@ class PlanSMControllerTest extends TestCase
     {
         parent::setUp();
 
+        $this->withoutMiddleware([
+            \App\Http\Middleware\ForcePasswordChange::class,
+            \App\Http\Middleware\ForceCompanySetup::class,
+            \App\Http\Middleware\ForceSignatureUpload::class,
+            \App\Http\Middleware\CheckSubscriptionStatus::class,
+        ]);
+
         // Create permissions
         Permission::findOrCreate('view_all_tasks');
 

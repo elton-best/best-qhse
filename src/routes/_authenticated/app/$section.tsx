@@ -1,3 +1,4 @@
+import { LeadershipReviewPage } from "@/components/app/iso/LeadershipReviewPage";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { SECTIONS } from "@/components/app/sections";
 import { SectionView } from "@/components/app/SectionView";
@@ -108,6 +109,7 @@ const GUIDE: Record<string, { id: string; label: string; render: () => React.Rea
 };
 
 const CUSTOM = [
+  "engagements-leadership",
   "entreprise",
   "roles",
   "abonnement",
@@ -274,6 +276,8 @@ function SectionPage() {
       return <CollaboratorsPage />;
     case "fiches-poste":
       return <JobDescriptionsPage />;
+    case "engagements-leadership":
+      return <LeadershipReviewPage />;
     case "responsabilites":
       return <ResponsibilitiesPage />;
     case "risques":

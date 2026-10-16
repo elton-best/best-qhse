@@ -2,18 +2,18 @@
 
 namespace App\Modules\Leadership\Models;
 
-use App\Traits\HasAuditFields;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use App\Modules\Enterprise\Models\Enterprise;
 use App\Modules\Enterprise\Models\Site;
 use App\Modules\Enterprise\Models\User;
 use App\Modules\Support\Models\Document;
+use App\Traits\HasAuditFields;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class ApplicationScope extends Model
 {
-    use HasFactory, SoftDeletes, HasAuditFields;
+    use HasAuditFields, HasFactory, SoftDeletes;
 
     protected $fillable = [
         'enterprise_id',
@@ -42,9 +42,14 @@ class ApplicationScope extends Model
         'document_path',
         'metadata',
         'generated_at',
+        'review_frequency_months', 'last_reviewed_at', 'next_review_date',
+        'review_required_at', 'review_reason', 'review_notified_at',
     ];
 
     protected $casts = [
+        'review_frequency_months' => 'integer',
+        'last_reviewed_at' => 'date', 'next_review_date' => 'date',
+        'review_required_at' => 'datetime', 'review_notified_at' => 'datetime',
         'is_current' => 'boolean',
         'referenced_documents' => 'array',
         'processes' => 'array',
@@ -59,6 +64,13 @@ class ApplicationScope extends Model
         'metadata' => 'array',
         'generated_at' => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (ApplicationScope $scope) {
+            $scope->next_review_date ??= today()->addMonthsNoOverflow($scope->review_frequency_months ?? 12);
+        });
+    }
 
     public function enterprise()
     {

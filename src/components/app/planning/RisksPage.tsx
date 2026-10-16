@@ -1,3 +1,4 @@
+import { RiskExamplePicker } from "@/components/app/iso/RiskExamplePicker";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
@@ -1186,6 +1187,7 @@ export function RisksPage() {
               ))}
             </div>
 
+            {step === 1 && !editingId && <RiskExamplePicker type={form.type} onChoose={(example, locale) => touch({ title: example.title[locale], description: example.description[locale], cause: example.cause[locale], consequence: example.consequence[locale] })} />}
             {step === 1 ? (
               <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
@@ -1439,7 +1441,8 @@ export function RisksPage() {
                   <ArrowLeft className="h-4 w-4" /> Retour
                 </button>
               )}
-              {step === 1 ? (
+              {step === 1 && !editingId && <RiskExamplePicker type={form.type} onChoose={(example, locale) => touch({ title: example.title[locale], description: example.description[locale], cause: example.cause[locale], consequence: example.consequence[locale] })} />}
+            {step === 1 ? (
                 <button
                   type="button"
                   className={primary}

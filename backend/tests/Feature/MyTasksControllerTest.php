@@ -22,6 +22,13 @@ class MyTasksControllerTest extends TestCase
     {
         parent::setUp();
 
+        $this->withoutMiddleware([
+            \App\Http\Middleware\ForcePasswordChange::class,
+            \App\Http\Middleware\ForceCompanySetup::class,
+            \App\Http\Middleware\ForceSignatureUpload::class,
+            \App\Http\Middleware\CheckSubscriptionStatus::class,
+        ]);
+
         $this->enterprise = Enterprise::factory()->create();
         $this->site = Site::factory()->create(['enterprise_id' => $this->enterprise->id]);
         $this->user = User::factory()->create([

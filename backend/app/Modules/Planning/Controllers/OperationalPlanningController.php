@@ -7,6 +7,7 @@ use App\Models\Action;
 use App\Models\ComplianceObligationAction;
 use App\Models\OperationalProject;
 use App\Models\OperationalProjectActivity;
+use App\Modules\Improvement\Controllers\MyTasksController;
 use App\Models\OperationalProjectTask;
 use App\Models\ProcessObjective;
 use App\Models\ProcessRiskOpportunity;
