@@ -65,6 +65,9 @@ export const BACKEND_RESOURCES: Record<string, string> = {
   duerp: "duerp",
   sm_change: "modifications",
   sm_plan: "plan-actions",
+  order_review: "order-reviews",
+  culture_commitment: "culture-commitments",
+  ethics_report: "ethics-reports",
   suggestion: "improvement-suggestions",
   improvement: "improvement-suggestions",
 };
@@ -115,6 +118,25 @@ const UI_STATUS: Record<string, Record<string, string>> = {
     achieved: "Atteint",
     cancelled: "Annulé",
   },
+  order_review: {
+    draft: "Brouillon",
+    in_review: "En revue",
+    blocked: "Écarts à lever",
+    validated: "Validée",
+    closed: "Clôturée",
+  },
+  culture_commitment: {
+    active: "Active",
+    in_review: "En révision",
+    archived: "Archivée",
+  },
+  ethics_report: {
+    received: "Reçu",
+    in_progress: "En traitement",
+    resolved: "Traité",
+    closed: "Clôturé",
+    rejected: "Rejeté",
+  },
 };
 
 const BACKEND_STATUS: Record<string, Record<string, string>> = {
@@ -158,6 +180,25 @@ const BACKEND_STATUS: Record<string, Record<string, string>> = {
     "En cours": "in_progress",
     Atteint: "achieved",
     Annulé: "cancelled",
+  },
+  order_review: {
+    Brouillon: "draft",
+    "En revue": "in_review",
+    "Écarts à lever": "blocked",
+    Validée: "validated",
+    Clôturée: "closed",
+  },
+  culture_commitment: {
+    Active: "active",
+    "En révision": "in_review",
+    Archivée: "archived",
+  },
+  ethics_report: {
+    Reçu: "received",
+    "En traitement": "in_progress",
+    Traité: "resolved",
+    Clôturé: "closed",
+    Rejeté: "rejected",
   },
 };
 
@@ -454,6 +495,22 @@ async function transitionRecord(id: string, kind: string, status: string, commen
     return backendApi.request(`${endpoint}/${id}/status`, {
       method: "POST",
       body: JSON.stringify({ status: value, comments: comment }),
+    });
+  }
+  if (kind === "order_review") {
+    // La validation d'un engagement peut débloquer la résolution des écarts :
+    // le commentaire obligatoire de l'action vaut attestation de résolution (8.2.3).
+    return backendApi.request(`${endpoint}/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ status: value, validation_comment: comment }),
+    });
+  }
+  if (kind === "ethics_report") {
+    // Le commentaire de l'action (résolution ou motif de rejet) est conservé
+    // dans le champ resolution ; sans commentaire, il n'est pas écrasé.
+    return backendApi.request(`${endpoint}/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ status: value, resolution: comment }),
     });
   }
   return updateRecord(id, kind, { status });

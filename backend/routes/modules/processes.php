@@ -6,6 +6,7 @@ use App\Modules\Processes\Controllers\ProcessReviewController;
 use App\Modules\Processes\Controllers\ActivityController;
 use App\Modules\Processes\Controllers\ProcessResourceController;
 use App\Modules\Processes\Controllers\ProcessInteractionController;
+use App\Modules\Processes\Controllers\OrderReviewController;
 
 // ============================================================
 // CHAPITRE 4 & 8 : PROCESSUS & CARTOGRAPHIE
@@ -75,4 +76,9 @@ Route::post('processes/{process}/versions/{versionId}/approve', [ProcessControll
 Route::apiResource('activities', ActivityController::class);
 Route::apiResource('process-resources', ProcessResourceController::class);
 Route::apiResource('process-interactions', ProcessInteractionController::class);
+
+// --- §8.2 Relation client : revue des exigences avant engagement (Q12-04) ---
+Route::apiResource('order-reviews', OrderReviewController::class)->parameters([
+    'order-reviews' => 'orderReview',
+]);
 

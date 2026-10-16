@@ -2,16 +2,18 @@
 
 namespace App\Modules\Support\Models;
 
+use App\Modules\Enterprise\Models\User;
+use App\Traits\BelongsToEnterprise;
 use App\Traits\HasAuditFields;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use App\Modules\Enterprise\Models\Enterprise;
-use App\Modules\Enterprise\Models\User;
 
 class CalibrationPlan extends Model
 {
-    use HasFactory, SoftDeletes, HasAuditFields;
+    use HasFactory, SoftDeletes, HasAuditFields, BelongsToEnterprise;
+
+    public const STATUSES = ['valid', 'due', 'overdue', 'suspended'];
 
     protected $fillable = [
         'enterprise_id',
@@ -25,6 +27,10 @@ class CalibrationPlan extends Model
         'alert_sent',
         'service_provider',
         'service_provider_accreditation',
+        'usage_fitness',
+        'reference_standard',
+        'reference_standard_documented',
+        'protected_against_adjustment',
         'responsible_user_id',
         'status',
     ];
@@ -34,6 +40,8 @@ class CalibrationPlan extends Model
         'next_calibration_date' => 'date',
         'scheduled_date' => 'date',
         'alert_sent' => 'boolean',
+        'reference_standard_documented' => 'boolean',
+        'protected_against_adjustment' => 'boolean',
     ];
 
     protected static function booted(): void
@@ -44,11 +52,6 @@ class CalibrationPlan extends Model
                 $plan->scheduled_date = $plan->next_calibration_date;
             }
         });
-    }
-
-    public function enterprise()
-    {
-        return $this->belongsTo(Enterprise::class);
     }
 
     public function equipment()

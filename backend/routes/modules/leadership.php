@@ -1,6 +1,8 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Modules\Leadership\Controllers\CultureCommitmentController;
+use App\Modules\Leadership\Controllers\EthicsReportController;
 use App\Modules\Leadership\Controllers\QhsePolicyController;
 use App\Modules\Leadership\Controllers\StrategicAxisController;
 use App\Modules\Leadership\Controllers\OrgChartController;
@@ -66,4 +68,12 @@ Route::apiResource('roles', RoleController::class)->middleware([
 ]);
 Route::post('roles/{role}/permissions', [RoleController::class, 'syncPermissions'])
     ->middleware(['permission:roles.update', 'validate.permission.assignment']);
+
+// --- Culture de la qualité et comportement éthique (§5.1.1 i, §7.3 e — Q3-06) ---
+Route::apiResource('culture-commitments', CultureCommitmentController::class)->parameters([
+    'culture-commitments' => 'cultureCommitment',
+]);
+Route::apiResource('ethics-reports', EthicsReportController::class)->parameters([
+    'ethics-reports' => 'ethicsReport',
+]);
 

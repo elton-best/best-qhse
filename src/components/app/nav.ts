@@ -49,6 +49,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { slug: "collaborateurs", label: "Liste du personnel", icon: Users },
       { slug: "fiches-poste", label: "Fiches de poste", icon: Briefcase },
       { slug: "responsabilites", label: "Fiches de responsabilité", icon: UserCheck },
+      { slug: "culture-qualite", label: "Culture qualité", icon: Smile },
+      { slug: "ethique", label: "Signalements éthiques", icon: MessageSquareWarning },
     ],
   },
   {
@@ -84,6 +86,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { slug: "procedures", label: "Procédures", icon: FileSearch },
       { slug: "maitrise-operationnelle", label: "Maîtrise opérationnelle", icon: SlidersHorizontal },
       { slug: "exigences", label: "Exigences produits & services", icon: ClipboardCheck },
+      { slug: "revue-commandes", label: "Revue des commandes & contrats", icon: FileSearch },
       { slug: "obligations", label: "Obligations de conformité", icon: Scale },
       { slug: "conception", label: "Conception & développement", icon: PenTool },
       { slug: "fournisseurs", label: "Gestion des prestataires", icon: Truck },
