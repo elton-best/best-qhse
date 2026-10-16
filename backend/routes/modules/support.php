@@ -12,9 +12,11 @@ use App\Modules\Support\Controllers\DocumentTypeCatalogController;
 use App\Modules\Processes\Controllers\ProcessCatalogController;
 use App\Modules\Support\Controllers\DocumentCodeRecyclingController;
 use App\Modules\Support\Controllers\CodificationController;
+use App\Modules\Support\Controllers\CalibrationController;
 use App\Modules\Support\Controllers\EquipementController;
 use App\Modules\Support\Controllers\EquipementTransferController;
 use App\Modules\Support\Controllers\MaintenanceController;
+use App\Modules\Support\Controllers\OrganizationalKnowledgeController;
 use App\Modules\Support\Controllers\FormationController;
 use App\Modules\Support\Controllers\FormationInternalEvaluationController;
 use App\Modules\Support\Controllers\TrainingPlanController;
@@ -159,6 +161,18 @@ Route::get('transfers', [EquipementTransferController::class, 'index'])->middlew
 Route::get('transfers/{transfer}', [EquipementTransferController::class, 'show'])->middleware('throttle:20,1');
 Route::put('transfers/{transfer}/verify', [EquipementTransferController::class, 'verify'])->middleware('throttle:10,1');
 Route::get('enterprises/{enterprise}/transfer-reasons', [EquipementTransferController::class, 'getTransferReasons'])->middleware('throttle:20,1');
+
+// --- 7.1.5 Équipements de surveillance et de mesure : étalonnage ---
+Route::get('calibration-plans/{calibrationPlan}/records', [CalibrationController::class, 'indexRecords']);
+Route::post('calibration-plans/{calibrationPlan}/records', [CalibrationController::class, 'storeRecord']);
+Route::apiResource('calibration-plans', CalibrationController::class)->parameters([
+    'calibration-plans' => 'calibrationPlan',
+]);
+
+// --- 7.1.6 Connaissances organisationnelles ---
+Route::apiResource('organizational-knowledges', OrganizationalKnowledgeController::class)->parameters([
+    'organizational-knowledges' => 'organizationalKnowledge',
+]);
 
 Route::get('maintenances/alertes', [MaintenanceController::class, 'alertes']);
 Route::get('maintenances/template', [MaintenanceController::class, 'template']);

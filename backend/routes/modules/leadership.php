@@ -1,5 +1,7 @@
 <?php
 
+use App\Modules\Leadership\Controllers\CultureCommitmentController;
+use App\Modules\Leadership\Controllers\EthicsReportController;
 use App\Modules\Leadership\Controllers\JobDescriptionController;
 use App\Modules\Leadership\Controllers\JobDescriptionImportController;
 use App\Modules\Leadership\Controllers\LeadershipReviewController;
@@ -76,3 +78,12 @@ Route::delete('application-scopes/{id}/publications/{publication}', [ScopePublic
 Route::post('application-scopes/{id}/review', [ScopePublicationController::class, 'review'])->whereNumber('id');
 Route::get('leadership-reviews', [LeadershipReviewController::class, 'index']);
 Route::post('leadership-reviews', [LeadershipReviewController::class, 'store']);
+
+// --- Culture de la qualité et comportement éthique (§5.1.1 i, §7.3 e — Q3-06) ---
+Route::apiResource('culture-commitments', CultureCommitmentController::class)->parameters([
+    'culture-commitments' => 'cultureCommitment',
+]);
+Route::apiResource('ethics-reports', EthicsReportController::class)->parameters([
+    'ethics-reports' => 'ethicsReport',
+]);
+

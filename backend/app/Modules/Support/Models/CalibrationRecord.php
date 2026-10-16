@@ -16,6 +16,8 @@ class CalibrationRecord extends Model
         'certificate_path',
         'results',
         'conformity_status',
+        'impact_analysis',
+        'impact_assessed',
         'cost',
         'next_calibration_date',
     ];
@@ -23,6 +25,7 @@ class CalibrationRecord extends Model
     protected $casts = [
         'performed_date' => 'date',
         'results' => 'array',
+        'impact_assessed' => 'boolean',
         'cost' => 'decimal:2',
         'next_calibration_date' => 'date',
     ];

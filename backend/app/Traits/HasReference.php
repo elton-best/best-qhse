@@ -91,6 +91,11 @@ trait HasReference
             'applicable_requirements' => 'REQ',
             'client_satisfaction_forms' => 'FS',
             'improvement_suggestions' => 'SUG',
+            'order_reviews' => 'RVE',
+            'culture_commitments' => 'CUL',
+            'ethics_reports' => 'ETH',
+            'organizational_knowledges' => 'KNO',
+            'non_applicable_requirements' => 'NAP',
         ];
         
         return $prefixes[$tableName] ?? 'REF';
