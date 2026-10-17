@@ -36,6 +36,8 @@ Route::put('processes/{process}/indicators/{indicator}', [ProcessController::cla
 Route::delete('processes/{process}/indicators/{indicator}', [ProcessController::class, 'deleteIndicator']);
 Route::post('indicators/{indicator}/values', [ProcessController::class, 'addIndicatorValue']);
 Route::post('processes/{process}/iso-coverage', [ProcessController::class, 'addIsoCoverage']);
+Route::put('processes/{process}/iso-coverage/{coverage}', [ProcessController::class, 'updateIsoCoverage']);
+Route::delete('processes/{process}/iso-coverage/{coverage}', [ProcessController::class, 'deleteIsoCoverage']);
 Route::get('iso-coverage-matrix', [ProcessController::class, 'isoCoverageMatrix']);
 Route::get('system-settings', [ProcessController::class, 'systemSettings']);
 

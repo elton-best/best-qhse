@@ -2,8 +2,8 @@
 
 namespace App\Services\Docx;
 
-use App\Models\QhsePolicy;
-use App\Services\DocumentBrandingService;
+use App\Modules\Leadership\Models\QhsePolicy;
+use App\Modules\Support\Services\DocumentBrandingService;
 use PhpOffice\PhpWord\PhpWord;
 use PhpOffice\PhpWord\SimpleType\Jc;
 
@@ -54,6 +54,8 @@ class QhsePolicyDocxGenerator
         $this->addParagraphSection($section, 'Politique Qualité', $policy->quality_policy);
         $this->addParagraphSection($section, 'Politique Environnementale', $policy->environmental_policy);
         $this->addParagraphSection($section, 'Politique Santé & Sécurité', $policy->health_safety_policy);
+        $this->addParagraphSection($section, 'Charte éthique', $policy->ethics_charter);
+        $this->addCustomerOrientationReviews($section, $policy->customer_orientation_reviews ?? []);
 
         $section->addTextBreak(2);
         $section->addText(
@@ -71,6 +73,54 @@ class QhsePolicyDocxGenerator
         \PhpOffice\PhpWord\IOFactory::createWriter($phpWord, 'Word2007')->save($path);
 
         return $path;
+    }
+
+    protected function addCustomerOrientationReviews($section, mixed $reviews): void
+    {
+        if (!is_array($reviews) || $reviews === []) {
+            return;
+        }
+
+        $labels = [
+            'requirements' => 'Exigences clients et légales déterminées, comprises et satisfaites',
+            'risk_opportunity' => 'Risques et opportunités concernant le client traités',
+            'satisfaction' => 'Amélioration de la satisfaction maintenue comme priorité',
+        ];
+        $statuses = [
+            'demontre' => 'Démontré',
+            'ecart' => 'Écart à traiter',
+            'non_applicable' => 'Non applicable',
+        ];
+
+        $section->addText(
+            'Revue annuelle de l’orientation client (5.1.2)',
+            ['bold' => true, 'size' => 13, 'color' => '2E3B55'],
+            ['spaceAfter' => 120]
+        );
+        foreach ($reviews as $review) {
+            if (!is_array($review)) {
+                continue;
+            }
+            $periodYear = (string) ($review['period_year'] ?? '—');
+            $signedAt = $review['reviewed_at'] ?? null;
+            $section->addText(
+                'Période ' . $periodYear . ' — ' . ($signedAt ? 'signée le ' . $signedAt : 'brouillon'),
+                ['bold' => true, 'size' => 11],
+                ['spaceAfter' => 80]
+            );
+            $items = is_array($review['items'] ?? null) ? $review['items'] : [];
+            foreach ($labels as $id => $label) {
+                $answer = is_array($items[$id] ?? null) ? $items[$id] : [];
+                $status = $statuses[$answer['status'] ?? ''] ?? 'À évaluer';
+                $section->addText($label . ' — ' . $status, ['bold' => true, 'size' => 10]);
+                if (!empty($answer['rationale'])) {
+                    $section->addText('Décision / justification : ' . $answer['rationale'], ['size' => 10]);
+                }
+                if (!empty($answer['evidence'])) {
+                    $section->addText('Preuve : ' . $answer['evidence'], ['size' => 10]);
+                }
+            }
+        }
     }
 
     protected function addParagraphSection($section, string $title, ?string $content): void

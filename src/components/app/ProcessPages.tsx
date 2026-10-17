@@ -208,7 +208,9 @@ function useProcessLookups(siteId: string) {
 }
 
 function laneOf(item: Record<string, unknown>) {
-  const value = String(item["normalized_category"] ?? item["category"] ?? item["type"] ?? "").toLowerCase();
+  const value = String(
+    item["normalized_category"] ?? item["category"] ?? item["type"] ?? "",
+  ).toLowerCase();
   if (["management", "pilotage", "mesure_amelioration", "direction"].includes(value))
     return "management";
   if (["support", "soutien", "ressource", "ressources"].includes(value)) return "support";
@@ -484,7 +486,9 @@ export function ProcessManagementPage() {
                           <p className="mt-2 text-xs text-muted-foreground">
                             Pilote :{" "}
                             <span className="font-bold text-foreground">
-                              {String(item["pilot_name"] ?? item["responsible_display"] ?? "Non assigné")}
+                              {String(
+                                item["pilot_name"] ?? item["responsible_display"] ?? "Non assigné",
+                              )}
                             </span>{" "}
                             · {String(item["indicators_count"] ?? 0)} indicateur(s) ·{" "}
                             {String(item["risks_count"] ?? 0)} risque(s)
@@ -717,8 +721,8 @@ export function ProcessManagementPage() {
                 {coverage.isLoading
                   ? "Chargement de la matrice…"
                   : coverageRows.length === 0
-                    ? "Aucune couverture ISO enregistrée pour ce site (ajoutez des couvertures sur chaque fiche processus)."
-                    : `${coverageRows.length} ligne(s) — norme ${String(coverage.data?.norme ?? "9001")}.`}
+                    ? "Aucune clause évaluée pour ce site. Ajoutez des couvertures depuis les fiches processus."
+                    : `${coverage.data?.summary.evaluated_clauses ?? coverageRows.length} clause(s) évaluée(s) — moyenne déclarée ${coverage.data?.summary.average_coverage_percentage ?? 0}% — ${coverage.data?.summary.nonconformities ?? 0} non-conformité(s). La matrice ne vaut pas déclaration d’exhaustivité normative.`}
               </p>
             </div>
           </div>
@@ -729,7 +733,7 @@ export function ProcessManagementPage() {
                   <tr>
                     <th className="px-3 py-2">Processus</th>
                     <th className="px-3 py-2">Clause</th>
-                    <th className="px-3 py-2">Couverture</th>
+                    <th className="px-3 py-2">Niveau évalué</th>
                     <th className="px-3 py-2">Conformité</th>
                   </tr>
                 </thead>
@@ -905,6 +909,13 @@ export function ProcessEditorPage({ processId }: { processId?: string }) {
       sequences: normalizeProcessSequences(existing["sequences"]),
     });
   }, [existing, siteId]);
+  const sequenceProcessOptions = useMemo(
+    () =>
+      lookupProcesses
+        .map((process) => String(process.title ?? process.name ?? process.code ?? "").trim())
+        .filter(Boolean),
+    [lookupProcesses],
+  );
   if (!siteId)
     return (
       <div className="mx-auto max-w-7xl p-4 md:p-8">
@@ -989,13 +1000,6 @@ export function ProcessEditorPage({ processId }: { processId?: string }) {
   const next = () => {
     if (validation(step + 1)) setStep((current) => Math.min(4, current + 1));
   };
-  const sequenceProcessOptions = useMemo(
-    () =>
-      lookupProcesses
-        .map((process) => String(process.title ?? process.name ?? process.code ?? "").trim())
-        .filter(Boolean),
-    [lookupProcesses],
-  );
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-8">
       <Header
@@ -1115,29 +1119,31 @@ export function ProcessEditorPage({ processId }: { processId?: string }) {
                 </p>
               </div>
               <div className="grid gap-4 md:grid-cols-3">
-                {([
+                {(
                   [
-                    "aspect_qualite",
-                    "Qualité",
-                    "ISO 9001",
-                    ShieldCheck,
-                    "border-primary bg-primary-soft",
-                  ],
-                  [
-                    "aspect_environnement",
-                    "Environnement",
-                    "ISO 14001",
-                    Leaf,
-                    "border-success bg-success/10",
-                  ],
-                  [
-                    "aspect_sante_securite",
-                    "Santé & sécurité",
-                    "ISO 45001",
-                    CircleAlert,
-                    "border-destructive bg-destructive/10",
-                  ],
-                ] as [string, string, string, LucideIcon, string][]).map(([key, label, code, Icon, activeClass]) => {
+                    [
+                      "aspect_qualite",
+                      "Qualité",
+                      "ISO 9001",
+                      ShieldCheck,
+                      "border-primary bg-primary-soft",
+                    ],
+                    [
+                      "aspect_environnement",
+                      "Environnement",
+                      "ISO 14001",
+                      Leaf,
+                      "border-success bg-success/10",
+                    ],
+                    [
+                      "aspect_sante_securite",
+                      "Santé & sécurité",
+                      "ISO 45001",
+                      CircleAlert,
+                      "border-destructive bg-destructive/10",
+                    ],
+                  ] as [string, string, string, LucideIcon, string][]
+                ).map(([key, label, code, Icon, activeClass]) => {
                   const active = Boolean(form[key as keyof ProcessForm]);
                   return (
                     <button

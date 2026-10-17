@@ -3,6 +3,9 @@ import { backendApi } from "@/integrations/backend/client";
 
 export const POLICY_KEY = ["qhse-policy"] as const;
 export const POLICY_HISTORY_KEY = ["qhse-policy-history"] as const;
+export const POLICY_PUBLICATION_KEY = ["qhse-policy-publication"] as const;
+export const POLICY_ACKNOWLEDGEMENTS_KEY = ["qhse-policy-acknowledgements"] as const;
+export const ETHICS_REPORTS_KEY = ["qhse-ethics-reports"] as const;
 export const STRATEGIC_AXES_KEY = ["strategic-axes"] as const;
 export const ORG_CHART_KEY = ["org-chart"] as const;
 export const JOB_DESCRIPTIONS_KEY = ["job-descriptions"] as const;
@@ -18,7 +21,11 @@ export type QhsePolicy = {
   site_id?: string | number | null;
   version?: string | null;
   is_current?: boolean;
+  based_on_policy_id?: string | number | null;
   effective_date?: string | null;
+  validated_by_direction_at?: string | null;
+  validated_by_user_id?: string | number | null;
+  validated_by_name?: string | null;
   mission: string;
   vision?: string | null;
   values?: string[];
@@ -27,8 +34,11 @@ export type QhsePolicy = {
   quality_policy?: string | null;
   environmental_policy?: string | null;
   health_safety_policy?: string | null;
+  ethics_charter?: string | null;
   status?: string | null;
   updated_at?: string | null;
+  leadership_reviews?: unknown[] | null;
+  customer_orientation_reviews?: unknown[] | null;
 };
 
 export type QhsePolicyHistoryItem = {
@@ -41,6 +51,76 @@ export type QhsePolicyHistoryItem = {
   created_at?: string | null;
   updated_at?: string | null;
   [key: string]: unknown;
+};
+
+export type PolicyQuizQuestion = {
+  id: "mission" | "quality_policy" | "commitment";
+  prompt: string;
+  options: string[];
+};
+
+export type PolicyAcknowledgement = {
+  id: number;
+  user_id: number;
+  notified_at: string | null;
+  acknowledged_at: string | null;
+  quiz_score: number | null;
+  quiz_passed: boolean | null;
+  quiz_completed_at: string | null;
+  user?: { id: number; name: string; email: string };
+};
+
+export type PolicyPublication = {
+  policy: QhsePolicy | null;
+  acknowledgement: PolicyAcknowledgement | null;
+  quiz: PolicyQuizQuestion[];
+};
+
+export type PolicyAcknowledgementReport = {
+  policy_id: number;
+  total: number;
+  acknowledged: number;
+  quiz_passed: number;
+  items: PolicyAcknowledgement[];
+};
+
+export type EthicsReportStatus =
+  "received" | "investigating" | "action_taken" | "closed" | "rejected";
+
+export type EthicsReport = {
+  id: string;
+  category: string;
+  subject: string;
+  status: EthicsReportStatus;
+  public_update: string | null;
+  is_anonymous: boolean;
+  submitted_at: string | null;
+  updated_at: string | null;
+  tracking_code?: string;
+  description?: string;
+  incident_date?: string | null;
+  handling_notes?: string | null;
+  handled_at?: string | null;
+  handled_by?: string | null;
+  site?: string | null;
+  reporter?: { name: string | null; email: string | null } | null;
+};
+
+export type CultureSurveyAnswers = {
+  quality_integration: number;
+  speak_up_safety: number;
+  management_listening: number;
+  role_clarity: number;
+  change_communication: number;
+};
+
+export type CultureSurveySummary = {
+  available: boolean;
+  minimum_responses?: number;
+  response_count?: number;
+  scale?: { min: number; max: number };
+  questions?: Record<keyof CultureSurveyAnswers, string>;
+  averages?: CultureSurveyAnswers;
 };
 
 export type StrategicAxis = {
@@ -247,11 +327,40 @@ export async function fetchCurrentPolicy(siteId: string): Promise<QhsePolicy | n
   return dataOf<QhsePolicy>(payload);
 }
 
+export async function fetchPublishedPolicy(siteId: string): Promise<PolicyPublication> {
+  return backendApi.request<PolicyPublication>(
+    `qhse-policies/published?site_id=${encodeURIComponent(siteId)}`,
+  );
+}
+
+export async function fetchPolicyAcknowledgements(
+  policyId: EntityId,
+): Promise<PolicyAcknowledgementReport> {
+  return backendApi.request<PolicyAcknowledgementReport>(
+    `qhse-policies/${encodeURIComponent(String(policyId))}/acknowledgements`,
+  );
+}
+
 export async function fetchPolicyHistory(siteId: string): Promise<QhsePolicyHistoryItem[]> {
   const payload = await backendApi.request<unknown>(
     `qhse-policies/history?site_id=${encodeURIComponent(siteId)}`,
   );
   return listOf<QhsePolicyHistoryItem>(payload);
+}
+
+export async function fetchMyEthicsReports(): Promise<EthicsReport[]> {
+  return listOf<EthicsReport>(await backendApi.request<unknown>("ethics-reports/mine"));
+}
+
+export async function fetchManagedEthicsReports(siteId: string): Promise<EthicsReport[]> {
+  const query = siteId ? `?site_id=${encodeURIComponent(siteId)}` : "";
+  return listOf<EthicsReport>(await backendApi.request<unknown>(`ethics-reports${query}`));
+}
+
+export async function fetchCultureSurveySummary(siteId: string): Promise<CultureSurveySummary> {
+  return backendApi.request<CultureSurveySummary>(
+    `qhse-culture-survey/summary?site_id=${encodeURIComponent(siteId)}`,
+  );
 }
 
 export async function exportPolicyPdf(id: EntityId): Promise<Blob> {
@@ -506,6 +615,41 @@ export function usePolicyHistory(siteId: string) {
   });
 }
 
+export function usePublishedPolicy(siteId: string) {
+  return useQuery({
+    queryKey: [...POLICY_PUBLICATION_KEY, siteId],
+    queryFn: () => fetchPublishedPolicy(siteId),
+    enabled: true,
+    staleTime: 30_000,
+  });
+}
+
+export function usePolicyAcknowledgements(siteId: string, policyId?: EntityId) {
+  return useQuery({
+    queryKey: [...POLICY_ACKNOWLEDGEMENTS_KEY, siteId, policyId ?? "none"],
+    queryFn: () => fetchPolicyAcknowledgements(policyId!),
+    enabled: Boolean(siteId && policyId),
+    staleTime: 30_000,
+  });
+}
+
+export function useMyEthicsReports() {
+  return useQuery({
+    queryKey: [...ETHICS_REPORTS_KEY, "mine"],
+    queryFn: fetchMyEthicsReports,
+    staleTime: 30_000,
+  });
+}
+
+export function useManagedEthicsReports(siteId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [...ETHICS_REPORTS_KEY, "managed", siteId],
+    queryFn: () => fetchManagedEthicsReports(siteId),
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
 export function useStrategicAxes(siteId: string) {
   return useQuery({
     queryKey: [...STRATEGIC_AXES_KEY, siteId],
@@ -587,6 +731,8 @@ export function usePolicyMutations(siteId: string) {
   const invalidate = () => {
     void client.invalidateQueries({ queryKey: [...POLICY_KEY, siteId] });
     void client.invalidateQueries({ queryKey: [...POLICY_HISTORY_KEY, siteId] });
+    void client.invalidateQueries({ queryKey: [...POLICY_PUBLICATION_KEY, siteId] });
+    void client.invalidateQueries({ queryKey: [...POLICY_ACKNOWLEDGEMENTS_KEY, siteId] });
   };
   return {
     save: useMutation({
@@ -607,7 +753,88 @@ export function usePolicyMutations(siteId: string) {
         backendApi.request(`qhse-policies/${id}/validate`, { method: "POST" }),
       onSuccess: invalidate,
     }),
+    acknowledge: useMutation({
+      mutationFn: (input: { policyId: string; answers: Record<string, string> }) =>
+        backendApi.request<PolicyAcknowledgement & { message: string }>(
+          `qhse-policies/${encodeURIComponent(input.policyId)}/acknowledge`,
+          {
+            method: "POST",
+            body: JSON.stringify({ answers: input.answers }),
+          },
+        ),
+      onSuccess: invalidate,
+    }),
   };
+}
+
+export function useEthicsReportMutations(siteId: string) {
+  const client = useQueryClient();
+  const invalidate = () => {
+    void client.invalidateQueries({ queryKey: [...ETHICS_REPORTS_KEY] });
+  };
+  return {
+    submit: useMutation({
+      mutationFn: (payload: Record<string, unknown>) =>
+        backendApi.request<EthicsReport>("ethics-reports", {
+          method: "POST",
+          body: JSON.stringify({ ...payload, ...(siteId ? { site_id: Number(siteId) } : {}) }),
+        }),
+      onSuccess: invalidate,
+    }),
+    track: useMutation({
+      mutationFn: (trackingCode: string) =>
+        backendApi.request<EthicsReport>("ethics-reports/track", {
+          method: "POST",
+          body: JSON.stringify({ tracking_code: trackingCode }),
+        }),
+    }),
+    update: useMutation({
+      mutationFn: (input: {
+        id: string;
+        status: EthicsReportStatus;
+        handling_notes: string;
+        public_update: string;
+      }) =>
+        backendApi.request<EthicsReport>(`ethics-reports/${encodeURIComponent(input.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: input.status,
+            handling_notes: input.handling_notes,
+            public_update: input.public_update || null,
+          }),
+        }),
+      onSuccess: invalidate,
+    }),
+  };
+}
+
+export function useCultureSurveyMutations(siteId: string) {
+  const client = useQueryClient();
+  const key = ["qhse-culture-survey", siteId] as const;
+  return {
+    submit: useMutation({
+      mutationFn: (answers: CultureSurveyAnswers) =>
+        backendApi.request<{ message: string; recorded_with_user_identity: false }>(
+          "qhse-culture-survey",
+          {
+            method: "POST",
+            body: JSON.stringify({ ...answers, site_id: Number(siteId) }),
+          },
+        ),
+      onSuccess: () => {
+        void client.invalidateQueries({ queryKey: key });
+      },
+    }),
+  };
+}
+
+export function useCultureSurveySummary(siteId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["qhse-culture-survey", siteId],
+    queryFn: () => fetchCultureSurveySummary(siteId),
+    enabled: enabled && Boolean(siteId),
+    staleTime: 60_000,
+  });
 }
 
 export function useOrgChartMutations(siteId: string) {

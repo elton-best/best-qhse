@@ -191,6 +191,23 @@ class ProcessResource extends JsonApiResource
                     ];
                 });
             }),
+            'iso_coverages' => $this->when($this->relationLoaded('isoCoverages'), function () {
+                return $this->isoCoverages->map(fn ($coverage) => [
+                    'id' => $coverage->id,
+                    'norme' => $coverage->norme,
+                    'version' => $coverage->version,
+                    'clause_number' => $coverage->clause_number,
+                    'clause_title' => $coverage->clause_title,
+                    'clause_description' => $coverage->clause_description,
+                    'coverage_level' => $coverage->coverage_level,
+                    'coverage_percentage' => $coverage->coverage_percentage,
+                    'coverage_comment' => $coverage->coverage_comment,
+                    'evidence' => $coverage->evidence ?? [],
+                    'conformity_status' => $coverage->conformity_status,
+                    'last_audit_date' => $coverage->last_audit_date?->toDateString(),
+                    'next_audit_date' => $coverage->next_audit_date?->toDateString(),
+                ])->values()->all();
+            }),
             'current_version' => $this->when($this->relationLoaded('currentVersion'), function () {
                 $cv = $this->currentVersion;
                 return $cv ? [

@@ -2,9 +2,9 @@
 
 namespace App\Modules\Leadership\Models;
 
-use App\Models\Enterprise;
-use App\Models\Site;
-use App\Models\User;
+use App\Modules\Enterprise\Models\Enterprise;
+use App\Modules\Enterprise\Models\Site;
+use App\Modules\Enterprise\Models\User;
 
 use App\Traits\HasAuditFields;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -20,6 +20,7 @@ class QhsePolicy extends Model
         'enterprise_id',
         'site_id',
         'version',
+        'based_on_policy_id',
         'is_current',
         'effective_date',
         'mission',
@@ -30,6 +31,9 @@ class QhsePolicy extends Model
         'quality_policy',
         'environmental_policy',
         'health_safety_policy',
+        'ethics_charter',
+        'leadership_reviews',
+        'customer_orientation_reviews',
         'status',
         'validated_by_direction_at',
         'validated_by_user_id',
@@ -43,6 +47,8 @@ class QhsePolicy extends Model
         'values' => 'array',
         'axes' => 'array',
         'commitments' => 'array',
+        'leadership_reviews' => 'array',
+        'customer_orientation_reviews' => 'array',
         'validated_by_direction_at' => 'datetime',
         'generated_at' => 'datetime',
     ];
@@ -60,6 +66,21 @@ class QhsePolicy extends Model
     public function validatedBy()
     {
         return $this->belongsTo(User::class, 'validated_by_user_id');
+    }
+
+    public function basedOnPolicy()
+    {
+        return $this->belongsTo(self::class, 'based_on_policy_id');
+    }
+
+    public function revision()
+    {
+        return $this->hasOne(self::class, 'based_on_policy_id');
+    }
+
+    public function acknowledgements()
+    {
+        return $this->hasMany(QhsePolicyAcknowledgement::class, 'qhse_policy_id');
     }
 
     public function axisEntries()

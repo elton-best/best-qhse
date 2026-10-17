@@ -2,22 +2,21 @@
 
 namespace App\Modules\Hse\Services;
 
-use App\Modules\Enterprise\Models\Enterprise;
-use App\Modules\Enterprise\Models\Site;
 use App\Modules\Hse\Models\Duerp;
 use App\Modules\Hse\Models\DuerpDanger;
 use App\Modules\Hse\Models\EnvironmentalAspect;
+use App\Modules\Enterprise\Models\Enterprise;
+use App\Modules\Enterprise\Models\Site;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
-use PhpOffice\PhpSpreadsheet\Style\Color;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class HseExportService
 {
     /**
-     * Export DUERP to Excel (identique au canevas officiel Document Unique d'Évaluation des Risques Professionnels)
+     * Export DUERP using the field structure of the supplied INRS workbook.
      */
     public function exportDuerpXlsx(int $enterpriseId, ?int $siteId = null, ?int $duerpId = null): string
     {
@@ -36,143 +35,202 @@ class HseExportService
                     $q->where('is_current', true);
                 }
             })
-            ->with(['duerp.site', 'process', 'responsible']);
+            ->with(['duerp.site', 'process', 'workUnit', 'riskFamily', 'responsible']);
 
         $dangers = $query->orderBy('work_unit')->orderBy('id')->get();
 
-        $spreadsheet = new Spreadsheet;
+        $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('DUERP - ISO 45001');
 
-        // Document Header
+        // The supplied workbook uses B:AC for its 28 DUERP fields.
+        $lastColumn = 'AC';
         $enterpriseName = $enterprise?->name ?? 'ENTREPRISE';
-        $siteName = $site ? ' - Site : '.$site->name : ' - Tous les sites';
+        $siteName = $site ? ' - Site : ' . $site->name : ' - Tous les sites';
+        $documentMeta = $dangers->pluck('duerp')->filter()->unique('id')->map(
+            fn ($document) => 'v' . ($document->version ?? '1.0')
+                . ' — évaluation du ' . ($document->evaluation_date?->format('d/m/Y') ?? '—')
+                . ' — prochaine mise à jour ' . ($document->next_evaluation_date?->format('d/m/Y') ?? '—')
+                . ' — ' . match ($document->workflow_status) {
+                    'approved_by_ceo' => 'approuvé le ' . ($document->approved_at?->format('d/m/Y') ?? ''),
+                    'submitted_by_rq' => 'soumis à validation',
+                    default => 'brouillon',
+                },
+        )->implode(' | ');
+        $sheet->setCellValue('B2', "DOCUMENT UNIQUE D'ÉVALUATION DES RISQUES PROFESSIONNELS (DUERP)");
+        $subtitle = "Entreprise : {$enterpriseName}{$siteName} | Date d'extraction : " . date('d/m/Y H:i');
+        if ($documentMeta !== '') {
+            $subtitle .= " | {$documentMeta}";
+        }
+        $sheet->setCellValue('B3', $subtitle);
+        $sheet->mergeCells("B2:{$lastColumn}2");
+        $sheet->mergeCells("B3:{$lastColumn}3");
 
-        $sheet->setCellValue('A1', "DOCUMENT UNIQUE D'ÉVALUATION DES RISQUES PROFESSIONNELS (DUERP) — ISO 45001");
-        $sheet->setCellValue('A2', "Entreprise : {$enterpriseName}{$siteName} | Date d'extraction : ".date('d/m/Y H:i'));
+        $sheet->getStyle("B2:{$lastColumn}2")->getFont()->setBold(true)->setSize(14)->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color('FFFFFF'));
+        $sheet->getStyle("B2:{$lastColumn}2")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF1E293B');
+        $sheet->getStyle("B2:{$lastColumn}2")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("B3:{$lastColumn}3")->getFont()->setItalic(true)->setSize(11)->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color('475569'));
+        $sheet->getStyle("B3:{$lastColumn}3")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        $sheet->mergeCells('A1:Q1');
-        $sheet->mergeCells('A2:Q2');
-
-        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->setColor(new Color('FFFFFF'));
-        $sheet->getStyle('A1')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF1E293B'); // Slate 800
-        $sheet->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-
-        $sheet->getStyle('A2')->getFont()->setItalic(true)->setSize(11)->setColor(new Color('475569'));
-        $sheet->getStyle('A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-
-        // Métadonnées du document (R.4121-1 : date de l'évaluation, mise à jour, validation)
-        $documents = $dangers->pluck('duerp')->unique('id')->values();
-        $meta = $documents->map(fn ($d) => 'v'.($d->version ?? '1.0').' — évaluation du '.($d->evaluation_date?->format('d/m/Y') ?? '—')
-            .' — prochaine mise à jour '.($d->next_evaluation_date?->format('d/m/Y') ?? '—')
-            .' — '.match ($d->workflow_status) {
-                'approved_by_ceo' => 'approuvé le '.($d->approved_at?->format('d/m/Y') ?? ''), 'submitted_by_rq' => 'soumis à validation', default => 'brouillon'
-            })->implode(' | ');
-        $sheet->setCellValue('A3', $meta ?: 'Aucun document');
-        $sheet->mergeCells('A3:U3');
-        $sheet->getStyle('A3')->getFont()->setBold(true)->setSize(10);
-        $sheet->getStyle('A3')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->unmergeCells('A1:Q1');
-        $sheet->unmergeCells('A2:Q2');
-        $sheet->mergeCells('A1:U1');
-        $sheet->mergeCells('A2:U2');
-
-        $headers = [
-            'A' => 'N°', 'B' => 'Unité de Travail (UT)', 'C' => 'Activité / Poste', 'D' => 'Famille de Danger (INRS)',
-            'E' => 'Situation Dangereuse', 'F' => 'Risques Identifiés / Dommages', 'G' => 'Gravité (G)', 'H' => 'Fréquence (F)',
-            'I' => 'Risque Brut (G×F)', 'J' => 'Niveau Brut', 'K' => 'Mesures Existantes de Prévention', 'L' => 'Maîtrise (M)',
-            'M' => 'Risque Évalué (G×F×M)', 'N' => 'Niveau Évalué', 'O' => 'Plan d\'Actions Préventives', 'P' => 'Responsable',
-            'Q' => 'Délai / Échéance', 'R' => 'Statut Action', 'S' => 'Risque Résiduel', 'T' => 'Niveau Résiduel', 'U' => 'Effectifs exposés',
+        $groups = [
+            'B4:H4' => 'IDENTIFICATION DU RISQUE',
+            'I4:S4' => 'ÉVALUATION DU RISQUE',
+            'T4:Y4' => "PLAN D'ACTIONS",
+            'Z4:AC4' => 'SUIVI / ÉVALUATION',
         ];
-        foreach ($headers as $col => $val) {
-            $sheet->setCellValue("{$col}4", $val);
+        foreach ($groups as $range => $label) {
+            $sheet->mergeCells($range);
+            $sheet->setCellValue(explode(':', $range)[0], $label);
         }
 
-        $sheet->getStyle('A4:U4')->getFont()->setBold(true)->setColor(new Color('FFFFFF'));
-        $sheet->getStyle('A4:U4')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF0F766E');
-        $sheet->getStyle('A4:U4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
-        $sheet->getRowDimension(4)->setRowHeight(28);
+        $headers = [
+            'Processus',
+            'Activités',
+            'Unité de travail : postes de travail',
+            'Famille de risques selon l’INRS',
+            'Description de la situation dangereuse',
+            'Risques identifiés',
+            'Conséquences',
+            'Gravité',
+            'Fréquence',
+            'Évaluation du risque brut',
+            'Coefficient / score brut',
+            'Actions existantes',
+            'Maîtrise du risque',
+            'Coefficient de maîtrise',
+            'Gravité résiduelle',
+            'Fréquence résiduelle',
+            'Évaluation du risque résiduel',
+            'Coefficient / score résiduel',
+            'Actions de prévention à mettre en place',
+            'Priorités',
+            'Responsable des actions',
+            'Date de décision',
+            'Délai d’exécution / échéance',
+            'Réalisation / statut',
+            'Date d’évaluation de l’efficacité',
+            'Critère de réalisation / effectivité',
+            'Critère de performance / efficacité',
+            'Observations / commentaires',
+        ];
+        foreach ($headers as $index => $header) {
+            $column = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($index + 2);
+            $sheet->setCellValue("{$column}5", $header);
+        }
 
-        $maitrise = fn (?string $level) => match ($level) {
-            '1' => 'Bonne', '2' => 'Moyenne', '3' => 'Faible ou absente', default => '—'
-        };
-        $colorLevel = function (string $cell, ?string $level) use ($sheet): void {
-            $sheet->getStyle($cell)->getFont()->setBold(true);
-            $sheet->getStyle($cell)->getFont()->getColor()->setARGB(match (mb_strtolower((string) $level)) {
-                'significatif' => 'FFDC2626', 'moyen' => 'FFD97706', default => 'FF15803D',
-            });
-        };
+        $sheet->getStyle("B4:{$lastColumn}4")->getFont()->setBold(true)->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color('FFFFFF'));
+        $sheet->getStyle("B4:{$lastColumn}4")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF0F766E');
+        $sheet->getStyle("B4:{$lastColumn}4")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getStyle("B5:{$lastColumn}5")->getFont()->setBold(true)->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color('FFFFFF'));
+        $sheet->getStyle("B5:{$lastColumn}5")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF0F766E');
+        $sheet->getStyle("B5:{$lastColumn}5")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER)->setWrapText(true);
+        $sheet->getRowDimension(4)->setRowHeight(24);
+        $sheet->getRowDimension(5)->setRowHeight(48);
 
-        $row = 5;
-        $idx = 1;
+        $row = 6;
         foreach ($dangers as $danger) {
+            $rawRiskScore = $danger->raw_risk_score
+                ?? ((int) ($danger->gravity ?? 1) * (int) ($danger->frequency ?? 1));
+            $rawRiskLevel = $danger->raw_risk_level ?: match (true) {
+                $rawRiskScore <= 3 => 'Faible',
+                $rawRiskScore <= 8 => 'Moyen',
+                default => 'Significatif',
+            };
+            $observationDetails = array_filter([
+                $danger->observations,
+                $danger->assessed_risk_score !== null
+                    ? 'Risque évalué : ' . $danger->assessed_risk_score . ' (' . ($danger->assessed_risk_level ?? 'niveau non renseigné') . ')'
+                    : null,
+                $danger->exposed_workers_count !== null
+                    ? 'Effectif exposé : ' . $danger->exposed_workers_count
+                    : null,
+            ], static fn ($detail) => $detail !== null && $detail !== '');
             $values = [
-                'A' => $idx++,
-                'B' => $danger->work_unit ?: ($danger->process?->title ?? 'N/A'),
-                'C' => $danger->activity ?? 'N/A',
-                'D' => $danger->inrs_family ?? 'N/A',
-                'E' => $danger->dangerous_situation ?? 'N/A',
-                'F' => $danger->identified_risks ?: ($danger->consequences ?? 'N/A'),
-                'G' => $danger->gravity ?? '—',
-                'H' => $danger->frequency ?? '—',
-                'I' => $danger->raw_risk_score ?? '—',
-                'J' => mb_strtoupper((string) ($danger->raw_risk_level ?? '—')),
-                'K' => $danger->existing_preventions ?: 'Aucune',
-                'L' => $maitrise($danger->mitigation_level),
-                'M' => $danger->assessed_risk_score ?? '—',
-                'N' => mb_strtoupper((string) ($danger->assessed_risk_level ?? '—')),
-                'O' => $danger->prevention_actions ?: 'Aucune',
-                'P' => $danger->responsible?->name ?: ($danger->responsible_name ?: 'Non assigné'),
-                'Q' => $danger->deadline ? $danger->deadline->format('d/m/Y') : '—',
-                'R' => ucfirst(str_replace('_', ' ', (string) ($danger->action_status ?? 'non démarrée'))),
-                'S' => $danger->residual_risk_score ?? '—',
-                'T' => mb_strtoupper((string) ($danger->residual_risk_level ?? '—')),
-                'U' => $danger->exposed_workers_count ?? '—',
+                $danger->process?->title ?? '—',
+                $danger->activity ?: ($danger->activity_name ?? '—'),
+                $danger->work_unit ?: ($danger->workUnit?->name ?? '—'),
+                $danger->inrs_family ?: ($danger->riskFamily?->name ?? '—'),
+                $danger->dangerous_situation ?? '—',
+                $danger->identified_risks ?: '—',
+                $danger->consequences ?? '—',
+                $danger->gravity,
+                $danger->frequency,
+                $rawRiskLevel,
+                $rawRiskScore,
+                $danger->existing_preventions ?: '—',
+                $danger->mitigation_level ?? '—',
+                $danger->mitigation_coef,
+                $danger->residual_gravity,
+                $danger->residual_frequency,
+                $danger->residual_risk_level ?? '—',
+                $danger->residual_risk_score,
+                $danger->prevention_actions ?: '—',
+                $rawRiskLevel,
+                $danger->responsible?->name ?: ($danger->responsible_name ?: 'Non assigné'),
+                null, // The current model does not store a separate action decision date.
+                $danger->deadline?->format('d/m/Y'),
+                $danger->action_status ? ucfirst(str_replace('_', ' ', $danger->action_status)) : '—',
+                $danger->action_evaluation_date?->format('d/m/Y'),
+                $danger->action_effectivity_criteria ?? '—',
+                $danger->action_efficacy_criteria ?? '—',
+                implode("\n", $observationDetails) ?: '—',
             ];
-            foreach ($values as $col => $value) {
-                $sheet->setCellValue("{$col}{$row}", $value);
+            foreach ($values as $index => $value) {
+                $column = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($index + 2);
+                $sheet->setCellValue("{$column}{$row}", $value);
             }
-            $sheet->getStyle("A{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-            $sheet->getStyle("G{$row}:J{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-            $sheet->getStyle("L{$row}:N{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-            $sheet->getStyle("Q{$row}:U{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-            $colorLevel("J{$row}", $danger->raw_risk_level);
-            $colorLevel("N{$row}", $danger->assessed_risk_level);
-            if ($danger->residual_risk_level) {
-                $colorLevel("T{$row}", $danger->residual_risk_level);
+
+            $sheet->getStyle("I{$row}:S{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->getStyle("W{$row}:Z{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $level = mb_strtolower((string) $rawRiskLevel);
+            if (in_array($level, ['significatif', 'fort'], true)) {
+                $sheet->getStyle("K{$row}")->getFont()->getColor()->setARGB('FFDC2626');
+                $sheet->getStyle("K{$row}")->getFont()->setBold(true);
+            } elseif ($level === 'moyen') {
+                $sheet->getStyle("K{$row}")->getFont()->getColor()->setARGB('FFD97706');
             }
+            $residualLevel = mb_strtolower((string) ($danger->residual_risk_level ?? ''));
+            if (in_array($residualLevel, ['significatif', 'fort'], true)) {
+                $sheet->getStyle("R{$row}")->getFont()->getColor()->setARGB('FFDC2626');
+                $sheet->getStyle("R{$row}")->getFont()->setBold(true);
+            } elseif ($residualLevel === 'moyen') {
+                $sheet->getStyle("R{$row}")->getFont()->getColor()->setARGB('FFD97706');
+            }
+
             $row++;
         }
 
-        $lastRow = max(5, $row - 1);
-        $sheet->getStyle("A4:U{$lastRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->setColor(new Color('CBD5E1'));
-        foreach (range('A', 'U') as $col) {
-            $sheet->getColumnDimension($col)->setAutoSize(true);
+        $lastRow = max(6, $row - 1);
+        $sheet->getStyle("B4:{$lastColumn}{$lastRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color('CBD5E1'));
+        $sheet->freezePane('B6');
+        $sheet->setAutoFilter("B5:{$lastColumn}{$lastRow}");
+        foreach (range(2, 29) as $index) {
+            $sheet->getColumnDimension(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($index))->setAutoSize(true);
         }
 
         $writer = new Xlsx($spreadsheet);
-        $tempFile = tempnam(sys_get_temp_dir(), 'duerp_').'.xlsx';
+        $tempFile = tempnam(sys_get_temp_dir(), 'duerp_') . '.xlsx';
         $writer->save($tempFile);
 
         return $tempFile;
     }
 
     /**
-     * Export AES to Excel (identique au canevas officiel BASE AES 2.xlsx)
+     * Export AES using the field structure of the supplied BASE AES workbook.
      */
     public function exportEnvironmentalAspectsXlsx(int $enterpriseId, array $filters = []): string
     {
         $enterprise = Enterprise::find($enterpriseId);
-        $site = ! empty($filters['site_id']) ? Site::find($filters['site_id']) : null;
+        $site = !empty($filters['site_id']) ? Site::find($filters['site_id']) : null;
 
         $query = EnvironmentalAspect::query()
             ->where('enterprise_id', $enterpriseId)
             ->with(['site', 'process', 'responsible']);
 
-        if (! empty($filters['site_id'])) {
+        if (!empty($filters['site_id'])) {
             $query->where('site_id', $filters['site_id']);
         }
-        if (! empty($filters['process_id'])) {
+        if (!empty($filters['process_id'])) {
             $query->where('process_id', $filters['process_id']);
         }
         if (isset($filters['is_significant'])) {
@@ -181,93 +239,117 @@ class HseExportService
 
         $aspects = $query->orderBy('process_id')->orderBy('id')->get();
 
-        $spreadsheet = new Spreadsheet;
+        $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('AES - ISO 14001');
 
-        // Header
+        // The supplied BASE AES "Exemple" sheet contains 19 fields in B:T.
+        $lastColumn = 'T';
         $enterpriseName = $enterprise?->name ?? 'ENTREPRISE';
-        $siteName = $site ? ' - Site : '.$site->name : ' - Tous les sites';
+        $siteName = $site ? ' - Site : ' . $site->name : ' - Tous les sites';
+        $sheet->setCellValue('B2', 'REGISTRE DES ASPECTS ENVIRONNEMENTAUX ET AES — ISO 14001');
+        $sheet->setCellValue('B3', "Entreprise : {$enterpriseName}{$siteName} | Seuil de significativité paramétré dans l'entreprise | Date d'extraction : " . date('d/m/Y H:i'));
+        $sheet->mergeCells("B2:{$lastColumn}2");
+        $sheet->mergeCells("B3:{$lastColumn}3");
 
-        $sheet->setCellValue('A1', 'ANALYSE ENVIRONNEMENTALE & ASPECTS ENVIRONNEMENTAUX SIGNIFICATIFS (AES) — ISO 14001');
-        $sheet->setCellValue('A2', "Entreprise : {$enterpriseName}{$siteName} | Seuil de significativité standard : 343 | Date d'extraction : ".date('d/m/Y H:i'));
+        $sheet->getStyle("B2:{$lastColumn}2")->getFont()->setBold(true)->setSize(14)->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color('FFFFFF'));
+        $sheet->getStyle("B2:{$lastColumn}2")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF166534');
+        $sheet->getStyle("B2:{$lastColumn}2")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("B3:{$lastColumn}3")->getFont()->setItalic(true)->setSize(11)->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color('475569'));
+        $sheet->getStyle("B3:{$lastColumn}3")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        $sheet->mergeCells('A1:T1');
-        $sheet->mergeCells('A2:T2');
-
-        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->setColor(new Color('FFFFFF'));
-        $sheet->getStyle('A1')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF166534'); // Green 800
-        $sheet->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-
-        $sheet->getStyle('A2')->getFont()->setItalic(true)->setSize(11)->setColor(new Color('475569'));
-        $sheet->getStyle('A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-
-        // Column Headers
-        $headers = [
-            'A4' => 'N°',
-            'B4' => 'Processus / Domaine',
-            'C4' => 'Sous-Processus / Zone',
-            'D4' => 'Mode (N/A)',
-            'E4' => 'Activité',
-            'F4' => 'Aspect Environnemental',
-            'G4' => 'Impact Environnemental',
-            'H4' => 'Mesures Existantes de Maîtrise',
-            'I4' => 'Gravité (G)',
-            'J4' => 'Fréquence (F)',
-            'K4' => 'Sensibilité (S)',
-            'L4' => 'Maîtrise (M)',
-            'M4' => 'Score Criticité (IC)',
-            'N4' => 'Significatif ?',
-            'O4' => 'Actions de Maîtrise Complémentaires',
-            'P4' => 'Responsable',
-            'Q4' => 'Délai / Échéance',
-            'R4' => 'Regroupement',
-            'S4' => 'Activités / produits regroupés',
-            'T4' => 'Caractéristiques communes',
+        $groups = [
+            'B4:H4' => 'IDENTIFICATION',
+            'I4:L4' => 'ÉVALUATION',
+            'M4:N4' => 'RÉSULTATS',
+            'O4:Q4' => 'TRAITEMENT ET PRÉVENTION',
+            'R4:T4' => 'SUIVI ET ÉVALUATION',
         ];
-
-        foreach ($headers as $cell => $val) {
-            $sheet->setCellValue($cell, $val);
+        foreach ($groups as $range => $label) {
+            $sheet->mergeCells($range);
+            $sheet->setCellValue(explode(':', $range)[0], $label);
         }
 
-        $sheet->getStyle('A4:T4')->getFont()->setBold(true)->setColor(new Color('FFFFFF'));
-        $sheet->getStyle('A4:T4')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF15803D'); // Green 700
-        $sheet->getStyle('A4:T4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
-        $sheet->getRowDimension(4)->setRowHeight(28);
+        $headers = [
+            'Processus',
+            'Sous-processus / activité',
+            'Mode',
+            'Aspect environnemental',
+            'Impact environnemental',
+            'Risque associé',
+            'Actions de maîtrise ou préventions existantes',
+            'Gravité',
+            'Fréquence / probabilité',
+            'Sensibilité',
+            'Maîtrise',
+            'Criticité (Cr)',
+            'AES',
+            'Actions',
+            'Responsable',
+            'Délai',
+            'Observations',
+            "Critère d'effectivité",
+            "Critère d'efficacité",
+        ];
+        foreach ($headers as $index => $header) {
+            $column = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($index + 2);
+            $sheet->setCellValue("{$column}5", $header);
+        }
 
-        // Rows
-        $row = 5;
-        $idx = 1;
+        $sheet->getStyle("B4:{$lastColumn}4")->getFont()->setBold(true)->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color('FFFFFF'));
+        $sheet->getStyle("B4:{$lastColumn}4")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF15803D');
+        $sheet->getStyle("B4:{$lastColumn}4")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getStyle("B5:{$lastColumn}5")->getFont()->setBold(true)->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color('FFFFFF'));
+        $sheet->getStyle("B5:{$lastColumn}5")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF15803D');
+        $sheet->getStyle("B5:{$lastColumn}5")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER)->setWrapText(true);
+        $sheet->getRowDimension(4)->setRowHeight(24);
+        $sheet->getRowDimension(5)->setRowHeight(42);
+
+        $row = 6;
         foreach ($aspects as $aspect) {
-            $sheet->setCellValue("A{$row}", $idx++);
-            $sheet->setCellValue("B{$row}", $aspect->process?->title ?? 'Général');
-            $sheet->setCellValue("C{$row}", $aspect->sub_process ?? '—');
-            $sheet->setCellValue("D{$row}", $aspect->mode ?? 'N');
-            $sheet->setCellValue("E{$row}", $aspect->activity);
-            $sheet->setCellValue("F{$row}", $aspect->aspect);
-            $sheet->setCellValue("G{$row}", $aspect->impact);
-            $sheet->setCellValue("H{$row}", $aspect->existing_controls ?: 'Aucune');
-            $sheet->setCellValue("I{$row}", $aspect->gravity ?? 1);
-            $sheet->setCellValue("J{$row}", $aspect->frequency ?? 1);
-            $sheet->setCellValue("K{$row}", $aspect->sensitivity ?? 1);
-            $sheet->setCellValue("L{$row}", $aspect->mastery ?? 1);
-            $sheet->setCellValue("M{$row}", $aspect->criticality_score ?? ($aspect->gravity * $aspect->frequency * $aspect->sensitivity * $aspect->mastery));
-            $sheet->setCellValue("N{$row}", $aspect->is_significant ? 'OUI (AES)' : 'NON');
-            $sheet->setCellValue("O{$row}", $aspect->additional_actions ?: '—');
-            $sheet->setCellValue("P{$row}", $aspect->responsible?->name ?: ($aspect->responsible_name ?: 'Non assigné'));
-            $sheet->setCellValue("Q{$row}", $aspect->deadline ? $aspect->deadline->format('d/m/Y') : '—');
+            $groupDetails = array_filter([
+                $aspect->group_label ? 'Regroupement : ' . $aspect->group_label : null,
+                !empty($aspect->group_members)
+                    ? 'Activités / produits regroupés : ' . implode(', ', $aspect->group_members)
+                    : null,
+                $aspect->group_characteristics
+                    ? 'Caractéristiques communes : ' . $aspect->group_characteristics
+                    : null,
+            ], static fn ($detail) => $detail !== null && $detail !== '');
+            $observationDetails = array_filter([
+                $aspect->observations,
+                ...$groupDetails,
+            ], static fn ($detail) => $detail !== null && $detail !== '');
+            $values = [
+                $aspect->process?->title ?? 'Général',
+                $aspect->sub_process ?: $aspect->activity,
+                $aspect->mode ?? 'N',
+                $aspect->aspect,
+                $aspect->impact,
+                $aspect->risk ?? '—',
+                $aspect->existing_controls ?: '—',
+                $aspect->gravity,
+                $aspect->frequency,
+                $aspect->sensitivity,
+                $aspect->mastery,
+                $aspect->criticality_score,
+                $aspect->is_significant ? 'OUI' : 'NON',
+                $aspect->additional_actions ?: '—',
+                $aspect->responsible?->name ?: ($aspect->responsible_name ?: 'Non assigné'),
+                $aspect->deadline?->format('d/m/Y'),
+                implode("\n", $observationDetails) ?: '—',
+                $aspect->effectiveness_criterion ?? '—',
+                $aspect->efficiency_criterion ?? '—',
+            ];
+            foreach ($values as $index => $value) {
+                $column = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($index + 2);
+                $sheet->setCellValue("{$column}{$row}", $value);
+            }
 
-            $sheet->setCellValue("R{$row}", $aspect->group_label);
-            $sheet->setCellValue("S{$row}", implode("\n", $aspect->group_members ?? []));
-            $sheet->setCellValue("T{$row}", $aspect->group_characteristics);
-
-            // Alignment
-            $sheet->getStyle("A{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             $sheet->getStyle("D{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             $sheet->getStyle("I{$row}:N{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             $sheet->getStyle("Q{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-            // Highlight significant aspects
             if ($aspect->is_significant) {
                 $sheet->getStyle("N{$row}")->getFont()->setBold(true)->getColor()->setARGB('FFDC2626');
                 $sheet->getStyle("M{$row}")->getFont()->setBold(true)->getColor()->setARGB('FFDC2626');
@@ -277,19 +359,19 @@ class HseExportService
             $row++;
         }
 
-        // Borders
-        $lastRow = max(5, $row - 1);
-        $sheet->getStyle("A4:T{$lastRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->setColor(new Color('CBD5E1'));
-
-        // Auto-fit
-        foreach (range('A', 'T') as $col) {
-            $sheet->getColumnDimension($col)->setAutoSize(true);
+        $lastRow = max(6, $row - 1);
+        $sheet->getStyle("B4:{$lastColumn}{$lastRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color('CBD5E1'));
+        $sheet->freezePane('B6');
+        $sheet->setAutoFilter("B5:{$lastColumn}{$lastRow}");
+        foreach (range(2, 20) as $index) {
+            $sheet->getColumnDimension(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($index))->setAutoSize(true);
         }
 
         $writer = new Xlsx($spreadsheet);
-        $tempFile = tempnam(sys_get_temp_dir(), 'aes_').'.xlsx';
+        $tempFile = tempnam(sys_get_temp_dir(), 'aes_') . '.xlsx';
         $writer->save($tempFile);
 
         return $tempFile;
     }
 }
+

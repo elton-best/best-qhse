@@ -22,7 +22,12 @@ class ApplicationScopeResource extends JsonApiResource
 
         return [
             'version' => $this->version,
+            'effective_date' => $metadata['scope_effective_date'] ?? null,
             'is_current' => $this->is_current,
+            'status' => $this->status,
+            'published_by_user_id' => $this->published_by,
+            'published_by_name' => $this->whenLoaded('publishedBy', fn () => $this->publishedBy?->name),
+            'published_at' => $this->published_at?->toISOString(),
             'objective' => $this->objective,
             'scope' => $this->scope,
             'document_objective' => $this->document_objective,

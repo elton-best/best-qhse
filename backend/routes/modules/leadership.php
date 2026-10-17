@@ -2,6 +2,8 @@
 
 use App\Modules\Leadership\Controllers\CultureCommitmentController;
 use App\Modules\Leadership\Controllers\EthicsReportController;
+use App\Modules\Leadership\Controllers\QhseEthicsReportController;
+use App\Modules\Leadership\Controllers\QhseCultureSurveyController;
 use App\Modules\Leadership\Controllers\JobDescriptionController;
 use App\Modules\Leadership\Controllers\JobDescriptionImportController;
 use App\Modules\Leadership\Controllers\LeadershipReviewController;
@@ -20,13 +22,29 @@ use Illuminate\Support\Facades\Route;
 
 // Politique QHSE (§5.2)
 Route::get('qhse-policies/current', [QhsePolicyController::class, 'current']);
+Route::get('qhse-policies/published', [QhsePolicyController::class, 'published']);
 Route::get('qhse-policies/history', [QhsePolicyController::class, 'history']);
+Route::get('qhse-policies/{qhsePolicy}/acknowledgements', [QhsePolicyController::class, 'acknowledgements']);
+Route::post('qhse-policies/{qhsePolicy}/acknowledge', [QhsePolicyController::class, 'acknowledge']);
 Route::get('qhse-policies/{qhsePolicy}/export-pdf', [QhsePolicyController::class, 'exportPdf']);
 Route::get('qhse-policies/{qhsePolicy}/export-docx', [QhsePolicyController::class, 'exportDocx']);
 Route::post('qhse-policies/{qhsePolicy}/generate-draft', [QhsePolicyController::class, 'generateDraftDocx']);
 Route::post('qhse-policies/{qhsePolicy}/validate', [QhsePolicyController::class, 'validate']);
 Route::post('qhse-policies/{qhsePolicy}/submit', [QhsePolicyController::class, 'submitForReview']);
 Route::apiResource('qhse-policies', QhsePolicyController::class);
+
+// Signalements éthiques : déclaration par tout contributeur, consultation réservée aux référents habilités.
+Route::get('ethics-reports/mine', [QhseEthicsReportController::class, 'mine']);
+Route::post('ethics-reports/track', [QhseEthicsReportController::class, 'track'])->middleware('throttle:10,1');
+Route::post('ethics-reports', [QhseEthicsReportController::class, 'store'])->middleware('throttle:5,1');
+Route::get('ethics-reports', [QhseEthicsReportController::class, 'index'])
+    ->middleware('permission:leadership.ethics_reports.manage');
+Route::patch('ethics-reports/{qhseEthicsReport}', [QhseEthicsReportController::class, 'update'])
+    ->middleware('permission:leadership.ethics_reports.manage');
+Route::post('qhse-culture-survey', [QhseCultureSurveyController::class, 'store'])
+    ->middleware('throttle:10,1');
+Route::get('qhse-culture-survey/summary', [QhseCultureSurveyController::class, 'summary'])
+    ->middleware('permission:leadership.ethics_reports.manage');
 
 // Axes Stratégiques (§5.1)
 Route::apiResource('strategic-axes', StrategicAxisController::class);

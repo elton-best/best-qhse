@@ -13,6 +13,7 @@ use App\Modules\Evaluation\Controllers\SatisfactionSurveyController;
 use App\Modules\Evaluation\Controllers\StakeholderController;
 use App\Modules\Leadership\Controllers\ApplicationScopeController;
 use App\Modules\Leadership\Controllers\ContextController;
+use App\Modules\Leadership\Controllers\ContextReviewController;
 use App\Modules\Support\Controllers\EmployeeEvaluationController;
 use App\Modules\Support\Controllers\ProviderPartnerController;
 use Illuminate\Support\Facades\Route;
@@ -77,10 +78,13 @@ Route::apiResource('stakeholders', StakeholderController::class);
 
 Route::get('application-scopes/{application_scope}/export-docx', [ApplicationScopeController::class, 'exportDocx']);
 Route::post('application-scopes/{application_scope}/generate-draft', [ApplicationScopeController::class, 'generateDraftDocx']);
+Route::post('application-scopes/{application_scope}/publish', [ApplicationScopeController::class, 'publish']);
 Route::apiResource('application-scopes', ApplicationScopeController::class);
 
 Route::get('contexts/export-docx', [ContextController::class, 'exportDocx']);
 Route::post('contexts/generate-draft', [ContextController::class, 'generateDraftDocx']);
+Route::get('contexts/{context}/reviews', [ContextReviewController::class, 'index']);
+Route::post('contexts/{context}/reviews', [ContextReviewController::class, 'store']);
 Route::apiResource('contexts', ContextController::class);
 
 // --- Satisfaction & Évaluations PIP (§9.1.2) ---

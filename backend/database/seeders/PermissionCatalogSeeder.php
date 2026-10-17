@@ -131,6 +131,7 @@ class PermissionCatalogSeeder extends Seeder
             'leadership.politique.delete',
             'leadership.politique.validate',
             'leadership.politique.export',
+            'leadership.ethics_reports.manage',
 
             // Sous-module : Rôles et responsabilités
             // Section : Organigramme

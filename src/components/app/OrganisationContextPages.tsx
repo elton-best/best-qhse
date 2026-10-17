@@ -32,6 +32,7 @@ import { DocumentActions } from "@/components/app/DocumentActions";
 import {
   useCartography,
   useContextMutations,
+  useContextReviews,
   useContexts,
   useProcesses,
   useScope,
@@ -41,10 +42,13 @@ import {
 } from "@/integrations/backend/context";
 import {
   buildSwotPestelPayload,
+  countIncompleteClimateAssessments,
   emptyIssuesForm,
   EXTERNAL_CRITERIA,
   INTERNAL_CRITERIA,
   issuesFormFromRecord,
+  newContextIssue,
+  type ContextIssue,
   type IssueCriterionData,
   type SwotPestelIssuesForm,
 } from "@/integrations/backend/context";
@@ -201,7 +205,9 @@ type IssueTab = "internal" | "external" | "major" | "summary";
 function issueTotal(form: SwotPestelIssuesForm, category: "internal" | "external") {
   return Object.values(form[category]).reduce(
     (total, item) =>
-      total + item.favorable.filter(Boolean).length + item.unfavorable.filter(Boolean).length,
+      total +
+      item.favorable.filter((issue) => issue.text.trim()).length +
+      item.unfavorable.filter((issue) => issue.text.trim()).length,
     0,
   );
 }
@@ -216,11 +222,11 @@ function IssueListEditor({
   onRemove,
 }: {
   title: string;
-  values: string[];
+  values: ContextIssue[];
   tone: "success" | "danger" | "info" | "warning";
   placeholder: string;
   onAdd: () => void;
-  onChange: (index: number, value: string) => void;
+  onChange: (index: number, patch: Partial<ContextIssue>) => void;
   onRemove: (index: number) => void;
 }) {
   const styles =
@@ -255,7 +261,7 @@ function IssueListEditor({
               chip: "border-amber-200 focus-within:border-amber-500 focus-within:ring-amber-500/20",
               rank: "bg-amber-600/10 text-amber-800",
             };
-  const filled = values.filter(Boolean).length;
+  const filled = values.filter((issue) => issue.text.trim()).length;
   return (
     <div className={`overflow-hidden rounded-xl border ${styles.frame}`}>
       <div className={`flex items-center justify-between gap-2 px-3 py-2 ${styles.header}`}>
@@ -276,29 +282,69 @@ function IssueListEditor({
       </div>
       <div className="space-y-2 p-3">
         {values.map((item, index) => (
-          <div
-            key={index}
-            className={`flex items-start gap-1.5 rounded-xl border bg-card p-1.5 shadow-sm transition focus-within:ring-2 ${styles.chip}`}
-          >
-            <span
-              className={`mt-1.5 shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-extrabold ${styles.rank}`}
+          <div key={item.id || index} className="space-y-2">
+            <div
+              className={`flex items-start gap-1.5 rounded-xl border bg-card p-1.5 shadow-sm transition focus-within:ring-2 ${styles.chip}`}
             >
-              {index + 1}
-            </span>
-            <textarea
-              className="min-h-10 flex-1 resize-y border-0 bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-muted-foreground/70"
-              value={item}
-              onChange={(event) => onChange(index, event.target.value)}
-              placeholder={placeholder}
-            />
-            <button
-              type="button"
-              className="shrink-0 rounded-lg p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => onRemove(index)}
-              aria-label="Supprimer l'élément"
-            >
-              <X className="h-4 w-4" />
-            </button>
+              <span
+                className={`mt-1.5 shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-extrabold ${styles.rank}`}
+              >
+                {index + 1}
+              </span>
+              <textarea
+                className="min-h-10 flex-1 resize-y border-0 bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-muted-foreground/70"
+                value={item.text}
+                onChange={(event) => onChange(index, { text: event.target.value })}
+                placeholder={placeholder}
+              />
+              <button
+                type="button"
+                className="shrink-0 rounded-lg p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => onRemove(index)}
+                aria-label="Supprimer l'élément"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid gap-2 pl-8 sm:grid-cols-2">
+              <label className="text-xs font-semibold text-muted-foreground">
+                Le changement climatique est-il pertinent pour cet enjeu ?
+                <select
+                  className={`${input} mt-1`}
+                  value={
+                    item.climate_change_relevant === null
+                      ? ""
+                      : item.climate_change_relevant
+                        ? "yes"
+                        : "no"
+                  }
+                  onChange={(event) =>
+                    onChange(index, {
+                      climate_change_relevant:
+                        event.target.value === "" ? null : event.target.value === "yes",
+                      ...(event.target.value === "no" ? {} : { climate_change_rationale: "" }),
+                    })
+                  }
+                >
+                  <option value="">À déterminer</option>
+                  <option value="yes">Oui</option>
+                  <option value="no">Non</option>
+                </select>
+              </label>
+              {item.climate_change_relevant === false && (
+                <label className="text-xs font-semibold text-muted-foreground">
+                  Justification de la non-pertinence
+                  <textarea
+                    className={`${input} mt-1 min-h-10`}
+                    value={item.climate_change_rationale}
+                    onChange={(event) =>
+                      onChange(index, { climate_change_rationale: event.target.value })
+                    }
+                    placeholder="Expliquez la décision…"
+                  />
+                </label>
+              )}
+            </div>
           </div>
         ))}
         {values.length === 0 && (
@@ -326,6 +372,8 @@ function CriterionCard({
   criterion,
   data,
   onChange,
+  onAdd,
+  onRemove,
 }: {
   title: string;
   criterion: string;
@@ -334,15 +382,19 @@ function CriterionCard({
     criterion: string,
     polarity: "favorable" | "unfavorable",
     index: number,
-    value: string,
+    patch: Partial<ContextIssue>,
   ) => void;
+  onAdd: (criterion: string, polarity: "favorable" | "unfavorable") => void;
+  onRemove: (criterion: string, polarity: "favorable" | "unfavorable", index: number) => void;
 }) {
-  const update = (polarity: "favorable" | "unfavorable", index: number, value: string) =>
-    onChange(criterion, polarity, index, value);
-  const add = (polarity: "favorable" | "unfavorable") =>
-    onChange(criterion, polarity, data[polarity].length, "");
+  const update = (
+    polarity: "favorable" | "unfavorable",
+    index: number,
+    patch: Partial<ContextIssue>,
+  ) => onChange(criterion, polarity, index, patch);
+  const add = (polarity: "favorable" | "unfavorable") => onAdd(criterion, polarity);
   const remove = (polarity: "favorable" | "unfavorable", index: number) =>
-    onChange(criterion, polarity, index, "__REMOVE__");
+    onRemove(criterion, polarity, index);
   const total = data.favorable.length + data.unfavorable.length;
   return (
     <article className={`${card} overflow-hidden`}>
@@ -362,7 +414,7 @@ function CriterionCard({
           tone="success"
           placeholder="Décrivez un facteur favorable…"
           onAdd={() => add("favorable")}
-          onChange={(index, value) => update("favorable", index, value)}
+          onChange={(index, patch) => update("favorable", index, patch)}
           onRemove={(index) => remove("favorable", index)}
         />
         <IssueListEditor
@@ -371,7 +423,7 @@ function CriterionCard({
           tone="danger"
           placeholder="Décrivez un facteur défavorable…"
           onAdd={() => add("unfavorable")}
-          onChange={(index, value) => update("unfavorable", index, value)}
+          onChange={(index, patch) => update("unfavorable", index, patch)}
           onRemove={(index) => remove("unfavorable", index)}
         />
       </div>
@@ -390,23 +442,6 @@ function StructuredContextAnalysis({
 }) {
   const [tab, setTab] = useState<IssueTab>("internal");
   const [savedTab, setSavedTab] = useState<IssueTab>();
-  const updateCriterion = (
-    category: "internal" | "external",
-    criterion: string,
-    polarity: "favorable" | "unfavorable",
-    index: number,
-    text: string,
-  ) => {
-    const current = value[category][criterion] ?? { favorable: [], unfavorable: [] };
-    const values = [...current[polarity]];
-    if (text === "__REMOVE__") values.splice(index, 1);
-    else if (index >= values.length) values.push(text);
-    else values[index] = text;
-    onChange({
-      ...value,
-      [category]: { ...value[category], [criterion]: { ...current, [polarity]: values } },
-    });
-  };
   const addMajor = () => change({ ...value, majorIssues: [...value.majorIssues, ""] });
   const tabs: [IssueTab, string][] = [
     ["internal", "Enjeux internes"],
@@ -428,6 +463,50 @@ function StructuredContextAnalysis({
     setSavedTab(undefined);
     onChange(next);
   };
+  const setCriterionIssues = (
+    category: "internal" | "external",
+    criterion: string,
+    polarity: "favorable" | "unfavorable",
+    issues: ContextIssue[],
+  ) => {
+    const current = value[category][criterion] ?? { favorable: [], unfavorable: [] };
+    change({
+      ...value,
+      [category]: { ...value[category], [criterion]: { ...current, [polarity]: issues } },
+    });
+  };
+  const updateIssue = (
+    category: "internal" | "external",
+    criterion: string,
+    polarity: "favorable" | "unfavorable",
+    index: number,
+    patch: Partial<ContextIssue>,
+  ) => {
+    const issues = [...(value[category][criterion]?.[polarity] ?? [])];
+    issues[index] = { ...issues[index]!, ...patch };
+    setCriterionIssues(category, criterion, polarity, issues);
+  };
+  const addIssue = (
+    category: "internal" | "external",
+    criterion: string,
+    polarity: "favorable" | "unfavorable",
+  ) =>
+    setCriterionIssues(category, criterion, polarity, [
+      ...(value[category][criterion]?.[polarity] ?? []),
+      newContextIssue(),
+    ]);
+  const removeIssue = (
+    category: "internal" | "external",
+    criterion: string,
+    polarity: "favorable" | "unfavorable",
+    index: number,
+  ) =>
+    setCriterionIssues(
+      category,
+      criterion,
+      polarity,
+      (value[category][criterion]?.[polarity] ?? []).filter((_, itemIndex) => itemIndex !== index),
+    );
   return (
     <div className={`${card} p-4`}>
       <div>
@@ -458,17 +537,11 @@ function StructuredContextAnalysis({
               title={INTERNAL_LABELS[criterion] ?? criterion}
               criterion={criterion}
               data={value.internal[criterion] ?? { favorable: [], unfavorable: [] }}
-              onChange={(key, polarity, index, text) => {
-                const current = value.internal[key] ?? { favorable: [], unfavorable: [] };
-                const values = [...current[polarity]];
-                if (text === "__REMOVE__") values.splice(index, 1);
-                else if (index >= values.length) values.push(text);
-                else values[index] = text;
-                change({
-                  ...value,
-                  internal: { ...value.internal, [key]: { ...current, [polarity]: values } },
-                });
-              }}
+              onChange={(key, polarity, index, patch) =>
+                updateIssue("internal", key, polarity, index, patch)
+              }
+              onAdd={(key, polarity) => addIssue("internal", key, polarity)}
+              onRemove={(key, polarity, index) => removeIssue("internal", key, polarity, index)}
             />
           ))}
         </div>
@@ -481,17 +554,11 @@ function StructuredContextAnalysis({
               title={EXTERNAL_LABELS[criterion] ?? criterion}
               criterion={criterion}
               data={value.external[criterion] ?? { favorable: [], unfavorable: [] }}
-              onChange={(key, polarity, index, text) => {
-                const current = value.external[key] ?? { favorable: [], unfavorable: [] };
-                const values = [...current[polarity]];
-                if (text === "__REMOVE__") values.splice(index, 1);
-                else if (index >= values.length) values.push(text);
-                else values[index] = text;
-                change({
-                  ...value,
-                  external: { ...value.external, [key]: { ...current, [polarity]: values } },
-                });
-              }}
+              onChange={(key, polarity, index, patch) =>
+                updateIssue("external", key, polarity, index, patch)
+              }
+              onAdd={(key, polarity) => addIssue("external", key, polarity)}
+              onRemove={(key, polarity, index) => removeIssue("external", key, polarity, index)}
             />
           ))}
         </div>
@@ -622,13 +689,18 @@ function StructuredContextAnalysis({
 export function ContextOrganisationPage() {
   const [siteId] = useCurrentSite();
   const { data = [], isLoading, isError } = useContexts(siteId);
-  const { save } = useContextMutations(siteId);
+  const { save, review } = useContextMutations(siteId);
   const { data: stakeholders = [] } = useStakeholders(siteId);
   const { data: scopes = [] } = useScope(siteId);
   const { data: cartography = [] } = useCartography(siteId);
   const [issuesForm, setIssuesForm] = useState<SwotPestelIssuesForm>(() => emptyIssuesForm());
   const [legacyPestel, setLegacyPestel] = useState<Record<string, string>>({});
   const existing = data[0] as Record<string, unknown> | undefined;
+  const { data: contextReviews = [] } = useContextReviews(
+    existing?.["id"] ? String(existing["id"]) : undefined,
+  );
+  const [reviewFrequencyMonths, setReviewFrequencyMonths] = useState("12");
+  const [reviewSummary, setReviewSummary] = useState("");
 
   // Profil entreprise (lecture seule) : auth/me -> enterprises/{id}.
   // Affiche la vue d'ensemble de l'organisme sans passer par la page Paramètres.
@@ -638,7 +710,8 @@ export function ContextOrganisationPage() {
       const me = await backendApi.request<Record<string, unknown>>("auth/me");
       const user = (me["user"] ?? me) as Record<string, unknown>;
       const enterpriseId =
-        user["enterprise_id"] ?? (user["enterprise"] as Record<string, unknown> | undefined)?.["id"];
+        user["enterprise_id"] ??
+        (user["enterprise"] as Record<string, unknown> | undefined)?.["id"];
       if (enterpriseId === undefined || enterpriseId === null || enterpriseId === "")
         return {
           user,
@@ -672,15 +745,24 @@ export function ContextOrganisationPage() {
   const internalCount = issueTotal(issuesForm, "internal");
   const externalCount = issueTotal(issuesForm, "external");
   const majorCount = issuesForm.majorIssues.filter(Boolean).length;
+  const incompleteClimateAssessments = countIncompleteClimateAssessments(issuesForm);
   const synthesisDone =
     (hasText(issuesForm.synthesisInternal) ? 1 : 0) +
     (hasText(issuesForm.synthesisExternal) ? 1 : 0);
   const pestelDone = EXTERNAL_CRITERIA.filter((key) => {
     const criterion = issuesForm.external[key];
-    return Boolean(criterion?.favorable.some(Boolean) || criterion?.unfavorable.some(Boolean));
+    return Boolean(
+      criterion?.favorable.some((issue) => issue.text.trim()) ||
+      criterion?.unfavorable.some((issue) => issue.text.trim()),
+    );
   }).length;
   const stakeholderHigh = stakeholders.filter((item) => item["relevance_degree"] === "high").length;
   const scope = scopes[0] as Record<string, unknown> | undefined;
+  const nextReviewAt = String(existing?.["next_review_at"] ?? "").slice(0, 10);
+  const nextReviewTimestamp = nextReviewAt ? Date.parse(`${nextReviewAt}T00:00:00`) : Number.NaN;
+  const todayTimestamp = new Date().setHours(0, 0, 0, 0);
+  const reviewIsOverdue =
+    Number.isFinite(nextReviewTimestamp) && nextReviewTimestamp < todayTimestamp;
   const scopeExclusions = scope ? hasText(scope["scope_exclusions"] ?? scope["exclusions"]) : false;
   const cartographyCategory = (item: Record<string, unknown>) => {
     const value = String(item["category"] ?? item["type"] ?? "").toLowerCase();
@@ -712,6 +794,7 @@ export function ContextOrganisationPage() {
   useEffect(() => {
     if (existing) {
       setIssuesForm(issuesFormFromRecord(existing));
+      setReviewFrequencyMonths(String(existing["review_frequency_months"] ?? 12));
       setLegacyPestel(
         Object.fromEntries(
           [
@@ -733,10 +816,20 @@ export function ContextOrganisationPage() {
       </div>
     );
   const saveForm = async (): Promise<boolean> => {
+    if (incompleteClimateAssessments > 0) {
+      toast.error(
+        `${incompleteClimateAssessments} enjeu(x) doit/doivent avoir une décision climatique documentée.`,
+      );
+      return false;
+    }
     try {
       await save.mutateAsync({
         ...(existing?.["id"] ? { id: String(existing["id"]) } : {}),
-        payload: { ...buildSwotPestelPayload(siteId, issuesForm), ...legacyPestel },
+        payload: {
+          ...buildSwotPestelPayload(siteId, issuesForm),
+          ...legacyPestel,
+          review_frequency_months: Number(reviewFrequencyMonths),
+        },
       });
       toast.success("Analyse du contexte enregistrée.");
       return true;
@@ -744,6 +837,26 @@ export function ContextOrganisationPage() {
       toast.error(error instanceof Error ? error.message : "Impossible d'enregistrer l'analyse.");
     }
     return false;
+  };
+  const recordContextReview = async () => {
+    if (!existing?.["id"]) {
+      toast.error("Enregistrez d’abord l’analyse du contexte.");
+      return;
+    }
+    const summary = reviewSummary.trim();
+    if (summary.length < 10) {
+      toast.error("Le compte rendu de revue doit contenir au moins 10 caractères.");
+      return;
+    }
+    if (!(await saveForm())) return;
+
+    try {
+      await review.mutateAsync({ id: String(existing["id"]), summary });
+      setReviewSummary("");
+      toast.success("Revue du contexte enregistrée avec son instantané.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Impossible d'enregistrer la revue.");
+    }
   };
   if (isLoading)
     return (
@@ -1061,6 +1174,103 @@ export function ContextOrganisationPage() {
         </Link>
       </div>
       <StructuredContextAnalysis value={issuesForm} onChange={setIssuesForm} onSave={saveForm} />
+      <section className={`${card} space-y-4 p-5`}>
+        <div>
+          <h2 className="font-display text-lg font-bold">Revue périodique du contexte</h2>
+          <p className={muted}>
+            Définissez la fréquence, consignez chaque revue et conservez l’instantané des enjeux
+            évalués.
+          </p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-3">
+          <label className="text-xs font-semibold text-muted-foreground">
+            Fréquence de revue
+            <select
+              className={`${input} mt-1`}
+              value={reviewFrequencyMonths}
+              onChange={(event) => setReviewFrequencyMonths(event.target.value)}
+            >
+              <option value="3">Tous les 3 mois</option>
+              <option value="6">Tous les 6 mois</option>
+              <option value="12">Tous les 12 mois</option>
+              <option value="24">Tous les 24 mois</option>
+            </select>
+          </label>
+          <div className="rounded-xl bg-muted/40 p-3">
+            <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Prochaine revue
+            </p>
+            <p className={`mt-1 font-semibold ${reviewIsOverdue ? "text-destructive" : ""}`}>
+              {nextReviewAt
+                ? new Date(`${nextReviewAt}T00:00:00`).toLocaleDateString("fr-FR")
+                : "Enregistrez le contexte pour planifier"}
+              {reviewIsOverdue ? " · En retard" : ""}
+            </p>
+          </div>
+          <div className="rounded-xl bg-muted/40 p-3">
+            <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Dernière revue
+            </p>
+            <p className="mt-1 font-semibold">
+              {existing?.["last_reviewed_at"]
+                ? new Date(String(existing["last_reviewed_at"])).toLocaleDateString("fr-FR")
+                : "Aucune revue consignée"}
+            </p>
+          </div>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+          <label className="text-xs font-semibold text-muted-foreground">
+            Compte rendu / changements depuis la dernière revue
+            <textarea
+              className={`${input} mt-1 min-h-20`}
+              value={reviewSummary}
+              onChange={(event) => setReviewSummary(event.target.value)}
+              placeholder="Résumez les évolutions du contexte, des parties intéressées, du climat et du périmètre…"
+            />
+          </label>
+          <button
+            type="button"
+            className={primary}
+            onClick={() => void recordContextReview()}
+            disabled={!existing?.["id"] || review.isPending || save.isPending}
+          >
+            <Save className="h-4 w-4" />
+            {review.isPending ? "Enregistrement…" : "Consigner la revue"}
+          </button>
+        </div>
+        <div className="border-t border-border pt-4">
+          <h3 className="font-semibold">Historique des revues ({contextReviews.length})</h3>
+          {contextReviews.length === 0 ? (
+            <p className={`mt-2 ${muted}`}>Aucune revue enregistrée pour ce contexte.</p>
+          ) : (
+            <ul className="mt-3 space-y-3">
+              {contextReviews.slice(0, 5).map((reviewItem) => (
+                <li key={String(reviewItem["id"])} className="rounded-xl bg-muted/30 p-3">
+                  <div className="flex flex-wrap justify-between gap-2 text-sm">
+                    <span className="font-semibold">
+                      {new Date(String(reviewItem["reviewed_at"])).toLocaleDateString("fr-FR")}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {String(reviewItem["reviewer_name"] ?? "Utilisateur")}
+                    </span>
+                  </div>
+                  <p className="mt-1 whitespace-pre-line text-sm">
+                    {String(reviewItem["summary"] ?? "")}
+                  </p>
+                  <details className="mt-2 text-xs text-muted-foreground">
+                    <summary className="cursor-pointer font-semibold">
+                      Afficher l’instantané audité
+                    </summary>
+                    <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-background p-3">
+                      {JSON.stringify(reviewItem["snapshot"] ?? {}, null, 2)}
+                    </pre>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
@@ -1109,6 +1319,7 @@ type StakeholderForm = {
   contact_person: string;
   contact_email: string;
   needs_expectations: string;
+  climate_expectations: string;
   needs: StakeholderNeedForm[];
 };
 const emptyStakeholder: StakeholderForm = {
@@ -1118,6 +1329,7 @@ const emptyStakeholder: StakeholderForm = {
   contact_person: "",
   contact_email: "",
   needs_expectations: "",
+  climate_expectations: "",
   needs: [],
 };
 const emptyNeed = (): StakeholderNeedForm => ({
@@ -1256,11 +1468,13 @@ export function StakeholdersPage() {
     const search = query.trim().toLowerCase();
     return data.filter((item) => {
       if (typeFilter && String(item["type"] ?? "") !== typeFilter) return false;
-      if (relevanceFilter && String(item["relevance_degree"] ?? "") !== relevanceFilter) return false;
+      if (relevanceFilter && String(item["relevance_degree"] ?? "") !== relevanceFilter)
+        return false;
       if (!search) return true;
       const haystack = [
         String(item["name"] ?? ""),
         String(item["needs_expectations"] ?? ""),
+        String(item["climate_expectations"] ?? ""),
         String(item["contact_person"] ?? ""),
       ]
         .join(" ")
@@ -1292,6 +1506,7 @@ export function StakeholdersPage() {
       contact_person: String(item["contact_person"] ?? ""),
       contact_email: String(item["contact_email"] ?? ""),
       needs_expectations: legacy,
+      climate_expectations: String(item["climate_expectations"] ?? ""),
       needs: normalizeNeeds(item["needs"], legacy),
     });
     setShowForm(true);
@@ -1383,6 +1598,7 @@ export function StakeholdersPage() {
           contact_person: form.contact_person,
           contact_email: form.contact_email,
           needs_expectations: form.needs_expectations,
+          climate_expectations: form.climate_expectations,
           needs,
         },
       });
@@ -1458,7 +1674,8 @@ export function StakeholdersPage() {
         <Stat
           value={data.reduce(
             (count, item) =>
-              count + normalizeNeeds(item["needs"], String(item["needs_expectations"] ?? "")).length,
+              count +
+              normalizeNeeds(item["needs"], String(item["needs_expectations"] ?? "")).length,
             0,
           )}
           label="Besoins"
@@ -1551,6 +1768,15 @@ export function StakeholdersPage() {
                 value={form.needs_expectations}
                 onChange={(event) => change("needs_expectations", event.target.value)}
                 placeholder="Résumé lisible pour le registre…"
+              />
+            </div>
+            <div className="md:col-span-2 lg:col-span-3">
+              <Label>Attentes de la partie liées au changement climatique</Label>
+              <textarea
+                className={`${input} min-h-20`}
+                value={form.climate_expectations}
+                onChange={(event) => change("climate_expectations", event.target.value)}
+                placeholder="Décrivez les attentes climatiques pertinentes, ou indiquez qu’aucune n’a été identifiée."
               />
             </div>
           </div>
@@ -1917,7 +2143,8 @@ export function StakeholdersPage() {
                   <span
                     className={`rounded-full px-2 py-1 text-[11px] font-bold ${item["relevance_degree"] === "high" ? "bg-rose-100 text-rose-700" : item["relevance_degree"] === "low" ? "bg-slate-100 text-slate-600" : "bg-amber-100 text-amber-700"}`}
                   >
-                    {RELEVANCE.find(([value]) => value === item["relevance_degree"])?.[1] ?? "Moyenne"}
+                    {RELEVANCE.find(([value]) => value === item["relevance_degree"])?.[1] ??
+                      "Moyenne"}
                   </span>
                   <span className="rounded-full bg-primary-soft px-2 py-1 text-[11px] font-bold text-primary">
                     {normalizeNeeds(item["needs"], String(item["needs_expectations"] ?? "")).length}{" "}
@@ -1929,11 +2156,17 @@ export function StakeholdersPage() {
                     <p className="line-clamp-3 whitespace-pre-line text-muted-foreground">
                       {String(item["needs_expectations"] ?? "Aucune attente décrite.")}
                     </p>
+                    {String(item["climate_expectations"] ?? "").trim() && (
+                      <p className="line-clamp-3 whitespace-pre-line rounded-lg bg-sky-50 p-2 text-xs text-sky-900">
+                        <span className="font-bold">Attentes climatiques : </span>
+                        {String(item["climate_expectations"])}
+                      </p>
+                    )}
                     <p className="text-xs font-semibold text-muted-foreground">
-                      {normalizeNeeds(item["needs"], String(item["needs_expectations"] ?? "")).reduce(
-                        (count, need) => count + need.requirements.length,
-                        0,
-                      )}{" "}
+                      {normalizeNeeds(
+                        item["needs"],
+                        String(item["needs_expectations"] ?? ""),
+                      ).reduce((count, need) => count + need.requirements.length, 0)}{" "}
                       exigence(s) structurée(s)
                     </p>
                   </div>
@@ -2286,7 +2519,9 @@ export function ApplicationScopePage() {
                           className="rounded-xl bg-white/75 p-3 text-sm font-semibold text-foreground"
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <span>{String(item["title"] ?? item["name"] ?? "Processus sans nom")}</span>
+                            <span>
+                              {String(item["title"] ?? item["name"] ?? "Processus sans nom")}
+                            </span>
                             <ChevronRight className="h-4 w-4 shrink-0 opacity-60" />
                           </div>
                           {String(item["purpose"] ?? "") && (

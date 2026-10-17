@@ -55,6 +55,17 @@ class ContextDocxGenerator
             return $this->save($phpWord, $siteId);
         }
 
+        $reviewFrequency = $context->review_frequency_months
+            ? 'tous les ' . $context->review_frequency_months . ' mois'
+            : 'non définie';
+        $lastReview = $context->last_reviewed_at?->format('d/m/Y') ?? 'aucune revue enregistrée';
+        $nextReview = $context->next_review_at?->format('d/m/Y') ?? 'non planifiée';
+        $section->addText(
+            "Cycle de revue : {$reviewFrequency} · dernière revue : {$lastReview} · prochaine revue : {$nextReview}",
+            ['size' => 10, 'italic' => true],
+            ['spaceAfter' => 160]
+        );
+
         $internal = $this->decodeJsonArray($context->swot_weaknesses);
         $external = $this->decodeJsonArray($context->swot_opportunities);
         $majorIssues = $this->decodeJsonArray($context->swot_threats);
@@ -165,7 +176,7 @@ class ContextDocxGenerator
     private function addBulletedLinesToCell(\PhpOffice\PhpWord\Element\Cell $cell, array $items): void
     {
         $values = array_values(array_filter(array_map(
-            static fn ($v) => trim((string) $v),
+            fn ($value) => $this->formatIssue($value),
             $items
         )));
 
@@ -177,6 +188,27 @@ class ContextDocxGenerator
         foreach ($values as $value) {
             $cell->addText('• ' . $value, ['size' => 10], ['spaceAfter' => 40]);
         }
+    }
+
+    private function formatIssue(mixed $issue): string
+    {
+        if (!is_array($issue)) {
+            return trim((string) $issue);
+        }
+
+        $text = trim((string) ($issue['text'] ?? $issue['description'] ?? ''));
+        if ($text === '' || !is_bool($issue['climate_change_relevant'] ?? null)) {
+            return $text;
+        }
+
+        if ($issue['climate_change_relevant']) {
+            return $text . ' (Changement climatique pertinent)';
+        }
+
+        $rationale = trim((string) ($issue['climate_change_rationale'] ?? ''));
+        return $text . ' (Changement climatique non pertinent'
+            . ($rationale !== '' ? ' : ' . $rationale : '')
+            . ')';
     }
 
     private function save(PhpWord $phpWord, int $siteId): string
@@ -212,7 +244,7 @@ class ContextDocxGenerator
             }
 
             foreach ($criterion[$type] as $entry) {
-                $text = trim((string) $entry);
+                $text = $this->formatIssue($entry);
                 if ($text !== '') {
                     $items[] = $text;
                 }

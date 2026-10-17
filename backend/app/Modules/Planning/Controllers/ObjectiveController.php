@@ -27,7 +27,15 @@ class ObjectiveController extends Controller
     {
         $this->authorize('viewAny', Objective::class);
 
-        $query = Objective::with(['site', 'responsible', 'indicateur', 'axes', 'workflowState', 'actions']);
+        $query = Objective::with([
+            'site',
+            'responsible',
+            'indicateur',
+            'axes',
+            'workflowState',
+            'actions',
+            'parentObjective',
+        ]);
 
         if ($request->has('site_id')) {
             $query->where('site_id', $request->site_id);
@@ -55,7 +63,13 @@ class ObjectiveController extends Controller
     public function show(int $id): JsonResponse
     {
         $objective = Objective::with([
-            'site', 'responsible', 'indicateur', 'axes', 'workflowState', 'actions'
+            'site',
+            'responsible',
+            'indicateur',
+            'axes',
+            'workflowState',
+            'actions',
+            'parentObjective',
         ])->findOrFail($id);
 
         $this->authorize('view', $objective);
@@ -68,7 +82,7 @@ class ObjectiveController extends Controller
         $objective = Objective::findOrFail($id);
         $this->authorize('update', $objective);
         
-        $objective->update($request->validated());
+        $objective = $this->service->update($objective, $request->validated());
 
         return response()->json($objective);
     }
@@ -77,7 +91,13 @@ class ObjectiveController extends Controller
     {
         $objective = Objective::findOrFail($id);
         $this->authorize('delete', $objective);
-        
+
+        if ($objective->childObjectives()->exists()) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'objective' => ['Détachez ou re-rattachez les objectifs enfants avant de supprimer celui-ci.'],
+            ]);
+        }
+
         $objective->delete();
         return response()->json(['message' => 'Objectif supprimé'], 200);
     }

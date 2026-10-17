@@ -29,6 +29,7 @@ class Stakeholder extends Model
         'relevance_level',
         'relevance_justification',
         'needs_expectations',
+        'climate_expectations',
         'needs',
         'requirements',
         'actions',

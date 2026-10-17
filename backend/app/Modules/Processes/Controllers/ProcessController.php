@@ -8,12 +8,15 @@ use App\Models\Site;
 use App\Services\DocumentSyncService;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\AuthorizesSiteAccess;
 use App\Http\Controllers\Api\Concerns\ResolvesGeneratedDocumentContext;
 use App\Http\Resources\DocumentResource;
 use App\Http\Resources\ProcessResource;
 use App\Models\Action;
 use App\Models\Process;
 use App\Modules\Processes\Models\ProcessIndicator;
+use App\Modules\Processes\Models\ProcessIsoCoverage;
+use App\Modules\Planning\Models\Opportunity;
 use App\Models\ProcessObjective;
 use App\Models\ProcessRiskOpportunity;
 use App\Models\TeamMember;
@@ -30,6 +33,8 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -38,6 +43,7 @@ use PhpOffice\PhpSpreadsheet\Style\Fill;
 
 class ProcessController extends Controller
 {
+    use AuthorizesSiteAccess;
     use ResolvesGeneratedDocumentContext;
 
     protected $processService;
@@ -52,45 +58,32 @@ class ProcessController extends Controller
         $this->authorizeResource(Process::class, 'process', [
             'except' => ['store']
         ]);
+
+        $this->middleware(function ($request, $next) {
+            $process = $request->route('process');
+            if ($process instanceof Process) {
+                $this->assertSiteAccess($request, (int) $process->site_id);
+            }
+
+            return $next($request);
+        });
     }
 
     public function index(Request $request)
     {
-        $user = $request->user();
-        
         // Mode allégé (?light=1) : sans relations coûteuses (site.manager/pilot
         // embarquent des centaines de permissions via UserResource). Réservé aux
         // selects et listes ; les vues détaillées utilisent le mode complet.
         $light = $request->boolean('light');
 
         $query = Process::query();
+        $this->scopeToUserSites($request, $query);
 
         if (!$light) {
             $query->with([
                 'site', 'pilot', 'copilot', 'copilots', 'parentProcess',
                 'indicators', 'risksOpportunities', 'processObjectives.indicator'
             ]);
-        }
-
-        // Scope access by user type / enterprise / site context
-        if ($user->user_type !== 'super_admin') {
-            if ($request->filled('site_id')) {
-                $siteId = (int) $request->site_id;
-                if ($user->enterprise_id) {
-                    $query->whereHas('site', function ($siteQuery) use ($user) {
-                        $siteQuery->where('enterprise_id', $user->enterprise_id);
-                    });
-                }
-                $query->where('site_id', $siteId);
-            } elseif ($user->site_id) {
-                $query->where('site_id', $user->site_id);
-            } elseif ($user->enterprise_id) {
-                $query->whereHas('site', function ($siteQuery) use ($user) {
-                    $siteQuery->where('enterprise_id', $user->enterprise_id);
-                });
-            }
-        } elseif ($request->filled('site_id')) {
-            $query->where('site_id', (int) $request->site_id);
         }
 
         if ($request->has('category')) {
@@ -166,6 +159,7 @@ class ProcessController extends Controller
             Log::error('[ProcessController] Validation failed', ['errors' => $e->errors()]);
             throw $e;
         }
+        $this->assertSiteAccess($request, (int) $validated['site_id']);
 
         if (!isset($validated['title']) && isset($validated['name'])) {
             $validated['title'] = $validated['name'];
@@ -393,18 +387,47 @@ class ProcessController extends Controller
 
     public function addRiskOpportunity(Request $request, Process $process)
     {
+        $this->assertSiteAccess($request, (int) $process->site_id);
+
         $validated = $request->validate([
             'type' => 'required|in:risque,opportunite',
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'normes_iso' => 'nullable|array',
+            'source_category' => 'required|in:contexte,parties_interessees,capacites,mesures,marche,technologie,reglementation,processus,changement,audit,autre',
+            'source_detail' => 'required|string|max:2000',
+            'assessment_method' => 'required|in:qualitative,quantitative',
+            'proportionality_rationale' => [Rule::requiredIf($request->input('type') === 'risque'), 'nullable', 'string', 'max:2000'],
+            'decision_rationale' => [Rule::requiredIf($request->input('type') === 'opportunite'), 'nullable', 'string', 'max:2000'],
+            'desired_effect' => [Rule::requiredIf($request->input('type') === 'opportunite'), 'nullable', 'string', 'max:2000'],
+            'opportunity_decision' => [Rule::requiredIf($request->input('type') === 'opportunite'), 'nullable', 'in:retain,defer,reject'],
+            'continuity_plan' => [Rule::requiredIf($request->input('type') === 'risque'), 'nullable', 'string', 'max:4000'],
+            'continuity_indicator' => [Rule::requiredIf($request->input('type') === 'risque'), 'nullable', 'string', 'max:255'],
+            'strategie' => [Rule::requiredIf($request->input('type') === 'risque'), 'nullable', 'in:accepter,reduire,transferer,eviter,exploiter'],
+            'planned_actions' => ['required', 'array', 'min:1'],
+            'planned_actions.*.id' => 'nullable|uuid',
+            'planned_actions.*.title' => 'required|string|max:255',
+            'planned_actions.*.description' => 'nullable|string|max:2000',
+            'planned_actions.*.action_type' => 'nullable|in:preventive,corrective,control',
+            'planned_actions.*.responsible_user_id' => 'nullable|integer|exists:users,id',
+            'planned_actions.*.responsible' => 'nullable|string|max:255',
+            'planned_actions.*.implicated_user_ids' => 'nullable|array',
+            'planned_actions.*.implicated_user_ids.*' => 'integer|exists:users,id',
+            'planned_actions.*.deadline' => 'required|date',
+            'planned_actions.*.deadline_frequency' => 'nullable|string|max:100',
+            'planned_actions.*.status' => 'nullable|string|max:50',
+            'planned_actions.*.implementation_status' => 'nullable|in:planned,in_progress,completed',
+            'planned_actions.*.effectiveness_result' => 'nullable|in:efficace,partiellement_efficace,non_efficace',
+            'planned_actions.*.effectiveness_review' => 'nullable|string|max:2000',
+            'planned_actions.*.effectiveness_review_date' => 'nullable|date|before_or_equal:today',
+            'effectiveness_review' => 'nullable|string|max:2000',
+            'effectiveness_review_date' => 'nullable|date|before_or_equal:today',
+            'effectiveness_result' => 'nullable|in:efficace,partiellement_efficace,non_efficace',
             'cause' => 'nullable|string',
             'consequence' => 'nullable|string',
             'probabilite' => 'required|integer|min:1|max:4',
             'gravite' => 'required|integer|min:1|max:4',
-            'strategie' => 'nullable|in:accepter,reduire,transferer,eviter,exploiter',
             'actions_prevues' => 'nullable|string',
-            'planned_actions' => 'nullable',
             'responsible_user_id' => 'nullable|integer|exists:users,id',
             'target_date' => 'nullable|date',
             'status' => 'nullable|in:identifie,en_cours,traite,surveille,cloture,a_traiter',
@@ -412,7 +435,12 @@ class ProcessController extends Controller
             'gravite_residuelle' => 'nullable|integer|min:1|max:4',
         ]);
 
-        $validated = $this->normalizeRiskOpportunityActionsPayload($validated);
+        $validated = $this->normalizeRiskOpportunityActionsPayload(
+            $validated,
+            null,
+            (int) $request->user()->id,
+        );
+        $this->assertActionEffectivenessReviewComplete($validated);
 
         if (empty(trim((string) ($validated['description'] ?? ''))) && !empty($validated['title'])) {
             $validated['description'] = $validated['title'];
@@ -420,6 +448,16 @@ class ProcessController extends Controller
 
         if (array_key_exists('status', $validated) && $validated['status']) {
             $validated['status'] = $this->normalizeRiskOpportunityStatus($validated['status']);
+        }
+
+        $this->assertEffectivenessReviewComplete($validated);
+        $this->assertEffectivenessForClosure($validated);
+        if (
+            array_key_exists('effectiveness_result', $validated) ||
+            array_key_exists('effectiveness_review', $validated) ||
+            array_key_exists('effectiveness_review_date', $validated)
+        ) {
+            $validated['effectiveness_reviewed_by'] = $request->user()->id;
         }
 
         $riskOpp = $this->processService->createRiskOpportunity($process, $validated, $request->user()->id);
@@ -432,14 +470,22 @@ class ProcessController extends Controller
         $validated = $request->validate([
             'norme' => 'required|string|max:30',
             'version' => 'nullable|string|max:20',
-            'clause_number' => 'required|string|max:20',
+            'clause_number' => [
+                'required',
+                'string',
+                'max:20',
+                \Illuminate\Validation\Rule::unique('process_iso_coverage')
+                    ->where(fn ($query) => $query
+                        ->where('process_id', $process->id)
+                        ->where('norme', $request->input('norme'))),
+            ],
             'clause_title' => 'required|string|max:255',
             'clause_description' => 'nullable|string',
             'coverage_level' => 'required|in:none,partial,full',
-            'coverage_percentage' => 'nullable|numeric|min:0|max:100',
+            'coverage_percentage' => 'nullable|integer|min:0|max:100',
             'coverage_comment' => 'nullable|string',
             'evidence' => 'nullable|array',
-            'conformity_status' => 'nullable|in:conforme,partiellement_conforme,non_conforme,na',
+            'conformity_status' => 'nullable|in:conforme,non_conforme,amelioration,non_applicable',
             'last_audit_date' => 'nullable|date',
             'next_audit_date' => 'nullable|date|after_or_equal:last_audit_date',
         ]);
@@ -449,8 +495,42 @@ class ProcessController extends Controller
         return response()->json(['data' => $coverage], 201);
     }
 
+    public function updateIsoCoverage(
+        Request $request,
+        Process $process,
+        ProcessIsoCoverage $coverage,
+    ) {
+        abort_unless((int) $coverage->process_id === (int) $process->id, 404);
+
+        $validated = $request->validate([
+            'coverage_level' => 'sometimes|in:none,partial,full',
+            'coverage_percentage' => 'sometimes|nullable|integer|min:0|max:100',
+            'coverage_comment' => 'nullable|string',
+            'evidence' => 'nullable|array',
+            'conformity_status' => 'nullable|in:conforme,non_conforme,amelioration,non_applicable',
+            'last_audit_date' => 'nullable|date',
+            'next_audit_date' => 'nullable|date|after_or_equal:last_audit_date',
+        ]);
+
+        $coverage->update($validated);
+
+        return response()->json(['data' => $coverage->fresh()]);
+    }
+
+    public function deleteIsoCoverage(Process $process, ProcessIsoCoverage $coverage)
+    {
+        abort_unless((int) $coverage->process_id === (int) $process->id, 404);
+        $coverage->delete();
+
+        return response()->json(null, 204);
+    }
+
     public function addIndicatorValue(Request $request, ProcessIndicator $indicator)
     {
+        $indicator->loadMissing('process');
+        abort_unless($indicator->process, 404);
+        $this->assertSiteAccess($request, (int) $indicator->process->site_id);
+
         $validated = $request->validate([
             'measurement_date' => 'required|date',
             'period' => 'nullable|string|max:100',
@@ -512,6 +592,9 @@ class ProcessController extends Controller
     public function listRisksOpportunities(Request $request)
     {
         $query = ProcessRiskOpportunity::with(['process', 'responsibleUser']);
+        $query->whereHas('process', function ($processQuery) use ($request) {
+            $this->scopeToUserSites($request, $processQuery);
+        });
 
         if ($request->filled('site_id')) {
             $siteId = $request->integer('site_id');
@@ -546,8 +629,12 @@ class ProcessController extends Controller
         return response()->json(['data' => $items]);
     }
 
-    public function showRiskOpportunity(ProcessRiskOpportunity $riskOpportunity)
+    public function showRiskOpportunity(Request $request, ProcessRiskOpportunity $riskOpportunity)
     {
+        $riskOpportunity->loadMissing('process');
+        abort_unless($riskOpportunity->process, 404);
+        $this->assertSiteAccess($request, (int) $riskOpportunity->process->site_id);
+
         return response()->json([
             'data' => $riskOpportunity->load(['process', 'responsibleUser']),
         ]);
@@ -555,18 +642,73 @@ class ProcessController extends Controller
 
     public function updateRiskOpportunity(Request $request, ProcessRiskOpportunity $riskOpportunity)
     {
+        $riskOpportunity->loadMissing('process');
+        abort_unless($riskOpportunity->process, 404);
+        $this->assertSiteAccess($request, (int) $riskOpportunity->process->site_id);
+        $isRisk = ($request->input('type') ?? $riskOpportunity->type) === 'risque';
+        $isOpportunity = !$isRisk;
+        $assessmentKeys = [
+            'type',
+            'source_category',
+            'source_detail',
+            'assessment_method',
+            'proportionality_rationale',
+            'decision_rationale',
+            'desired_effect',
+            'opportunity_decision',
+            'continuity_plan',
+            'continuity_indicator',
+            'strategie',
+            'planned_actions',
+            'cause',
+            'consequence',
+            'probabilite',
+            'gravite',
+        ];
+        $assessmentSubmitted = collect($assessmentKeys)
+            ->contains(fn (string $key) => $request->exists($key));
+        $requireRiskAssessment = $isRisk && $assessmentSubmitted;
+        $requireOpportunityAssessment = $isOpportunity && $assessmentSubmitted;
+
         $validated = $request->validate([
             'title' => 'sometimes|string|max:255',
             'description' => 'nullable|string',
             'type' => 'sometimes|in:risque,opportunite',
             'normes_iso' => 'nullable|array',
+            'source_category' => 'sometimes|required|in:contexte,parties_interessees,capacites,mesures,marche,technologie,reglementation,processus,changement,audit,autre',
+            'source_detail' => 'sometimes|required|string|max:2000',
+            'assessment_method' => 'sometimes|required|in:qualitative,quantitative',
+            'proportionality_rationale' => [Rule::requiredIf($requireRiskAssessment), 'nullable', 'string', 'max:2000'],
+            'decision_rationale' => [Rule::requiredIf($requireOpportunityAssessment), 'nullable', 'string', 'max:2000'],
+            'desired_effect' => [Rule::requiredIf($requireOpportunityAssessment), 'nullable', 'string', 'max:2000'],
+            'opportunity_decision' => [Rule::requiredIf($requireOpportunityAssessment), 'nullable', 'in:retain,defer,reject'],
+            'continuity_plan' => [Rule::requiredIf($requireRiskAssessment), 'nullable', 'string', 'max:4000'],
+            'continuity_indicator' => [Rule::requiredIf($requireRiskAssessment), 'nullable', 'string', 'max:255'],
+            'strategie' => [Rule::requiredIf($requireRiskAssessment), 'nullable', 'in:accepter,reduire,transferer,eviter,exploiter'],
+            'planned_actions' => ['sometimes', 'required', 'array', 'min:1'],
+            'planned_actions.*.id' => 'nullable|uuid',
+            'planned_actions.*.title' => 'required|string|max:255',
+            'planned_actions.*.description' => 'nullable|string|max:2000',
+            'planned_actions.*.action_type' => 'nullable|in:preventive,corrective,control',
+            'planned_actions.*.responsible_user_id' => 'nullable|integer|exists:users,id',
+            'planned_actions.*.responsible' => 'nullable|string|max:255',
+            'planned_actions.*.implicated_user_ids' => 'nullable|array',
+            'planned_actions.*.implicated_user_ids.*' => 'integer|exists:users,id',
+            'planned_actions.*.deadline' => 'nullable|date',
+            'planned_actions.*.deadline_frequency' => 'nullable|string|max:100',
+            'planned_actions.*.status' => 'nullable|string|max:50',
+            'planned_actions.*.implementation_status' => 'nullable|in:planned,in_progress,completed',
+            'planned_actions.*.effectiveness_result' => 'nullable|in:efficace,partiellement_efficace,non_efficace',
+            'planned_actions.*.effectiveness_review' => 'nullable|string|max:2000',
+            'planned_actions.*.effectiveness_review_date' => 'nullable|date|before_or_equal:today',
+            'effectiveness_review' => 'nullable|string|max:2000',
+            'effectiveness_review_date' => 'nullable|date|before_or_equal:today',
+            'effectiveness_result' => 'nullable|in:efficace,partiellement_efficace,non_efficace',
             'cause' => 'nullable|string',
             'consequence' => 'nullable|string',
             'probabilite' => 'sometimes|integer|min:1|max:4',
             'gravite' => 'sometimes|integer|min:1|max:4',
-            'strategie' => 'nullable|in:accepter,reduire,transferer,eviter,exploiter',
             'actions_prevues' => 'nullable|string',
-            'planned_actions' => 'nullable',
             'responsible_user_id' => 'nullable|exists:users,id',
             'target_date' => 'nullable|date',
             'status' => 'nullable|in:identifie,en_cours,traite,surveille,cloture,a_traiter',
@@ -574,7 +716,12 @@ class ProcessController extends Controller
             'gravite_residuelle' => 'nullable|integer|min:1|max:4',
         ]);
 
-        $validated = $this->normalizeRiskOpportunityActionsPayload($validated);
+        $validated = $this->normalizeRiskOpportunityActionsPayload(
+            $validated,
+            is_array($riskOpportunity->planned_actions) ? $riskOpportunity->planned_actions : [],
+            (int) $request->user()->id,
+        );
+        $this->assertActionEffectivenessReviewComplete($validated);
 
         if (array_key_exists('description', $validated) && trim((string) ($validated['description'] ?? '')) === '') {
             $validated['description'] = null;
@@ -584,6 +731,16 @@ class ProcessController extends Controller
             $validated['status'] = $this->normalizeRiskOpportunityStatus($validated['status']);
         }
 
+        $this->assertEffectivenessReviewComplete($validated, $riskOpportunity);
+        $this->assertEffectivenessForClosure($validated, $riskOpportunity);
+        if (
+            array_key_exists('effectiveness_result', $validated) ||
+            array_key_exists('effectiveness_review', $validated) ||
+            array_key_exists('effectiveness_review_date', $validated)
+        ) {
+            $validated['effectiveness_reviewed_by'] = $request->user()->id;
+        }
+
         $riskOpportunity->update($validated);
 
         return response()->json([
@@ -591,8 +748,12 @@ class ProcessController extends Controller
         ]);
     }
 
-    public function deleteRiskOpportunity(ProcessRiskOpportunity $riskOpportunity)
+    public function deleteRiskOpportunity(Request $request, ProcessRiskOpportunity $riskOpportunity)
     {
+        $riskOpportunity->loadMissing('process');
+        abort_unless($riskOpportunity->process, 404);
+        $this->assertSiteAccess($request, (int) $riskOpportunity->process->site_id);
+
         $riskOpportunity->delete();
 
         return response()->json(['message' => 'Risque/opportunite de processus supprime'], 200);
@@ -600,6 +761,10 @@ class ProcessController extends Controller
 
     public function updateRiskEvaluation(Request $request, ProcessRiskOpportunity $riskOpportunity)
     {
+        $riskOpportunity->loadMissing('process');
+        abort_unless($riskOpportunity->process, 404);
+        $this->assertSiteAccess($request, (int) $riskOpportunity->process->site_id);
+
         $validated = $request->validate([
             'probabilite' => 'required|integer|min:1|max:4',
             'gravite' => 'required|integer|min:1|max:4',
@@ -614,12 +779,124 @@ class ProcessController extends Controller
         ]);
     }
 
+    private function assertEffectivenessReviewComplete(
+        array $validated,
+        ?ProcessRiskOpportunity $existing = null,
+    ): void {
+        $result = array_key_exists('effectiveness_result', $validated)
+            ? $validated['effectiveness_result']
+            : $existing?->effectiveness_result;
+        if (!$result) {
+            return;
+        }
+
+        $review = array_key_exists('effectiveness_review', $validated)
+            ? $validated['effectiveness_review']
+            : $existing?->effectiveness_review;
+        $reviewDate = array_key_exists('effectiveness_review_date', $validated)
+            ? $validated['effectiveness_review_date']
+            : $existing?->effectiveness_review_date?->toDateString();
+        if (trim((string) $review) !== '' && $reviewDate) {
+            return;
+        }
+
+        throw \Illuminate\Validation\ValidationException::withMessages([
+            'effectiveness_review' => [
+                'Une décision d’efficacité doit être accompagnée d’une preuve ou justification et d’une date.',
+            ],
+        ]);
+    }
+
+    private function assertEffectivenessForClosure(
+        array $validated,
+        ?ProcessRiskOpportunity $existing = null,
+    ): void {
+        if (($validated['status'] ?? $existing?->status) !== 'cloture' || $existing?->status === 'cloture') {
+            return;
+        }
+
+        $type = $validated['type'] ?? $existing?->type;
+        $decision = $validated['opportunity_decision'] ?? $existing?->opportunity_decision;
+        if ($type === 'opportunite' && $decision === 'reject') {
+            return;
+        }
+
+        $result = array_key_exists('effectiveness_result', $validated)
+            ? $validated['effectiveness_result']
+            : $existing?->effectiveness_result;
+        $review = array_key_exists('effectiveness_review', $validated)
+            ? $validated['effectiveness_review']
+            : $existing?->effectiveness_review;
+        $reviewDate = array_key_exists('effectiveness_review_date', $validated)
+            ? $validated['effectiveness_review_date']
+            : $existing?->effectiveness_review_date?->toDateString();
+        if ($result !== 'efficace' || trim((string) $review) === '' || !$reviewDate) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'effectiveness_result' => [
+                    'Pour clôturer cette fiche, consignez une évaluation efficace, sa date et une preuve ou justification.',
+                ],
+            ]);
+        }
+
+        $actions = $validated['planned_actions'] ?? $existing?->planned_actions ?? [];
+        foreach (is_array($actions) ? $actions : [] as $index => $action) {
+            if (
+                !is_array($action)
+                || ($action['implementation_status'] ?? null) !== 'completed'
+                || ($action['effectiveness_result'] ?? null) !== 'efficace'
+                || trim((string) ($action['effectiveness_review'] ?? '')) === ''
+                || empty($action['effectiveness_review_date'])
+            ) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    "planned_actions.{$index}.effectiveness_result" => [
+                        'Chaque action prévue doit être terminée et évaluée efficace avec une date et une preuve avant la clôture.',
+                    ],
+                ]);
+            }
+        }
+    }
+
+    private function assertActionEffectivenessReviewComplete(array $validated): void
+    {
+        foreach ($validated['planned_actions'] ?? [] as $index => $action) {
+            if (!is_array($action)) {
+                continue;
+            }
+
+            $hasReviewData = !empty($action['effectiveness_result'])
+                || trim((string) ($action['effectiveness_review'] ?? '')) !== ''
+                || !empty($action['effectiveness_review_date']);
+            if (!$hasReviewData) {
+                continue;
+            }
+
+            if (
+                ($action['implementation_status'] ?? null) !== 'completed'
+                || empty($action['effectiveness_result'])
+                || trim((string) ($action['effectiveness_review'] ?? '')) === ''
+                || empty($action['effectiveness_review_date'])
+            ) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    "planned_actions.{$index}.effectiveness_review" => [
+                        'Pour évaluer une action, indiquez qu’elle est terminée, le résultat, une preuve ou justification et la date.',
+                    ],
+                ]);
+            }
+        }
+    }
+
     public function exportRisksOpportunitiesXlsx(Request $request)
     {
         $user = $request->user();
         $siteId = (int) $request->integer('site_id');
 
-        $query = ProcessRiskOpportunity::query()->with(['process.site']);
+        if ($siteId > 0) {
+            $this->assertSiteAccess($request, $siteId);
+        }
+
+        $query = ProcessRiskOpportunity::query()
+            ->with(['process.site'])
+            ->where('type', 'risque');
 
         if ($siteId > 0) {
             $query->whereHas('process', fn ($processQuery) => $processQuery->where('site_id', $siteId));
@@ -629,10 +906,25 @@ class ProcessController extends Controller
             $query->whereHas('process.site', fn ($siteQuery) => $siteQuery->where('enterprise_id', (int) $user->enterprise_id));
         }
 
-        $items = $query->orderBy('process_id')->orderBy('id')->get();
+        $riskItems = $query->orderBy('process_id')->orderBy('id')->get();
+
+        $opportunitiesQuery = Opportunity::query()->with(['process.site']);
+        if ($siteId > 0) {
+            $opportunitiesQuery->where('site_id', $siteId);
+        } elseif ($user?->site_id) {
+            $opportunitiesQuery->where('site_id', (int) $user->site_id);
+        } elseif ($user?->enterprise_id) {
+            $opportunitiesQuery->whereHas('site', fn ($siteQuery) =>
+                $siteQuery->where('enterprise_id', (int) $user->enterprise_id));
+        }
+
+        $items = $riskItems
+            ->concat($opportunitiesQuery->orderBy('process_id')->orderBy('id')->get())
+            ->sortBy(['process_id', 'id'])
+            ->values();
 
         $allUserIds = collect($items)
-            ->flatMap(function (ProcessRiskOpportunity $item) {
+            ->flatMap(function ($item) {
                 $plannedActions = is_array($item->planned_actions) ? $item->planned_actions : [];
 
                 return collect($plannedActions)->flatMap(function ($action) {
@@ -776,7 +1068,7 @@ class ProcessController extends Controller
         return $mapping[$status] ?? 'identifie';
     }
 
-    private function normalizeSingleRiskAction(mixed $item): ?array
+    private function normalizeSingleRiskAction(mixed $item, ?array $existing = null): ?array
     {
         if (is_string($item)) {
             $title = trim($item);
@@ -785,8 +1077,10 @@ class ProcessController extends Controller
             }
 
             return [
+                'id' => $existing['id'] ?? (string) Str::uuid(),
                 'title' => $title,
                 'description' => $title,
+                'implementation_status' => $existing['implementation_status'] ?? 'planned',
             ];
         }
 
@@ -800,8 +1094,12 @@ class ProcessController extends Controller
         }
 
         $normalized = [
+            'id' => (string) ($item['id'] ?? $existing['id'] ?? Str::uuid()),
             'title' => $title,
             'description' => trim((string) ($item['description'] ?? $title)),
+            'implementation_status' => in_array($item['implementation_status'] ?? null, ['planned', 'in_progress', 'completed'], true)
+                ? $item['implementation_status']
+                : ($existing['implementation_status'] ?? 'planned'),
         ];
 
         if (!empty($item['action_type']) && in_array($item['action_type'], ['preventive', 'corrective', 'control'], true)) {
@@ -816,8 +1114,10 @@ class ProcessController extends Controller
             $normalized['responsible'] = (string) $item['responsible'];
         }
 
-        if (!empty($item['due_date'])) {
-            $normalized['due_date'] = (string) $item['due_date'];
+        if (array_key_exists('deadline', $item)) {
+            $normalized['deadline'] = $item['deadline'];
+        } elseif (!empty($existing['deadline'])) {
+            $normalized['deadline'] = $existing['deadline'];
         }
 
         if (!empty($item['deadline_frequency'])) {
@@ -830,6 +1130,18 @@ class ProcessController extends Controller
 
         if (!empty($item['implicated_user_ids']) && is_array($item['implicated_user_ids'])) {
             $normalized['implicated_user_ids'] = array_values($item['implicated_user_ids']);
+        }
+
+        foreach (['effectiveness_result', 'effectiveness_review', 'effectiveness_review_date'] as $key) {
+            if (array_key_exists($key, $item)) {
+                $normalized[$key] = $item[$key];
+            } elseif (array_key_exists($key, $existing ?? [])) {
+                $normalized[$key] = $existing[$key];
+            }
+        }
+
+        if (!empty($existing['effectiveness_reviewed_by'])) {
+            $normalized['effectiveness_reviewed_by'] = $existing['effectiveness_reviewed_by'];
         }
 
         return $normalized;
@@ -877,17 +1189,58 @@ class ProcessController extends Controller
         return $types;
     }
 
-    private function normalizeRiskOpportunityActionsPayload(array $payload): array
+    private function normalizeRiskOpportunityActionsPayload(
+        array $payload,
+        ?array $existingActions = null,
+        ?int $actorId = null,
+    ): array
     {
         if (array_key_exists('planned_actions', $payload)) {
             $planned = $payload['planned_actions'];
+            $existingById = collect($existingActions ?? [])
+                ->filter(fn ($action) => is_array($action) && !empty($action['id']))
+                ->keyBy(fn (array $action) => (string) $action['id']);
+            $normalize = function ($item) use ($existingById, $actorId) {
+                $existing = is_array($item) && !empty($item['id'])
+                    ? $existingById->get((string) $item['id'])
+                    : null;
+                $action = $this->normalizeSingleRiskAction(
+                    $item,
+                    is_array($existing) ? $existing : null,
+                );
+                if (!$action) {
+                    return null;
+                }
+
+                $reviewChanged = is_array($existing) && (
+                    ($action['effectiveness_result'] ?? null) !== ($existing['effectiveness_result'] ?? null)
+                    || ($action['effectiveness_review'] ?? null) !== ($existing['effectiveness_review'] ?? null)
+                    || ($action['effectiveness_review_date'] ?? null) !== ($existing['effectiveness_review_date'] ?? null)
+                );
+                $hasReviewData = !empty($action['effectiveness_result'])
+                    || !empty($action['effectiveness_review'])
+                    || !empty($action['effectiveness_review_date']);
+                if (
+                    $actorId
+                    && $hasReviewData
+                    && (
+                        !is_array($existing)
+                        || $reviewChanged
+                        || empty($existing['effectiveness_reviewed_by'])
+                    )
+                ) {
+                    $action['effectiveness_reviewed_by'] = $actorId;
+                }
+
+                return $action;
+            };
 
             if (is_string($planned)) {
                 try {
                     $decoded = json_decode($planned, true, 512, JSON_THROW_ON_ERROR);
                     if (is_array($decoded)) {
                         $payload['planned_actions'] = array_values(array_filter(array_map(
-                            fn ($item) => $this->normalizeSingleRiskAction($item),
+                            $normalize,
                             $decoded
                         )));
                     } else {
@@ -896,13 +1249,13 @@ class ProcessController extends Controller
                 } catch (\Throwable) {
                     $lines = preg_split('/\r\n|\r|\n/', $planned) ?: [];
                     $payload['planned_actions'] = array_values(array_filter(array_map(
-                        fn ($line) => $this->normalizeSingleRiskAction($line),
+                        $normalize,
                         $lines
                     )));
                 }
             } elseif (is_array($planned)) {
                 $payload['planned_actions'] = array_values(array_filter(array_map(
-                    fn ($item) => $this->normalizeSingleRiskAction($item),
+                    $normalize,
                     $planned
                 )));
             } elseif (!is_array($planned) && $planned !== null) {
@@ -983,6 +1336,8 @@ class ProcessController extends Controller
                     'responsables_implique_display' => $implicatedNames,
                     'delai_frequence' => (string) ($action['deadline_frequency'] ?? $action['due_date'] ?? ''),
                     'action_index' => $actionIndex,
+                    'effectiveness_result' => (string) ($action['effectiveness_result'] ?? $item->effectiveness_result ?? ''),
+                    'effectiveness_review' => (string) ($action['effectiveness_review'] ?? $item->effectiveness_review ?? ''),
                 ];
 
                 if ($item->type === 'risque') {
@@ -1079,8 +1434,8 @@ class ProcessController extends Controller
                 $sheet->setCellValue("K{$rowIndex}", $risk['responsable_name'] ?? '');
                 $sheet->setCellValue("L{$rowIndex}", $risk['responsables_implique_display'] ?? '');
                 $sheet->setCellValue("M{$rowIndex}", $risk['delai_frequence'] ?? '');
-                $sheet->setCellValue("N{$rowIndex}", '');
-                $sheet->setCellValue("O{$rowIndex}", '');
+                $sheet->setCellValue("N{$rowIndex}", $risk['effectiveness_result'] ?? '');
+                $sheet->setCellValue("O{$rowIndex}", $risk['effectiveness_review'] ?? '');
 
                 $sheet->setCellValue("P{$rowIndex}", $opportunity['description'] ?? '');
                 $sheet->setCellValue("Q{$rowIndex}", $opportunity['probabilite'] ?? '');
@@ -1090,8 +1445,8 @@ class ProcessController extends Controller
                 $sheet->setCellValue("U{$rowIndex}", $opportunity['responsable_name'] ?? '');
                 $sheet->setCellValue("V{$rowIndex}", $opportunity['responsables_implique_display'] ?? '');
                 $sheet->setCellValue("W{$rowIndex}", $opportunity['delai_frequence'] ?? '');
-                $sheet->setCellValue("X{$rowIndex}", '');
-                $sheet->setCellValue("Y{$rowIndex}", '');
+                $sheet->setCellValue("X{$rowIndex}", $opportunity['effectiveness_result'] ?? '');
+                $sheet->setCellValue("Y{$rowIndex}", $opportunity['effectiveness_review'] ?? '');
 
                 if (isset($risk['score']) && $risk['score'] !== '') {
                     $this->applyScoreFill($sheet, "H{$rowIndex}", (int) $risk['score'], 'risque');
@@ -1168,6 +1523,9 @@ class ProcessController extends Controller
     {
         $user = $request->user();
         $siteId = $request->filled('site_id') ? (int) $request->site_id : ($user?->site_id ? (int) $user->site_id : null);
+        if ($siteId) {
+            $this->assertSiteAccess($request, $siteId);
+        }
         $enterpriseId = (int) ($user?->enterprise_id ?? 0);
         $data = $this->processService->getCartographyData($siteId, $enterpriseId);
         return response()->json(['data' => $data]);
@@ -1180,6 +1538,9 @@ class ProcessController extends Controller
     {
         $user = $request->user();
         $siteId = $request->filled('site_id') ? (int) $request->site_id : ($user?->site_id ? (int) $user->site_id : null);
+        if ($siteId) {
+            $this->assertSiteAccess($request, $siteId);
+        }
         $enterpriseId = (int) ($user?->enterprise_id ?? 0);
         $data = $this->processService->getCartographyData($siteId, $enterpriseId);
 
@@ -1223,6 +1584,9 @@ class ProcessController extends Controller
     {
         $user = $request->user();
         $siteId = $request->filled('site_id') ? (int) $request->site_id : ($user?->site_id ? (int) $user->site_id : null);
+        if ($siteId) {
+            $this->assertSiteAccess($request, $siteId);
+        }
         $enterpriseId = (int) ($user?->enterprise_id ?? 0);
         $data = $this->processService->getCartographyData($siteId, $enterpriseId);
 
@@ -1262,8 +1626,12 @@ class ProcessController extends Controller
         $user = $request->user();
         $siteId = $request->filled('site_id') ? (int) $request->site_id : ($user?->site_id ? (int) $user->site_id : null);
         if (!$siteId) {
-            $siteId = (int) (Site::where('enterprise_id', $user?->enterprise_id)->value('id') ?? 1);
+            $siteId = (int) (Site::where('enterprise_id', $user?->enterprise_id)->value('id') ?? 0);
         }
+        if ($siteId <= 0) {
+            return response()->json(['message' => 'Le paramètre site_id est requis.'], 422);
+        }
+        $this->assertSiteAccess($request, $siteId);
 
         $generationContext = $this->resolveGeneratedDocumentContext($request, $siteId, null, 'CART', 'Cartographie des Processus');
 
@@ -1338,6 +1706,7 @@ class ProcessController extends Controller
         if (!$siteId) {
             return response()->json(['message' => 'Le paramètre site_id est requis.'], 422);
         }
+        $this->assertSiteAccess($request, $siteId);
 
         $rawNorme = trim((string) ($request->query('norme', $request->input('norme', '9001')) ?? '9001'));
         $norme = '9001';
@@ -1357,11 +1726,39 @@ class ProcessController extends Controller
             }
         }
 
+        $rows = array_values(is_array($matrix) ? $matrix : []);
+        $coverageScores = array_map(
+            fn ($row) => (float) ($row['coverage_percentage'] ?? 0),
+            $rows,
+        );
+
         return response()->json([
-            'data' => array_values(is_array($matrix) ? $matrix : []),
+            'data' => $rows,
             'site_id' => $siteId,
             'norme' => $norme,
-            'total' => is_array($matrix) ? count($matrix) : 0,
+            'total' => count($rows),
+            'summary' => [
+                'evaluated_clauses' => count($rows),
+                'average_coverage_percentage' => $coverageScores === []
+                    ? 0
+                    : round(array_sum($coverageScores) / count($coverageScores), 1),
+                'full_coverage' => count(array_filter(
+                    $rows,
+                    fn ($row) => ($row['coverage'] ?? null) === 'full',
+                )),
+                'partial_coverage' => count(array_filter(
+                    $rows,
+                    fn ($row) => ($row['coverage'] ?? null) === 'partial',
+                )),
+                'no_coverage' => count(array_filter(
+                    $rows,
+                    fn ($row) => ($row['coverage'] ?? null) === 'none',
+                )),
+                'nonconformities' => count(array_filter(
+                    $rows,
+                    fn ($row) => ($row['conformity'] ?? null) === 'non_conforme',
+                )),
+            ],
         ]);
     }
 

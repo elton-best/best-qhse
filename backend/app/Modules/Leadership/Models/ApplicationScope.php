@@ -20,6 +20,9 @@ class ApplicationScope extends Model
         'site_id',
         'version',
         'is_current',
+        'status',
+        'published_by',
+        'published_at',
         'objective',
         'scope',
         'document_objective',
@@ -51,6 +54,7 @@ class ApplicationScope extends Model
         'last_reviewed_at' => 'date', 'next_review_date' => 'date',
         'review_required_at' => 'datetime', 'review_notified_at' => 'datetime',
         'is_current' => 'boolean',
+        'published_at' => 'datetime',
         'referenced_documents' => 'array',
         'processes' => 'array',
         'included_processes' => 'array',
@@ -90,6 +94,11 @@ class ApplicationScope extends Model
     public function updater()
     {
         return $this->belongsTo(User::class, 'updated_by');
+    }
+
+    public function publishedBy()
+    {
+        return $this->belongsTo(User::class, 'published_by');
     }
 
     public function documents()

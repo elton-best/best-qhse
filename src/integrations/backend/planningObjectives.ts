@@ -22,8 +22,10 @@ export const POLICY_AXES_KEY = ["planning-policy-axes"] as const;
 export const OBJECTIVE_USERS_KEY = ["planning-objective-users"] as const;
 
 export type ObjectiveType = "strategic" | "operational" | "quality" | "safety" | "environmental";
+export type ObjectiveLevel = "strategic" | "tactical" | "operational";
 export type ObjectiveAxis = "Q" | "HS" | "E";
 export type ObjectiveFrequency = "mensuel" | "trimestriel" | "semestriel" | "annuel";
+export type ObjectiveMeasurementFrequency = "monthly" | "quarterly" | "semiannual" | "annual";
 export type MonthlyValue = number | "N/A" | null;
 
 export type ObjectiveRecord = Record<string, unknown> & {
@@ -31,6 +33,7 @@ export type ObjectiveRecord = Record<string, unknown> & {
 };
 
 export type PlannedActionInput = {
+  id?: string | number | undefined;
   title: string;
   description?: string | undefined;
   responsible_user_id?: number | undefined;
@@ -43,22 +46,31 @@ export type PlannedActionInput = {
 export type CreateObjectiveInput = {
   site_id: number;
   process_id?: number | undefined;
+  parent_objective_id?: number | undefined;
   title: string;
   description?: string | undefined;
   type: ObjectiveType;
+  level: ObjectiveLevel;
+  indicator_name: string;
+  baseline_value: number;
   target_value: number;
   unit?: string | undefined;
   deadline: string;
   responsible_id: number;
+  required_resources: string;
+  evaluation_method: string;
+  applicable_norms?: string[] | undefined;
   indicateur_id?: number | undefined;
   axes?: ObjectiveAxis[] | undefined;
-  frequency?: ObjectiveFrequency | undefined;
-  indicator_name?: string | undefined;
-  planned_actions?: PlannedActionInput[] | undefined;
+  measurement_frequency: ObjectiveMeasurementFrequency;
+  planned_actions: PlannedActionInput[];
 };
 
-export type UpdateObjectiveInput = Partial<Omit<CreateObjectiveInput, "site_id" | "process_id">> & {
+export type UpdateObjectiveInput = Partial<
+  Omit<CreateObjectiveInput, "site_id" | "process_id" | "parent_objective_id">
+> & {
   process_id?: number | undefined;
+  parent_objective_id?: number | null | undefined;
 };
 
 export type ProcessObjective = Record<string, unknown> & {
@@ -192,18 +204,31 @@ function buildCentralPayload(input: CreateObjectiveInput): Record<string, unknow
     site_id: input.site_id,
     title: input.title.trim(),
     type: input.type,
+    level: input.level,
+    indicator_name: input.indicator_name.trim(),
+    baseline_value: input.baseline_value,
     target_value: input.target_value,
     deadline: input.deadline,
     responsible_id: input.responsible_id,
+    required_resources: input.required_resources.trim(),
+    evaluation_method: input.evaluation_method.trim(),
+    measurement_frequency: input.measurement_frequency,
   };
   if (input.process_id != null) payload["process_id"] = input.process_id;
+  if (input.parent_objective_id != null) {
+    payload["parent_objective_id"] = input.parent_objective_id;
+  }
   if (input.description?.trim()) payload["description"] = input.description.trim();
   if (input.unit?.trim()) payload["unit"] = input.unit.trim();
   if (input.indicateur_id != null) payload["indicateur_id"] = input.indicateur_id;
   if (input.axes && input.axes.length > 0) payload["axes"] = input.axes;
-  if (input.planned_actions && input.planned_actions.length > 0) {
+  if (input.applicable_norms && input.applicable_norms.length > 0) {
+    payload["applicable_norms"] = input.applicable_norms;
+  }
+  if (input.planned_actions) {
     payload["planned_actions"] = input.planned_actions.map((action) => {
       const entry: Record<string, unknown> = { title: action.title.trim() };
+      if (action.id != null) entry["id"] = action.id;
       if (action.description?.trim()) entry["description"] = action.description.trim();
       if (action.responsible_user_id != null)
         entry["responsible_user_id"] = action.responsible_user_id;
@@ -234,15 +259,29 @@ export async function updateObjective(
   if (input.title !== undefined) body["title"] = input.title.trim();
   if (input.description !== undefined) body["description"] = input.description;
   if (input.type !== undefined) body["type"] = input.type;
+  if (input.level !== undefined) body["level"] = input.level;
+  if (input.parent_objective_id !== undefined) {
+    body["parent_objective_id"] = input.parent_objective_id;
+  }
+  if (input.indicator_name !== undefined) body["indicator_name"] = input.indicator_name.trim();
+  if (input.baseline_value !== undefined) body["baseline_value"] = input.baseline_value;
   if (input.target_value !== undefined) body["target_value"] = input.target_value;
   if (input.unit !== undefined) body["unit"] = input.unit;
   if (input.deadline !== undefined) body["deadline"] = input.deadline;
   if (input.responsible_id !== undefined) body["responsible_id"] = input.responsible_id;
+  if (input.required_resources !== undefined)
+    body["required_resources"] = input.required_resources.trim();
+  if (input.evaluation_method !== undefined)
+    body["evaluation_method"] = input.evaluation_method.trim();
+  if (input.measurement_frequency !== undefined)
+    body["measurement_frequency"] = input.measurement_frequency;
+  if (input.applicable_norms !== undefined) body["applicable_norms"] = input.applicable_norms;
   if (input.indicateur_id !== undefined) body["indicateur_id"] = input.indicateur_id;
   if (input.axes !== undefined) body["axes"] = input.axes;
   if (input.process_id !== undefined) body["process_id"] = input.process_id;
   if (input.planned_actions !== undefined) {
     body["planned_actions"] = input.planned_actions.map((action) => ({
+      id: action.id,
       title: action.title.trim(),
       description: action.description,
       responsible_user_id: action.responsible_user_id,

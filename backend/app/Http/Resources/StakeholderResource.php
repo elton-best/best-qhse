@@ -14,6 +14,7 @@ class StakeholderResource extends JsonApiResource
             'type' => $this->type,
             'relevance_degree' => $this->relevance_degree,
             'needs_expectations' => $this->needs_expectations,
+            'climate_expectations' => $this->climate_expectations,
             'requirements' => $this->requirements,
             'actions' => $this->actions,
             'contact_person' => $this->contact_person,

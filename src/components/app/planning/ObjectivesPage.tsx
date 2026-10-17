@@ -1,24 +1,24 @@
 import { ObjectiveCommunicationButton, ObjectiveInbox } from "@/components/app/iso/ObjectiveCommunications";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  CalendarDays,
   Download,
   Flag,
-  LayoutGrid,
   Lock,
   Pencil,
   Plus,
   Save,
   Search,
-  Table as TableIcon,
   Target,
   Trash2,
   TrendingUp,
   X,
 } from "lucide-react";
 import { useCurrentSite } from "@/hooks/use-workspace";
+import { getMyProfile } from "@/lib/profile.functions";
 import { flattenResource, useProcesses } from "@/integrations/backend/context";
 import {
   downloadBlob,
@@ -37,6 +37,8 @@ import {
   type MonthlyValue,
   type ObjectiveAxis,
   type ObjectiveFrequency,
+  type ObjectiveLevel,
+  type ObjectiveMeasurementFrequency,
   type ObjectiveRecord,
   type ObjectiveType,
   type PlannedActionInput,
@@ -82,6 +84,18 @@ const MONTHS = [
 const AXES: ObjectiveAxis[] = ["Q", "HS", "E"];
 const FREQUENCIES: ObjectiveFrequency[] = ["mensuel", "trimestriel", "semestriel", "annuel"];
 const TYPES: ObjectiveType[] = ["strategic", "operational", "quality", "safety", "environmental"];
+const OBJECTIVE_LEVELS: ObjectiveLevel[] = ["strategic", "tactical", "operational"];
+const LEVEL_LABELS: Record<ObjectiveLevel, string> = {
+  strategic: "Stratégique",
+  tactical: "Tactique",
+  operational: "Opérationnel",
+};
+const MEASUREMENT_FREQUENCY_API: Record<ObjectiveFrequency, ObjectiveMeasurementFrequency> = {
+  mensuel: "monthly",
+  trimestriel: "quarterly",
+  semestriel: "semiannual",
+  annuel: "annual",
+};
 
 const TYPE_LABELS: Record<ObjectiveType, string> = {
   strategic: "Stratégique",
@@ -142,6 +156,14 @@ function centralProcessLabel(obj: ObjectiveRecord, processNameById?: Map<string,
   return typeof fallback === "string" ? fallback : "";
 }
 
+function centralParentObjectiveLabel(obj: ObjectiveRecord): string {
+  const parent = obj["parent_objective"];
+  if (parent && typeof parent === "object") {
+    return textOf((parent as Record<string, unknown>)["title"]);
+  }
+  return "";
+}
+
 function centralResponsibleLabel(obj: ObjectiveRecord): string {
   const responsible = obj["responsible"];
   if (responsible && typeof responsible === "object") {
@@ -191,6 +213,9 @@ type LinkedActionView = {
   title: string;
   status: string;
   progress: number;
+  responsibleId: string | number | null;
+  startDate: string;
+  dueDate: string;
 };
 
 function linkedActionsOf(obj: ObjectiveRecord): LinkedActionView[] {
@@ -204,11 +229,18 @@ function linkedActionsOf(obj: ObjectiveRecord): LinkedActionView[] {
     const id: string | number | null =
       typeof idRaw === "string" || typeof idRaw === "number" ? idRaw : null;
     const progressRaw = numberOr(rec["progress"] ?? rec["progress_rate"]);
+    const responsibleRaw = rec["responsible_id"] ?? rec["responsible_user_id"];
     out.push({
       id,
       title: textOf(rec["title"] ?? rec["name"]) || "Action",
       status: textOf(rec["status"] ?? rec["workflow_state"] ?? ""),
       progress: progressRaw === null ? 0 : Math.min(100, Math.max(0, Math.round(progressRaw))),
+      responsibleId:
+        typeof responsibleRaw === "string" || typeof responsibleRaw === "number"
+          ? responsibleRaw
+          : null,
+      startDate: textOf(rec["start_date"]),
+      dueDate: textOf(rec["deadline"] ?? rec["due_date"] ?? rec["target_date"]),
     });
   }
   return out;
@@ -294,6 +326,9 @@ function ActionProgressRow({ action }: { action: LinkedActionView }) {
           {action.status ? planActionStatusLabel(action.status) : "—"}
         </span>
       </div>
+      {action.dueDate && (
+        <p className={`text-xs ${muted}`}>Échéance : {formatDateFR(action.dueDate)}</p>
+      )}
       <div className="flex items-center gap-3">
         <input
           type="range"
@@ -411,6 +446,205 @@ function ObjectiveActionsBlock({ obj }: { obj: ObjectiveRecord }) {
   );
 }
 
+type ObjectiveLane = "planned" | "in_progress" | "overdue" | "achieved";
+
+const OBJECTIVE_LANES: { key: ObjectiveLane; label: string }[] = [
+  { key: "planned", label: "À lancer" },
+  { key: "in_progress", label: "En cours" },
+  { key: "overdue", label: "En retard" },
+  { key: "achieved", label: "Atteints" },
+];
+
+function objectiveLaneOf(obj: ObjectiveRecord): ObjectiveLane {
+  const status = textOf(obj["status"] ?? obj["workflow_status"]).toLowerCase();
+  const progress = centralRate(obj);
+  if (/achiev|atteint|completed|termine|cloture/.test(status) || progress >= 100) {
+    return "achieved";
+  }
+
+  const deadline = Date.parse(textOf(obj["deadline"]));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (Number.isFinite(deadline) && deadline < today.getTime() && progress < 100) {
+    return "overdue";
+  }
+  if (/active|en_cours|in_progress/.test(status) || progress > 0) return "in_progress";
+  return "planned";
+}
+
+function ObjectiveKanbanView({
+  items,
+  processNameById,
+}: {
+  items: ObjectiveRecord[];
+  processNameById: Map<string, string>;
+}) {
+  return (
+    <div className="grid gap-3 lg:grid-cols-4">
+      {OBJECTIVE_LANES.map((lane) => {
+        const laneItems = items.filter((obj) => objectiveLaneOf(obj) === lane.key);
+        return (
+          <section key={lane.key} className={`${card} min-w-0 p-3`} aria-label={lane.label}>
+            <h3 className="mb-3 flex items-center justify-between font-bold">
+              {lane.label}
+              <span className="rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground">
+                {laneItems.length}
+              </span>
+            </h3>
+            <div className="space-y-3">
+              {laneItems.map((obj) => (
+                <article key={String(obj.id)} className="rounded-xl border border-border p-3">
+                  <p className="font-semibold">{textOf(obj["title"]) || "Objectif"}</p>
+                  <p className={`mt-1 text-xs ${muted}`}>
+                    {centralProcessLabel(obj, processNameById) || "Aucun processus associé"}
+                  </p>
+                  {centralParentObjectiveLabel(obj) && (
+                    <p className={`mt-1 text-xs ${muted}`}>
+                      Parent : {centralParentObjectiveLabel(obj)}
+                    </p>
+                  )}
+                  <div className="mt-3 flex justify-between text-xs">
+                    <span>{LEVEL_LABELS[textOf(obj["level"]) as ObjectiveLevel] ?? "Niveau non défini"}</span>
+                    <strong>{centralRate(obj)} %</strong>
+                  </div>
+                  <p className={`mt-1 text-xs ${muted}`}>
+                    Échéance : {formatDateFR(obj["deadline"])}
+                  </p>
+                  <ObjectiveActionsBlock obj={obj} />
+                </article>
+              ))}
+              {laneItems.length === 0 && (
+                <p className={`rounded-lg border border-dashed border-border p-3 text-xs ${muted}`}>
+                  Aucun objectif dans cette colonne.
+                </p>
+              )}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function ObjectiveGanttView({
+  items,
+  processNameById,
+}: {
+  items: ObjectiveRecord[];
+  processNameById: Map<string, string>;
+}) {
+  const dated = items.flatMap((objective) => {
+    const dueDate = Date.parse(textOf(objective["deadline"]));
+    const startDate = Date.parse(
+      textOf(objective["start_date"] ?? objective["created_at"] ?? objective["deadline"]),
+    );
+    if (!Number.isFinite(startDate) || !Number.isFinite(dueDate)) return [];
+    return [{ objective, startDate, dueDate: Math.max(startDate, dueDate) }];
+  });
+  if (dated.length === 0) {
+    return (
+      <div className={`${card} p-8 text-center`}>
+        <CalendarDays className="mx-auto h-8 w-8 text-muted-foreground" />
+        <p className="mt-2 font-bold">Aucune date exploitable pour le diagramme de Gantt</p>
+        <p className={`mt-1 text-sm ${muted}`}>
+          Renseignez les dates de début et les échéances des objectifs.
+        </p>
+      </div>
+    );
+  }
+
+  const rangeStart = Math.min(...dated.map((item) => item.startDate));
+  const lastDate = Math.max(...dated.map((item) => item.dueDate));
+  const rangeEnd = lastDate > rangeStart ? lastDate : rangeStart + 86_400_000;
+  const range = rangeEnd - rangeStart;
+
+  return (
+    <div className={`${card} space-y-4 overflow-x-auto p-4`}>
+      <div className="ml-[min(40%,220px)] flex min-w-[560px] justify-between text-xs text-muted-foreground">
+        <span>{formatDateFR(new Date(rangeStart).toISOString())}</span>
+        <span>{formatDateFR(new Date(rangeEnd).toISOString())}</span>
+      </div>
+      <div className="min-w-[780px] space-y-3">
+        {dated.map(({ objective, startDate, dueDate }) => {
+          const left = ((startDate - rangeStart) / range) * 100;
+          const width = Math.max(1.5, ((dueDate - startDate) / range) * 100);
+          return (
+            <div
+              key={String(objective.id)}
+              className="grid grid-cols-[minmax(180px,220px)_1fr] items-center gap-3"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold" title={textOf(objective["title"])}>
+                  {textOf(objective["title"]) || "Objectif"}
+                </p>
+                <p className={`truncate text-xs ${muted}`}>
+                  {centralProcessLabel(objective, processNameById) || "Sans processus"}
+                </p>
+                {centralParentObjectiveLabel(objective) && (
+                  <p className={`truncate text-[11px] ${muted}`}>
+                    Parent : {centralParentObjectiveLabel(objective)}
+                  </p>
+                )}
+              </div>
+              <div className="relative h-8 rounded-lg bg-background">
+                <div
+                  className="absolute top-1 h-6 min-w-2 rounded-md bg-primary"
+                  style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}
+                  title={`${formatDateFR(new Date(startDate).toISOString())} – ${formatDateFR(new Date(dueDate).toISOString())}`}
+                >
+                  <span className="absolute inset-y-0 right-2 flex items-center text-[10px] font-bold text-primary-foreground">
+                    {centralRate(objective)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MyObjectiveActionsView({
+  items,
+  userId,
+}: {
+  items: ObjectiveRecord[];
+  userId: string | number;
+}) {
+  const assigned = items.flatMap((objective) =>
+    linkedActionsOf(objective)
+      .filter((action) => String(action.responsibleId ?? "") === String(userId))
+      .map((action) => ({ objective, action })),
+  );
+
+  if (assigned.length === 0) {
+    return (
+      <div className={`${card} p-8 text-center`}>
+        <p className="font-bold">Aucune action d’objectif ne vous est assignée</p>
+        <p className={`mt-1 text-sm ${muted}`}>
+          Les actions attribuées à votre compte apparaîtront ici avec leur échéance et leur suivi.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {assigned.map(({ objective, action }) => (
+        <article key={`${String(objective.id)}-${String(action.id)}`} className={`${card} p-4`}>
+          <p className={`text-xs font-bold uppercase tracking-wide ${muted}`}>
+            {textOf(objective["title"]) || "Objectif"}
+          </p>
+          <div className="mt-3">
+            <ActionProgressRow action={action} />
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function centralFrequency(obj: ObjectiveRecord): string {
   const raw = textOf(obj["measurement_frequency"] ?? obj["frequency"] ?? obj["frequence"]);
   return MEASUREMENT_LABELS[raw.toLowerCase()] ?? raw;
@@ -456,31 +690,43 @@ function tomorrowISO(): string {
 
 type CentralForm = {
   process_id: string;
+  parent_objective_id: string;
   frequency: ObjectiveFrequency;
   title: string;
   type: ObjectiveType;
+  level: ObjectiveLevel;
   axes: ObjectiveAxis[];
   indicator_name: string;
+  baseline_value: string;
   target_value: string;
   unit: string;
   deadline: string;
   responsible_id: string;
   description: string;
+  required_resources: string;
+  evaluation_method: string;
+  applicable_norms: string;
   actions: PlannedActionInput[];
 };
 
 const EMPTY_FORM: CentralForm = {
   process_id: "",
+  parent_objective_id: "",
   frequency: "mensuel",
   title: "",
   type: "operational",
+  level: "operational",
   axes: [],
   indicator_name: "",
+  baseline_value: "0",
   target_value: "",
   unit: "%",
   deadline: "",
   responsible_id: "",
   description: "",
+  required_resources: "",
+  evaluation_method: "",
+  applicable_norms: "",
   actions: [],
 };
 
@@ -494,21 +740,57 @@ function formFromRecord(obj: ObjectiveRecord): CentralForm {
   const rawAxes = centralAxes(obj).filter((axis): axis is ObjectiveAxis =>
     (AXES as string[]).includes(axis),
   );
+  const frequency = textOf(obj["measurement_frequency"] ?? obj["frequency"]).toLowerCase();
   return {
     process_id: processId == null ? "" : String(processId),
-    frequency: "mensuel",
+    parent_objective_id:
+      obj["parent_objective_id"] == null ? "" : String(obj["parent_objective_id"]),
+    frequency:
+      ({
+        monthly: "mensuel",
+        quarterly: "trimestriel",
+        semiannual: "semestriel",
+        annual: "annuel",
+      } as Record<string, ObjectiveFrequency>)[frequency] ?? "mensuel",
     title: textOf(obj["title"]),
     type: (TYPES as string[]).includes(textOf(obj["type"]))
       ? (obj["type"] as ObjectiveType)
       : "operational",
+    level: (OBJECTIVE_LEVELS as string[]).includes(textOf(obj["level"]))
+      ? (obj["level"] as ObjectiveLevel)
+      : "operational",
     axes: rawAxes,
     indicator_name: centralIndicatorLabel(obj),
+    baseline_value: obj["baseline_value"] == null ? "0" : String(obj["baseline_value"]),
     target_value: obj["target_value"] == null ? "" : String(obj["target_value"]),
     unit: textOf(obj["unit"] ?? "%"),
     deadline: textOf(obj["deadline"]).slice(0, 10),
     responsible_id: obj["responsible_id"] == null ? "" : String(obj["responsible_id"]),
     description: textOf(obj["description"]),
-    actions: [],
+    required_resources: textOf(obj["required_resources"]),
+    evaluation_method: textOf(obj["evaluation_method"]),
+    applicable_norms: Array.isArray(obj["applicable_norms"])
+      ? (obj["applicable_norms"] as unknown[]).map(String).join(", ")
+      : "",
+    actions: Array.isArray(obj["actions"])
+      ? (obj["actions"] as unknown[]).flatMap((item) => {
+          if (!item || typeof item !== "object") return [];
+          const action = item as Record<string, unknown>;
+          return [{
+            id: action["id"] as string | number | undefined,
+            title: textOf(action["title"] ?? action["name"]),
+            description: textOf(action["description"]) || undefined,
+            responsible_user_id:
+              action["responsible_id"] == null
+                ? undefined
+                : Number(action["responsible_id"]),
+            start_date: textOf(action["start_date"]) || undefined,
+            due_date: textOf(action["deadline"] ?? action["due_date"]).slice(0, 10) || undefined,
+            status: textOf(action["status"]) || undefined,
+            progress: action["progress"] == null ? undefined : Number(action["progress"]),
+          }];
+        })
+      : [],
   };
 }
 
@@ -520,6 +802,7 @@ function CentralDialog({
   policyAxes,
   responsables,
   processOptions,
+  objectiveOptions,
   pending,
   onClose,
   onSubmit,
@@ -531,6 +814,7 @@ function CentralDialog({
   policyAxes: string[];
   responsables: Array<{ id: string | number; name: string }>;
   processOptions: Array<{ id: string; label: string }>;
+  objectiveOptions: ObjectiveRecord[];
   pending: boolean;
   onClose: () => void;
   onSubmit: () => void;
@@ -548,6 +832,15 @@ function CentralDialog({
       "actions",
       form.actions.map((action, i) => (i === index ? { ...action, ...patch } : action)),
     );
+  const parentLevel: ObjectiveLevel | null =
+    form.level === "tactical" ? "strategic" : form.level === "operational" ? "tactical" : null;
+  const parentOptions = parentLevel
+    ? objectiveOptions.filter(
+        (objective) =>
+          textOf(objective["level"]) === parentLevel &&
+          String(objective.id) !== String(editing?.id ?? ""),
+      )
+    : [];
   return (
     <div
       className="fixed inset-0 z-[70] grid place-items-center overflow-y-auto bg-foreground/45 p-4"
@@ -625,6 +918,56 @@ function CentralDialog({
             </select>
           </div>
           <div>
+            <Label>Niveau *</Label>
+            <select
+              className={input}
+              value={form.level}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  level: e.target.value as ObjectiveLevel,
+                  parent_objective_id: "",
+                })
+              }
+            >
+              {OBJECTIVE_LEVELS.map((level) => (
+                <option key={level} value={level}>
+                  {LEVEL_LABELS[level]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label>Objectif parent {parentLevel ? "*" : ""}</Label>
+            {parentLevel ? (
+              <>
+                <select
+                  className={input}
+                  value={form.parent_objective_id}
+                  onChange={(e) => set("parent_objective_id", e.target.value)}
+                >
+                  <option value="">
+                    Sélectionnez un objectif {LEVEL_LABELS[parentLevel].toLowerCase()}
+                  </option>
+                  {parentOptions.map((objective) => (
+                    <option key={String(objective.id)} value={String(objective.id)}>
+                      {textOf(objective["title"]) || `Objectif #${String(objective.id)}`}
+                    </option>
+                  ))}
+                </select>
+                {parentOptions.length === 0 && (
+                  <p className="mt-1 text-xs text-amber-700">
+                    Créez d’abord un objectif {LEVEL_LABELS[parentLevel].toLowerCase()} sur ce site.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className={`${input} text-sm text-muted-foreground`}>
+                Racine de la cascade stratégique
+              </p>
+            )}
+          </div>
+          <div>
             <Label>Indicateur *</Label>
             <input
               className={input}
@@ -652,6 +995,16 @@ function CentralDialog({
                 Axes de la politique : {policyAxes.join(" · ")}
               </p>
             )}
+          </div>
+          <div>
+            <Label>Valeur de référence *</Label>
+            <input
+              className={input}
+              inputMode="decimal"
+              value={form.baseline_value}
+              placeholder="Ex : 12"
+              onChange={(e) => set("baseline_value", e.target.value)}
+            />
           </div>
           <div>
             <Label>Cible *</Label>
@@ -706,10 +1059,37 @@ function CentralDialog({
               onChange={(e) => set("description", e.target.value)}
             />
           </div>
+          <div className="md:col-span-2">
+            <Label>Ressources nécessaires *</Label>
+            <textarea
+              className={`${input} min-h-20`}
+              value={form.required_resources}
+              placeholder="Personnes, budget, matériel, temps ou préciser qu’aucune ressource supplémentaire n’est nécessaire."
+              onChange={(e) => set("required_resources", e.target.value)}
+            />
+          </div>
+          <div className="md:col-span-2">
+            <Label>Méthode d’évaluation de l’atteinte *</Label>
+            <textarea
+              className={`${input} min-h-20`}
+              value={form.evaluation_method}
+              placeholder="Source de données, calcul, fréquence de mesure et critères de réussite."
+              onChange={(e) => set("evaluation_method", e.target.value)}
+            />
+          </div>
+          <div className="md:col-span-2">
+            <Label>Exigences applicables (normes, client, produit/service)</Label>
+            <input
+              className={input}
+              value={form.applicable_norms}
+              placeholder="Séparez les références par des virgules, ex. ISO 9001 § 8.5"
+              onChange={(e) => set("applicable_norms", e.target.value)}
+            />
+          </div>
         </div>
         <div className="mt-5">
           <div className="flex items-center justify-between">
-            <Label>Actions planifiées</Label>
+            <Label>Actions planifiées * (au moins une, avec échéance)</Label>
             <button
               type="button"
               className={`${secondary} h-8 px-3 text-xs`}
@@ -738,6 +1118,9 @@ function CentralDialog({
                   <input
                     type="date"
                     className={input}
+                    aria-label={`Échéance de l’action ${index + 1}`}
+                    min={new Date().toISOString().slice(0, 10)}
+                    max={form.deadline || undefined}
                     value={action.due_date ?? ""}
                     onChange={(e) => updateAction(index, { due_date: e.target.value || undefined })}
                   />
@@ -1027,7 +1410,7 @@ export function ObjectivesPage() {
   const [filterProcess, setFilterProcess] = useState("");
   const [filterAxe, setFilterAxe] = useState("");
   const [filterFrequency, setFilterFrequency] = useState("");
-  const [view, setView] = useState<"grid" | "table">("grid");
+  const [view, setView] = useState<"grid" | "table" | "kanban" | "gantt" | "my-actions">("grid");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ObjectiveRecord | null>(null);
   const [form, setForm] = useState<CentralForm>(EMPTY_FORM);
@@ -1047,6 +1430,11 @@ export function ObjectivesPage() {
   const [monthlyProcessId, setMonthlyProcessId] = useState("");
 
   const { data: objectives = [], isLoading, isError, error: listError } = useObjectives(siteId);
+  const profileQuery = useQuery({
+    queryKey: ["current-profile"],
+    queryFn: getMyProfile,
+    staleTime: 5 * 60 * 1000,
+  });
   const { data: summary } = useSystemSummary(siteId);
   const { data: policyAxes = [] } = usePolicyAxes(siteId);
   const { data: responsables = [] } = useResponsables(siteId);
@@ -1157,6 +1545,16 @@ export function ObjectivesPage() {
       toast.error("Le nom de l'indicateur est requis.");
       return;
     }
+    if (!form.required_resources.trim()) {
+      toast.error(
+        "Précisez les ressources nécessaires, même si aucune ressource supplémentaire n'est requise.",
+      );
+      return;
+    }
+    if (form.evaluation_method.trim().length < 5) {
+      toast.error("Décrivez la méthode d'évaluation de l'objectif.");
+      return;
+    }
     if (form.axes.length === 0) {
       toast.error("Sélectionnez au moins un axe (Q / HS / E).");
       return;
@@ -1164,6 +1562,11 @@ export function ObjectivesPage() {
     const target = Number(form.target_value);
     if (!Number.isFinite(target)) {
       toast.error("La cible doit être un nombre.");
+      return;
+    }
+    const baseline = Number(form.baseline_value);
+    if (!Number.isFinite(baseline)) {
+      toast.error("La valeur de référence doit être un nombre.");
       return;
     }
     if (!form.deadline || form.deadline <= new Date().toISOString().slice(0, 10)) {
@@ -1174,9 +1577,31 @@ export function ObjectivesPage() {
       toast.error("Sélectionnez un responsable.");
       return;
     }
+    if (form.level !== "strategic" && !form.parent_objective_id) {
+      toast.error(
+        `Sélectionnez un objectif parent de niveau ${form.level === "tactical" ? "stratégique" : "tactique"}.`,
+      );
+      return;
+    }
     const actions = form.actions
       .map((action) => ({ ...action, title: action.title.trim() }))
       .filter((action) => action.title.length > 0);
+    if (actions.length === 0) {
+      toast.error("Ajoutez au moins une action planifiée.");
+      return;
+    }
+    if (actions.some((action) => !action.due_date)) {
+      toast.error("Chaque action planifiée doit avoir une échéance.");
+      return;
+    }
+    if (actions.some((action) => (action.due_date ?? "") > form.deadline)) {
+      toast.error("L'échéance d'une action ne peut pas dépasser celle de l'objectif.");
+      return;
+    }
+    const applicableNorms = form.applicable_norms
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
     if (editing) {
       mutations.update.mutate(
         {
@@ -1185,10 +1610,20 @@ export function ObjectivesPage() {
             title: form.title.trim(),
             description: form.description.trim() || undefined,
             type: form.type,
+            level: form.level,
+            parent_objective_id: form.parent_objective_id
+              ? Number(form.parent_objective_id)
+              : null,
+            indicator_name: form.indicator_name.trim(),
+            baseline_value: baseline,
             target_value: target,
             unit: form.unit.trim() || undefined,
             deadline: form.deadline,
             responsible_id: Number(form.responsible_id),
+            required_resources: form.required_resources.trim(),
+            evaluation_method: form.evaluation_method.trim(),
+            applicable_norms: applicableNorms,
+            measurement_frequency: MEASUREMENT_FREQUENCY_API[form.frequency],
             axes: form.axes,
             planned_actions: actions,
           },
@@ -1210,13 +1645,21 @@ export function ObjectivesPage() {
       title: form.title.trim(),
       description: form.description.trim() || undefined,
       type: form.type,
+      level: form.level,
+      parent_objective_id: form.parent_objective_id
+        ? Number(form.parent_objective_id)
+        : undefined,
+      indicator_name: form.indicator_name.trim(),
+      baseline_value: baseline,
       target_value: target,
       unit: form.unit.trim() || undefined,
       deadline: form.deadline,
       responsible_id: Number(form.responsible_id),
+      required_resources: form.required_resources.trim(),
+      evaluation_method: form.evaluation_method.trim(),
+      applicable_norms: applicableNorms,
       axes: form.axes,
-      frequency: form.frequency,
-      indicator_name: form.indicator_name.trim(),
+      measurement_frequency: MEASUREMENT_FREQUENCY_API[form.frequency],
       planned_actions: actions,
     };
     mutations.create.mutate(payload, {
@@ -1434,23 +1877,26 @@ export function ObjectivesPage() {
                   </option>
                 ))}
               </select>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  className={view === "grid" ? primary : secondary}
-                  onClick={() => setView("grid")}
-                  aria-label="Vue grille"
-                >
-                  <LayoutGrid className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  className={view === "table" ? primary : secondary}
-                  onClick={() => setView("table")}
-                  aria-label="Vue tableau"
-                >
-                  <TableIcon className="h-4 w-4" />
-                </button>
+              <div className="flex flex-wrap gap-2" role="group" aria-label="Affichage des objectifs">
+                {(
+                  [
+                    ["grid", "Cartes"],
+                    ["table", "Tableau"],
+                    ["kanban", "Kanban"],
+                    ["gantt", "Gantt"],
+                    ["my-actions", "Mes actions"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`${view === key ? primary : secondary} min-h-10`}
+                    onClick={() => setView(key)}
+                    aria-pressed={view === key}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
             {hasFilters && (
@@ -1516,6 +1962,11 @@ export function ObjectivesPage() {
                     <h3 className="mt-3 font-display text-base font-extrabold">
                       {textOf(obj["title"]) || "Objectif"}
                     </h3>
+                    {centralParentObjectiveLabel(obj) && (
+                      <p className={`mt-1 text-xs ${muted}`}>
+                        Rattaché à : {centralParentObjectiveLabel(obj)}
+                      </p>
+                    )}
                     {centralIndicatorLabel(obj) && (
                       <p className={`mt-1 text-sm ${muted}`}>{centralIndicatorLabel(obj)}</p>
                     )}
@@ -1587,6 +2038,20 @@ export function ObjectivesPage() {
                 );
               })}
             </div>
+          ) : view === "kanban" ? (
+            <ObjectiveKanbanView items={filtered} processNameById={processNameById} />
+          ) : view === "gantt" ? (
+            <ObjectiveGanttView items={filtered} processNameById={processNameById} />
+          ) : view === "my-actions" ? (
+            profileQuery.isLoading ? (
+              <PageSkeleton rows={3} />
+            ) : profileQuery.isError || !profileQuery.data ? (
+              <div role="alert" className={`${card} p-6 text-sm text-destructive`}>
+                Impossible de charger votre profil pour filtrer les actions qui vous sont attribuées.
+              </div>
+            ) : (
+              <MyObjectiveActionsView items={filtered} userId={profileQuery.data.id} />
+            )
           ) : (
             <div className={`${card} overflow-x-auto [-webkit-overflow-scrolling:touch]`}>
               <table className="w-full min-w-[860px] text-left text-sm">
@@ -1862,6 +2327,7 @@ export function ObjectivesPage() {
         policyAxes={policyAxes}
         responsables={responsables.map((user) => ({ id: user.id, name: user.name }))}
         processOptions={processOptions}
+        objectiveOptions={objectives}
         pending={mutations.create.isPending || mutations.update.isPending}
         onClose={() => {
           setDialogOpen(false);
