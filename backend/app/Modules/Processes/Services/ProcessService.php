@@ -651,7 +651,15 @@ class ProcessService
                     'clause' => $coverage->clause_number,
                     'clause_title' => $coverage->clause_title,
                     'coverage' => $coverage->coverage_level,
+                    'coverage_percentage' => $coverage->coverage_percentage !== null
+                        ? (float) $coverage->coverage_percentage
+                        : match ($coverage->coverage_level) {
+                            'full' => 100.0,
+                            'partial' => 50.0,
+                            default => 0.0,
+                        },
                     'conformity' => $coverage->conformity_status,
+                    'evidence' => $coverage->evidence ?? [],
                 ];
             }
         }

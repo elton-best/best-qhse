@@ -80,7 +80,18 @@
 
 <div class="doc-header">
     <h1>DOMAINE D'APPLICATION DU SMQ</h1>
-    <div class="badge">Référence : {{ $document->code ?? '—' }} | Version : {{ $document->version ?? '1.0' }}</div>
+    <div class="badge">
+        Référence : {{ $document->code ?? '—' }} |
+        Version du domaine : {{ $scope->version ?? '1.0' }} |
+        Document : {{ $document->version ?? '1.0' }} |
+        Date d'effet : {{ data_get($scope->metadata, 'scope_effective_date') ?: 'À définir' }}
+    </div>
+    @if(($scope->status ?? null) === 'published' && $scope->published_by && $scope->published_at)
+        <p>
+            Validé électroniquement par {{ $scope->publishedBy->name ?? ('Utilisateur #' . $scope->published_by) }}
+            le {{ $scope->published_at->format('d/m/Y H:i') }}.
+        </p>
+    @endif
 </div>
 
 @if(!empty($scope->document_objective))

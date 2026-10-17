@@ -59,6 +59,26 @@ import {
 // ---------------------------------------------------------------------------
 
 const TYPE_LABELS: Record<RiskType, string> = { risque: "Risque", opportunite: "Opportunité" };
+const SOURCE_OPTIONS: Record<RiskType, Array<{ value: string; label: string }>> = {
+  risque: [
+    { value: "contexte", label: "Analyse du contexte" },
+    { value: "parties_interessees", label: "Parties intéressées" },
+    { value: "processus", label: "Processus" },
+    { value: "changement", label: "Changement" },
+    { value: "audit", label: "Audit / non-conformité" },
+    { value: "autre", label: "Autre source" },
+  ],
+  opportunite: [
+    { value: "contexte", label: "Analyse du contexte" },
+    { value: "parties_interessees", label: "Parties intéressées" },
+    { value: "capacites", label: "Capacités internes" },
+    { value: "mesures", label: "Résultats de mesure" },
+    { value: "marche", label: "Marché / client" },
+    { value: "technologie", label: "Technologie" },
+    { value: "reglementation", label: "Réglementation" },
+    { value: "autre", label: "Autre source" },
+  ],
+};
 
 const STATUS_LABELS: Record<RiskStatus, string> = {
   identifie: "Identifié",
@@ -68,6 +88,11 @@ const STATUS_LABELS: Record<RiskStatus, string> = {
   cloture: "Clôturé",
 };
 const STATUSES = Object.keys(STATUS_LABELS) as RiskStatus[];
+const OPPORTUNITY_DECISION_LABELS: Record<string, string> = {
+  retain: "Retenir",
+  defer: "Reporter",
+  reject: "Rejeter",
+};
 
 const STRATEGIES: Array<{ value: string; label: string }> = [
   { value: "accepter", label: "Accepter" },
@@ -222,16 +247,32 @@ function implicatedToString(value: unknown): string {
 
 type ActionDraft = {
   key: string;
+  id?: string | undefined;
   group: PlannedActionType;
   description: string;
   responsible_user_id: string;
   implicated: string;
   deadline: string;
+  implementation_status: "planned" | "in_progress" | "completed";
+  effectiveness_result: "" | "efficace" | "partiellement_efficace" | "non_efficace";
+  effectiveness_review: string;
+  effectiveness_review_date: string;
 };
 
 type RiskForm = {
   process_id: string;
   type: RiskType;
+  source_category: string;
+  source_detail: string;
+  assessment_method: "qualitative" | "quantitative";
+  proportionality_rationale: string;
+  decision_rationale: string;
+  desired_effect: string;
+  opportunity_decision: "" | "retain" | "defer" | "reject";
+  continuity_plan: string;
+  continuity_indicator: string;
+  effectiveness_review: string;
+  effectiveness_review_date: string;
   title: string;
   description: string;
   cause: string;
@@ -246,6 +287,10 @@ type RiskForm = {
   actions: ActionDraft[];
 };
 
+type ActionReviewResult = "" | "efficace" | "partiellement_efficace" | "non_efficace";
+type ActionImplementationStatus = "planned" | "in_progress" | "completed";
+type RegisterTab = RiskType | "combined";
+
 let draftCounter = 0;
 function newDraft(group: PlannedActionType): ActionDraft {
   draftCounter += 1;
@@ -256,6 +301,10 @@ function newDraft(group: PlannedActionType): ActionDraft {
     responsible_user_id: "",
     implicated: "",
     deadline: "",
+    implementation_status: "planned",
+    effectiveness_result: "",
+    effectiveness_review: "",
+    effectiveness_review_date: "",
   };
 }
 
@@ -263,6 +312,17 @@ function emptyForm(type: RiskType, processId = ""): RiskForm {
   return {
     process_id: processId,
     type,
+    source_category: type === "opportunite" ? "contexte" : "processus",
+    source_detail: "",
+    assessment_method: "qualitative",
+    proportionality_rationale: "",
+    decision_rationale: "",
+    desired_effect: "",
+    opportunity_decision: "",
+    continuity_plan: "",
+    continuity_indicator: "",
+    effectiveness_review: "",
+    effectiveness_review_date: "",
     title: "",
     description: "",
     cause: "",
@@ -281,21 +341,51 @@ function emptyForm(type: RiskType, processId = ""): RiskForm {
 function formFromItem(item: RiskOpportunity, processes: Array<Record<string, unknown>>): RiskForm {
   const type: RiskType =
     str(item["type"]).toLowerCase() === "opportunite" ? "opportunite" : "risque";
-  const actions = plannedActionsOf(item).map((entry, index) => ({
+  const actions: ActionDraft[] = plannedActionsOf(item).map((entry, index): ActionDraft => ({
     ...newDraft(validActionGroup(entry["action_type"])),
     key: `existing-${String(item.id)}-${index}`,
+    id: entry["id"] == null ? undefined : String(entry["id"]),
     description: actionText(entry),
     responsible_user_id:
       entry["responsible_user_id"] != null && String(entry["responsible_user_id"]) !== ""
         ? String(entry["responsible_user_id"])
         : "",
     implicated: implicatedToString(entry["implicated_user_ids"]),
-    deadline: str(entry["deadline"]),
+    deadline: str(entry["deadline"] ?? entry["due_date"]).slice(0, 10),
+    implementation_status:
+      str(entry["implementation_status"]) === "completed"
+        ? "completed"
+        : str(entry["implementation_status"]) === "in_progress"
+          ? "in_progress"
+          : "planned",
+    effectiveness_result: (
+      ["efficace", "partiellement_efficace", "non_efficace"] as string[]
+    ).includes(str(entry["effectiveness_result"]))
+      ? (str(entry["effectiveness_result"]) as ActionDraft["effectiveness_result"])
+      : "",
+    effectiveness_review: str(entry["effectiveness_review"]),
+    effectiveness_review_date: str(entry["effectiveness_review_date"]).slice(0, 10),
   }));
   const pid = processIdOf(item);
   return {
     process_id: pid || (processes[0] ? String(processes[0]?.["id"] ?? "") : ""),
     type,
+    source_category: str(item["source_category"]),
+    source_detail: str(item["source_detail"]),
+    assessment_method:
+      str(item["assessment_method"]) === "quantitative" ? "quantitative" : "qualitative",
+    proportionality_rationale: str(item["proportionality_rationale"]),
+    decision_rationale: str(item["decision_rationale"]),
+    desired_effect: str(item["desired_effect"]),
+    opportunity_decision: (["retain", "defer", "reject"] as string[]).includes(
+      str(item["opportunity_decision"]),
+    )
+      ? (str(item["opportunity_decision"]) as "retain" | "defer" | "reject")
+      : "",
+    continuity_plan: str(item["continuity_plan"]),
+    continuity_indicator: str(item["continuity_indicator"]),
+    effectiveness_review: str(item["effectiveness_review"]),
+    effectiveness_review_date: str(item["effectiveness_review_date"]).slice(0, 10),
     title: str(item["title"]),
     description: str(item["description"]),
     cause: str(item["cause"]),
@@ -322,7 +412,19 @@ function formFromItem(item: RiskOpportunity, processes: Array<Record<string, unk
 function buildPayload(form: RiskForm): Record<string, unknown> {
   const kept = form.actions.filter((a) => a.description.trim() !== "");
   return {
+    process_id: form.process_id,
     type: form.type,
+    source_category: form.source_category,
+    source_detail: form.source_detail.trim(),
+    assessment_method: form.assessment_method,
+    proportionality_rationale: form.proportionality_rationale.trim() || null,
+    decision_rationale: form.decision_rationale.trim() || null,
+    desired_effect: form.desired_effect.trim() || null,
+    opportunity_decision: form.opportunity_decision || null,
+    continuity_plan: form.continuity_plan.trim() || null,
+    continuity_indicator: form.continuity_indicator.trim() || null,
+    effectiveness_review: form.effectiveness_review.trim() || null,
+    effectiveness_review_date: form.effectiveness_review_date || null,
     title: form.title.trim() || form.description.trim(),
     description: form.description.trim() || form.title.trim(),
     cause: form.cause.trim() || null,
@@ -336,11 +438,16 @@ function buildPayload(form: RiskForm): Record<string, unknown> {
     strategie: form.strategie || null,
     actions_prevues: kept.map((a) => a.description.trim()).join("\n") || null,
     planned_actions: kept.map((a) => ({
+      ...(a.id ? { id: a.id } : {}),
       title: a.description.trim(),
       action_type: a.group,
       responsible_user_id: a.responsible_user_id ? Number(a.responsible_user_id) : null,
       implicated_user_ids: implicatedToIds(a.implicated),
       deadline: a.deadline.trim() || null,
+      implementation_status: a.implementation_status,
+      effectiveness_result: a.effectiveness_result || null,
+      effectiveness_review: a.effectiveness_review.trim() || null,
+      effectiveness_review_date: a.effectiveness_review_date || null,
     })),
     responsible_user_id: form.responsible_user_id ? Number(form.responsible_user_id) : null,
     target_date: form.target_date || null,
@@ -393,18 +500,20 @@ function Slider({
 
 function RiskDetailDialog({
   itemId,
+  itemType,
   processes,
   users,
   onClose,
   onEdit,
 }: {
   itemId: string | number;
+  itemType: RiskType;
   processes: Array<Record<string, unknown>>;
   users: RiskUser[];
   onClose: () => void;
   onEdit: (item: RiskOpportunity) => void;
 }) {
-  const { data: detail, isLoading } = useRisk(itemId);
+  const { data: detail, isLoading } = useRisk(itemId, itemType);
   const mutations = useRiskMutations();
   const [proba, setProba] = useState(2);
   const [grav, setGrav] = useState(2);
@@ -412,11 +521,16 @@ function RiskDetailDialog({
   const [gravRes, setGravRes] = useState("");
   const [targetDate, setTargetDate] = useState("");
   const [status, setStatus] = useState<RiskStatus>("identifie");
+  const [effectivenessResult, setEffectivenessResult] = useState("");
+  const [effectivenessReview, setEffectivenessReview] = useState("");
+  const [effectivenessReviewDate, setEffectivenessReviewDate] = useState("");
+  const [actionReviews, setActionReviews] = useState<Array<Record<string, unknown>>>([]);
   const [hydratedFor, setHydratedFor] = useState<string>("");
 
   useEffect(() => {
     if (!detail) return;
-    const key = String(detail.id);
+    const actions = plannedActionsOf(detail);
+    const key = `${String(detail.id)}:${str(detail["updated_at"])}:${JSON.stringify(actions)}`;
     if (hydratedFor === key) return;
     setHydratedFor(key);
     setProba(Number(detail["probabilite"] ?? 2) || 2);
@@ -432,6 +546,10 @@ function RiskDetailDialog({
         : "",
     );
     setTargetDate(str(detail["target_date"]).slice(0, 10));
+    setEffectivenessResult(str(detail["effectiveness_result"]));
+    setEffectivenessReview(str(detail["effectiveness_review"]));
+    setEffectivenessReviewDate(str(detail["effectiveness_review_date"]).slice(0, 10));
+    setActionReviews(actions.map((action) => ({ ...action })));
     const s = str(detail["status"]).toLowerCase();
     setStatus((STATUSES as string[]).includes(s) ? (s as RiskStatus) : "identifie");
   }, [detail, hydratedFor]);
@@ -442,13 +560,58 @@ function RiskDetailDialog({
   const criticiteRes =
     probaRes && gravRes ? riskCriticite(Number(probaRes), Number(gravRes)) : null;
   const busy = mutations.evaluate.isPending || mutations.update.isPending;
+  const closureExempt =
+    type === "opportunite" && str(detail?.["opportunity_decision"]) === "reject";
 
   const saveInfo = async (): Promise<void> => {
     if (!detail) return;
+    const closingNow = status === "cloture" && str(detail["status"]) !== "cloture";
+    if (
+      closingNow &&
+      !closureExempt &&
+      (effectivenessResult !== "efficace" ||
+        !effectivenessReview.trim() ||
+        !effectivenessReviewDate ||
+        actionReviews.some(
+          (action) =>
+            str(action["implementation_status"]) !== "completed" ||
+            str(action["effectiveness_result"]) !== "efficace" ||
+            !str(action["effectiveness_review"]).trim() ||
+            !str(action["effectiveness_review_date"]),
+        ))
+    ) {
+      toast.error(
+        "Avant la clôture, toutes les actions doivent être terminées et efficaces, avec une date et une preuve.",
+      );
+      return;
+    }
     try {
       await mutations.update.mutateAsync({
         id: detail.id,
-        payload: { status, target_date: targetDate || null },
+        type,
+        payload: {
+          status,
+          target_date: targetDate || null,
+          effectiveness_result: effectivenessResult || null,
+          effectiveness_review: effectivenessReview.trim() || null,
+          effectiveness_review_date: effectivenessReviewDate || null,
+          ...(actionReviews.length > 0
+            ? {
+                planned_actions: actionReviews.map((action) => ({
+                  ...action,
+                  title: actionText(action),
+                  deadline: str(action["deadline"] ?? action["due_date"]) || null,
+                  implementation_status: (str(action["implementation_status"]) ||
+                    "planned") as ActionImplementationStatus,
+                  effectiveness_result: str(action["effectiveness_result"])
+                    ? (str(action["effectiveness_result"]) as ActionReviewResult)
+                    : null,
+                  effectiveness_review: str(action["effectiveness_review"]).trim() || null,
+                  effectiveness_review_date: str(action["effectiveness_review_date"]) || null,
+                })),
+              }
+            : {}),
+        },
       });
       toast.success("Fiche mise à jour.");
     } catch (error) {
@@ -461,6 +624,7 @@ function RiskDetailDialog({
     try {
       await mutations.evaluate.mutateAsync({
         id: detail.id,
+        type,
         payload: {
           probabilite: proba,
           gravite: grav,
@@ -523,38 +687,158 @@ function RiskDetailDialog({
             {str(detail["description"]) && (
               <p className="rounded-xl bg-background p-3 text-sm">{str(detail["description"])}</p>
             )}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="rounded-xl bg-background p-3">
-                <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                  Cause
-                </p>
-                <p className="mt-1 text-sm">{str(detail["cause"]) || "—"}</p>
+            {type === "opportunite" ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-background p-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Source analysée
+                  </p>
+                  <p className="mt-1 text-sm">
+                    {str(detail["source_category"]) || "—"} · {str(detail["source_detail"]) || "—"}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-background p-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Décision
+                  </p>
+                  <p className="mt-1 text-sm">
+                    {OPPORTUNITY_DECISION_LABELS[str(detail["opportunity_decision"])] || "—"} ·{" "}
+                    {str(detail["decision_rationale"]) || "Justification non renseignée"}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-background p-3 sm:col-span-2">
+                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Effet recherché
+                  </p>
+                  <p className="mt-1 text-sm">{str(detail["desired_effect"]) || "—"}</p>
+                </div>
               </div>
-              <div className="rounded-xl bg-background p-3">
-                <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                  Conséquence
-                </p>
-                <p className="mt-1 text-sm">{str(detail["consequence"]) || "—"}</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-background p-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Cause
+                  </p>
+                  <p className="mt-1 text-sm">{str(detail["cause"]) || "—"}</p>
+                </div>
+                <div className="rounded-xl bg-background p-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Conséquence
+                  </p>
+                  <p className="mt-1 text-sm">{str(detail["consequence"]) || "—"}</p>
+                </div>
               </div>
-            </div>
+            )}
 
-            {plannedActionsOf(detail).length > 0 && (
+            {actionReviews.length > 0 && (
               <div>
-                <h3 className="text-sm font-extrabold">Actions prévues</h3>
-                <ul className="mt-2 space-y-1.5">
-                  {plannedActionsOf(detail).map((entry, index) => (
-                    <li
-                      key={`${String(detail.id)}-action-${index}`}
-                      className="rounded-xl bg-background px-3 py-2 text-sm"
+                <h3 className="text-sm font-extrabold">Exécution et efficacité des actions</h3>
+                <div className="mt-2 space-y-3">
+                  {actionReviews.map((action, index) => (
+                    <div
+                      key={str(action["id"]) || `${String(detail.id)}-action-${index}`}
+                      className="rounded-xl bg-background p-3"
                     >
-                      <span className="font-semibold">{actionText(entry) || "—"}</span>
-                      <span className={`ml-2 text-xs ${muted}`}>
-                        {str(entry["action_type"]) || "preventive"}
-                        {entry["deadline"] ? ` · ${str(entry["deadline"])}` : ""}
-                      </span>
-                    </li>
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold">
+                            {actionText(action) || "Action prévue"}
+                          </p>
+                          <p className={`mt-1 text-xs ${muted}`}>
+                            {str(action["action_type"]) || "Préventive"}
+                            {action["deadline"]
+                              ? ` · Échéance ${formatDateFR(action["deadline"])}`
+                              : ""}
+                          </p>
+                        </div>
+                        {action["effectiveness_reviewed_by"] != null && (
+                          <span className={`text-xs ${muted}`}>
+                            Évaluation consignée par l’utilisateur #
+                            {String(action["effectiveness_reviewed_by"])}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <label className="text-xs font-bold text-muted-foreground">
+                          Avancement de l’action
+                          <select
+                            className={`${input} mt-1`}
+                            value={str(action["implementation_status"]) || "planned"}
+                            onChange={(event) =>
+                              setActionReviews((current) =>
+                                current.map((entry, entryIndex) =>
+                                  entryIndex === index
+                                    ? { ...entry, implementation_status: event.target.value }
+                                    : entry,
+                                ),
+                              )
+                            }
+                          >
+                            <option value="planned">À faire</option>
+                            <option value="in_progress">En cours</option>
+                            <option value="completed">Terminée</option>
+                          </select>
+                        </label>
+                        <label className="text-xs font-bold text-muted-foreground">
+                          Résultat d’efficacité
+                          <select
+                            className={`${input} mt-1`}
+                            value={str(action["effectiveness_result"])}
+                            onChange={(event) =>
+                              setActionReviews((current) =>
+                                current.map((entry, entryIndex) =>
+                                  entryIndex === index
+                                    ? { ...entry, effectiveness_result: event.target.value }
+                                    : entry,
+                                ),
+                              )
+                            }
+                          >
+                            <option value="">Non évaluée</option>
+                            <option value="efficace">Efficace</option>
+                            <option value="partiellement_efficace">Partiellement efficace</option>
+                            <option value="non_efficace">Non efficace</option>
+                          </select>
+                        </label>
+                        <label className="text-xs font-bold text-muted-foreground">
+                          Date d’évaluation
+                          <input
+                            type="date"
+                            className={`${input} mt-1`}
+                            max={new Date().toISOString().slice(0, 10)}
+                            value={str(action["effectiveness_review_date"]).slice(0, 10)}
+                            onChange={(event) =>
+                              setActionReviews((current) =>
+                                current.map((entry, entryIndex) =>
+                                  entryIndex === index
+                                    ? { ...entry, effectiveness_review_date: event.target.value }
+                                    : entry,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                        <label className="text-xs font-bold text-muted-foreground sm:col-span-2">
+                          Preuve ou justification de l’efficacité
+                          <textarea
+                            className={`${input} mt-1 min-h-20`}
+                            value={str(action["effectiveness_review"])}
+                            onChange={(event) =>
+                              setActionReviews((current) =>
+                                current.map((entry, entryIndex) =>
+                                  entryIndex === index
+                                    ? { ...entry, effectiveness_review: event.target.value }
+                                    : entry,
+                                ),
+                              )
+                            }
+                            placeholder="Résultat observé, preuve vérifiable ou justification…"
+                          />
+                        </label>
+                      </div>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </div>
             )}
 
@@ -579,6 +863,22 @@ function RiskDetailDialog({
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Résultat de l’efficacité des actions
+                  </label>
+                  <select
+                    className={input}
+                    value={effectivenessResult}
+                    onChange={(e) => setEffectivenessResult(e.target.value)}
+                    aria-label="Résultat de l’évaluation d’efficacité"
+                  >
+                    <option value="">Non évaluée</option>
+                    <option value="efficace">Efficace</option>
+                    <option value="partiellement_efficace">Partiellement efficace</option>
+                    <option value="non_efficace">Non efficace</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
                     Échéance cible
                   </label>
                   <input
@@ -587,6 +887,35 @@ function RiskDetailDialog({
                     value={targetDate}
                     onChange={(e) => setTargetDate(e.target.value)}
                   />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Date de l’évaluation d’efficacité
+                  </label>
+                  <input
+                    type="date"
+                    className={input}
+                    max={new Date().toISOString().slice(0, 10)}
+                    value={effectivenessReviewDate}
+                    onChange={(e) => setEffectivenessReviewDate(e.target.value)}
+                  />
+                </div>
+                <div className="sm:col-span-2 lg:col-span-3">
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Preuve / justification de l’efficacité
+                  </label>
+                  <textarea
+                    className={`${input} min-h-20`}
+                    value={effectivenessReview}
+                    onChange={(e) => setEffectivenessReview(e.target.value)}
+                    placeholder="Résultat mesuré, preuve vérifiable et décision de suivi…"
+                  />
+                  {detail["effectiveness_reviewed_by"] != null && (
+                    <p className={`mt-1 text-xs ${muted}`}>
+                      Évaluation consignée par l’utilisateur #
+                      {String(detail["effectiveness_reviewed_by"])}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-end">
                   <button
@@ -710,7 +1039,7 @@ export function RisksPage() {
   const { data: users = [] } = useRiskUsers(siteId);
   const mutations = useRiskMutations();
 
-  const [tab, setTab] = useState<RiskType>("risque");
+  const [tab, setTab] = useState<RegisterTab>("risque");
   const [query, setQuery] = useState("");
   const [processFilter, setProcessFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -721,8 +1050,14 @@ export function RisksPage() {
   const [step, setStep] = useState<1 | 2>(1);
   const [editingId, setEditingId] = useState<string | number | null>(null);
   const [form, setForm] = useState<RiskForm>(() => emptyForm("risque"));
-  const [detailId, setDetailId] = useState<string | number | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | number | null>(null);
+  const [detailSelection, setDetailSelection] = useState<{
+    id: string | number;
+    type: RiskType;
+  } | null>(null);
+  const [confirmDeleteSelection, setConfirmDeleteSelection] = useState<{
+    id: string | number;
+    type: RiskType;
+  } | null>(null);
   const [duplicateSource, setDuplicateSource] = useState<RiskOpportunity | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -737,7 +1072,10 @@ export function RisksPage() {
     [items],
   );
 
-  const typed = useMemo(() => items.filter((i) => typeOf(i) === tab), [items, tab]);
+  const typed = useMemo(
+    () => (tab === "combined" ? items : items.filter((i) => typeOf(i) === tab)),
+    [items, tab],
+  );
 
   const stats = useMemo(() => {
     const total = typed.length;
@@ -782,6 +1120,7 @@ export function RisksPage() {
   const touch = (patch: Partial<RiskForm>): void => setForm((c) => ({ ...c, ...patch }));
 
   const openCreate = (): void => {
+    if (tab === "combined") return;
     if (!siteId) {
       toast.error("Sélectionnez un site avant de créer un risque ou une opportunité.");
       return;
@@ -797,7 +1136,7 @@ export function RisksPage() {
     setEditingId(item.id);
     setForm(formFromItem(item, processes));
     setStep(1);
-    setDetailId(null);
+    setDetailSelection(null);
     setFormOpen(true);
   };
 
@@ -814,8 +1153,31 @@ export function RisksPage() {
       toast.error("La description est requise.");
       return false;
     }
+    if (!form.source_category || !form.source_detail.trim()) {
+      toast.error("Indiquez la catégorie et le fait à l’origine de l’analyse.");
+      return false;
+    }
     if (form.type === "risque" && !form.cause.trim()) {
       toast.error("La cause est requise pour un risque.");
+      return false;
+    }
+    if (
+      form.type === "risque" &&
+      (!form.strategie ||
+        !form.continuity_plan.trim() ||
+        !form.continuity_indicator.trim() ||
+        !form.proportionality_rationale.trim())
+    ) {
+      toast.error(
+        "Justifiez la proportionnalité, la stratégie de traitement et le plan de continuité du risque.",
+      );
+      return false;
+    }
+    if (
+      form.type === "opportunite" &&
+      (!form.desired_effect.trim() || !form.opportunity_decision || !form.decision_rationale.trim())
+    ) {
+      toast.error("Précisez l’effet recherché, la décision et sa justification.");
       return false;
     }
     return true;
@@ -830,6 +1192,17 @@ export function RisksPage() {
       toast.error("Sélectionnez un site avant de créer un risque ou une opportunité.");
       return;
     }
+    const actionPlanRequired = form.type === "risque" || form.opportunity_decision !== "reject";
+    if (actionPlanRequired && !form.actions.some((action) => action.description.trim())) {
+      toast.error("Ajoutez au moins une action au plan de traitement ou d’exploitation.");
+      setStep(2);
+      return;
+    }
+    if (form.actions.some((action) => action.description.trim() && !action.deadline)) {
+      toast.error("Chaque action doit avoir une échéance.");
+      setStep(2);
+      return;
+    }
     try {
       if (editingId == null) {
         await mutations.create.mutateAsync({
@@ -838,7 +1211,11 @@ export function RisksPage() {
         });
         toast.success(`${TYPE_LABELS[form.type]} créé(e).`);
       } else {
-        await mutations.update.mutateAsync({ id: editingId, payload: buildPayload(form) });
+        await mutations.update.mutateAsync({
+          id: editingId,
+          type: form.type,
+          payload: buildPayload(form),
+        });
         toast.success(`${TYPE_LABELS[form.type]} mis(e) à jour.`);
       }
       setFormOpen(false);
@@ -848,9 +1225,9 @@ export function RisksPage() {
     }
   };
 
-  const doDestroy = async (id: string | number): Promise<void> => {
+  const doDestroy = async (id: string | number, type: RiskType): Promise<void> => {
     try {
-      await mutations.remove.mutateAsync(id);
+      await mutations.remove.mutateAsync({ id, type });
       toast.success("Élément supprimé.");
     } catch (error) {
       toast.error(errorMessage(error, "Suppression impossible."));
@@ -907,22 +1284,33 @@ export function RisksPage() {
   const criticite = riskCriticite(form.probabilite, form.gravite);
   const saving = mutations.create.isPending || mutations.update.isPending;
 
-  const renderActions = (item: RiskOpportunity) => (
-    <div className="flex flex-wrap gap-2">
-      <button type="button" className={secondary} onClick={() => setDetailId(item.id)}>
-        <Eye className="h-4 w-4" /> Détail
-      </button>
-      <button type="button" className={secondary} onClick={() => openEdit(item)}>
-        <PenLine className="h-4 w-4" /> Modifier
-      </button>
-      <button type="button" className={secondary} onClick={() => setDuplicateSource(item)}>
-        <Copy className="h-4 w-4" /> Dupliquer
-      </button>
-      <button type="button" className={secondary} onClick={() => setConfirmDeleteId(item.id)}>
-        <Trash2 className="h-4 w-4" /> Supprimer
-      </button>
-    </div>
-  );
+  const renderActions = (item: RiskOpportunity) =>
+    tab === "combined" ? (
+      <span className={`text-xs ${muted}`}>Lecture seule</span>
+    ) : (
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className={secondary}
+          onClick={() => setDetailSelection({ id: item.id, type: typeOf(item) })}
+        >
+          <Eye className="h-4 w-4" /> Détail
+        </button>
+        <button type="button" className={secondary} onClick={() => openEdit(item)}>
+          <PenLine className="h-4 w-4" /> Modifier
+        </button>
+        <button type="button" className={secondary} onClick={() => setDuplicateSource(item)}>
+          <Copy className="h-4 w-4" /> Dupliquer
+        </button>
+        <button
+          type="button"
+          className={secondary}
+          onClick={() => setConfirmDeleteSelection({ id: item.id, type: typeOf(item) })}
+        >
+          <Trash2 className="h-4 w-4" /> Supprimer
+        </button>
+      </div>
+    );
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-8">
@@ -930,7 +1318,7 @@ export function RisksPage() {
       <Header
         eyebrow="Planification"
         title="Risques & opportunités"
-        description="Identifiez, évaluez et suivez les risques et opportunités de chaque processus (probabilité × gravité, criticité, actions)."
+        description="Les risques et les opportunités sont conservés dans des registres séparés. La vue combinée est consultative et permet de comparer les deux."
         icon={AlertTriangle}
       >
         <button
@@ -941,31 +1329,44 @@ export function RisksPage() {
         >
           <FileDown className="h-4 w-4" /> {exporting ? "Export…" : "Export Excel"}
         </button>
-        <button type="button" className={primary} onClick={openCreate}>
-          <Plus className="h-4 w-4" /> Nouveau
-        </button>
+        {tab !== "combined" && (
+          <button type="button" className={primary} onClick={openCreate}>
+            <Plus className="h-4 w-4" /> Nouveau
+          </button>
+        )}
       </Header>
 
       <div className="flex flex-wrap gap-2">
-        {(Object.keys(TYPE_LABELS) as RiskType[]).map((t) => (
+        {(["risque", "opportunite", "combined"] as RegisterTab[]).map((t) => (
           <button
             key={t}
             type="button"
             className={tab === t ? primary : secondary}
             onClick={() => setTab(t)}
           >
-            {t === "risque" ? (
+            {t === "combined" ? (
+              <List className="h-4 w-4" />
+            ) : t === "risque" ? (
               <AlertTriangle className="h-4 w-4" />
             ) : (
               <TrendingUp className="h-4 w-4" />
             )}
-            {TYPE_LABELS[t]}s ({t === "risque" ? counts.risque : counts.opportunite})
+            {t === "combined"
+              ? `Vue combinée en lecture seule (${counts.risque + counts.opportunite})`
+              : `${TYPE_LABELS[t]}s (${t === "risque" ? counts.risque : counts.opportunite})`}
           </button>
         ))}
       </div>
 
       <div className={`${card} grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4`}>
-        <Stat value={stats.total} label={`Total ${TYPE_LABELS[tab].toLowerCase()}s`} />
+        <Stat
+          value={stats.total}
+          label={
+            tab === "combined"
+              ? "Total risques + opportunités"
+              : `Total ${TYPE_LABELS[tab].toLowerCase()}s`
+          }
+        />
         <Stat value={stats.priority} label="Prioritaires (≥ 12)" tone="text-red-600" />
         <Stat value={`${stats.rate} %`} label="Traités + clôturés" tone="text-emerald-600" />
         <Stat value={stats.avg} label="Criticité moyenne" tone="text-amber-600" />
@@ -1053,7 +1454,9 @@ export function RisksPage() {
           <div className="py-10 text-center">
             <p className={muted}>
               {typed.length === 0
-                ? `Aucun ${TYPE_LABELS[tab].toLowerCase()} enregistré pour ce périmètre.`
+                ? tab === "combined"
+                  ? "Aucun risque ou opportunité enregistré pour ce périmètre."
+                  : `Aucun ${TYPE_LABELS[tab].toLowerCase()} enregistré pour ce périmètre.`
                 : "Aucun élément ne correspond aux filtres."}
             </p>
             {hasActiveFilters && typed.length > 0 && (
@@ -1066,10 +1469,15 @@ export function RisksPage() {
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {visible.map((item) => (
               <article
-                key={String(item.id)}
+                key={`${typeOf(item)}-${String(item.id)}`}
                 className="rounded-xl border border-border bg-background p-4"
               >
                 <div className="flex flex-wrap items-center gap-2">
+                  {tab === "combined" && (
+                    <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold">
+                      {TYPE_LABELS[typeOf(item)]}
+                    </span>
+                  )}
                   <span className={`text-xs font-bold text-muted-foreground`}>
                     {str(item["code"]) || `#${String(item.id)}`}
                   </span>
@@ -1100,6 +1508,7 @@ export function RisksPage() {
             <table className="w-full min-w-[880px] text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  {tab === "combined" && <th className="px-3 py-2">Type</th>}
                   <th className="px-3 py-2">Code</th>
                   <th className="px-3 py-2">Intitulé</th>
                   <th className="px-3 py-2">Processus</th>
@@ -1113,7 +1522,10 @@ export function RisksPage() {
               </thead>
               <tbody>
                 {visible.map((item) => (
-                  <tr key={String(item.id)} className="border-t border-border">
+                  <tr key={`${typeOf(item)}-${String(item.id)}`} className="border-t border-border">
+                    {tab === "combined" && (
+                      <td className="px-3 py-2">{TYPE_LABELS[typeOf(item)]}</td>
+                    )}
                     <td className="px-3 py-2 font-semibold">{str(item["code"]) || "—"}</td>
                     <td className="px-3 py-2 font-semibold">{str(item["title"]) || "—"}</td>
                     <td className="px-3 py-2">{processName(item, processes)}</td>
@@ -1179,7 +1591,16 @@ export function RisksPage() {
                   key={t}
                   type="button"
                   className={form.type === t ? primary : secondary}
-                  onClick={() => touch({ type: t })}
+                  disabled={editingId != null && form.type !== t}
+                  onClick={() =>
+                    touch({
+                      type: t,
+                      source_category:
+                        form.type === t
+                          ? form.source_category
+                          : (SOURCE_OPTIONS[t][0]?.value ?? ""),
+                    })
+                  }
                 >
                   {TYPE_LABELS[t]}
                 </button>
@@ -1234,15 +1655,19 @@ export function RisksPage() {
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                    Stratégie
+                    Stratégie {form.type === "risque" ? "*" : ""}
                   </label>
                   <select
                     className={input}
                     value={form.strategie}
                     onChange={(e) => touch({ strategie: e.target.value })}
                   >
-                    <option value="">—</option>
-                    {STRATEGIES.map((s) => (
+                    {form.type !== "risque" && <option value="">—</option>}
+                    {STRATEGIES.filter((strategy) =>
+                      form.type === "risque"
+                        ? strategy.value !== "exploiter"
+                        : strategy.value === "exploiter",
+                    ).map((s) => (
                       <option key={s.value} value={s.value}>
                         {s.label}
                       </option>
@@ -1258,6 +1683,48 @@ export function RisksPage() {
                     value={form.description}
                     placeholder="Décrivez le risque ou l'opportunité…"
                     onChange={(e) => touch({ description: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Source de l’analyse *
+                  </label>
+                  <select
+                    className={input}
+                    value={form.source_category}
+                    onChange={(e) => touch({ source_category: e.target.value })}
+                  >
+                    {SOURCE_OPTIONS[form.type].map((source) => (
+                      <option key={source.value} value={source.value}>
+                        {source.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Méthode d’évaluation *
+                  </label>
+                  <select
+                    className={input}
+                    value={form.assessment_method}
+                    onChange={(e) =>
+                      touch({ assessment_method: e.target.value as RiskForm["assessment_method"] })
+                    }
+                  >
+                    <option value="qualitative">Qualitative, proportionnée au contexte</option>
+                    <option value="quantitative">Quantitative / chiffrée</option>
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Fait, attente ou donnée source *
+                  </label>
+                  <textarea
+                    className={`${input} min-h-20`}
+                    value={form.source_detail}
+                    placeholder="Référence au fait observé, à la partie intéressée, au changement ou à la mesure."
+                    onChange={(e) => touch({ source_detail: e.target.value })}
                   />
                 </div>
                 {form.type === "risque" && (
@@ -1284,9 +1751,117 @@ export function RisksPage() {
                     onChange={(e) => touch({ consequence: e.target.value })}
                   />
                 </div>
+                {form.type === "opportunite" ? (
+                  <>
+                    <div className="md:col-span-2">
+                      <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        Effet souhaité *
+                      </label>
+                      <textarea
+                        className={input}
+                        value={form.desired_effect}
+                        placeholder="Quel bénéfice ou résultat positif cherche-t-on à obtenir ?"
+                        onChange={(e) => touch({ desired_effect: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        Décision *
+                      </label>
+                      <select
+                        className={input}
+                        value={form.opportunity_decision}
+                        onChange={(e) =>
+                          touch({
+                            opportunity_decision: e.target
+                              .value as RiskForm["opportunity_decision"],
+                          })
+                        }
+                      >
+                        <option value="">Choisir une décision</option>
+                        <option value="retain">Retenir et exploiter</option>
+                        <option value="defer">Différer</option>
+                        <option value="reject">Rejeter</option>
+                      </select>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        Justification de la décision *
+                      </label>
+                      <textarea
+                        className={input}
+                        value={form.decision_rationale}
+                        placeholder="Expliquez les critères de faisabilité, les ressources et la priorité."
+                        onChange={(e) => touch({ decision_rationale: e.target.value })}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="md:col-span-2">
+                      <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        Plan de continuité en cas de perturbation *
+                      </label>
+                      <textarea
+                        className={input}
+                        value={form.continuity_plan}
+                        placeholder="Comment maintenir ou rétablir le processus si l’événement survient ?"
+                        onChange={(e) => touch({ continuity_plan: e.target.value })}
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        Indicateur de continuité *
+                      </label>
+                      <input
+                        className={input}
+                        value={form.continuity_indicator}
+                        placeholder="Ex. délai maximal de reprise ou taux de service maintenu"
+                        onChange={(e) => touch({ continuity_indicator: e.target.value })}
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        Justification de la proportionnalité *
+                      </label>
+                      <textarea
+                        className={input}
+                        value={form.proportionality_rationale}
+                        placeholder="Expliquez pourquoi la méthode et le niveau de traitement sont adaptés aux effets possibles."
+                        onChange={(e) => touch({ proportionality_rationale: e.target.value })}
+                      />
+                    </div>
+                  </>
+                )}
+                <div className="md:col-span-2">
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Revue d’efficacité (à renseigner au suivi)
+                  </label>
+                  <textarea
+                    className={input}
+                    value={form.effectiveness_review}
+                    placeholder="Résultat de la vérification des actions et motif de leur maintien ou ajustement."
+                    onChange={(e) => touch({ effectiveness_review: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Date de la revue d’efficacité
+                  </label>
+                  <input
+                    type="date"
+                    className={input}
+                    value={form.effectiveness_review_date}
+                    onChange={(e) => touch({ effectiveness_review_date: e.target.value })}
+                  />
+                </div>
                 <div>
                   <Slider
-                    label="Probabilité *"
+                    label={
+                      form.assessment_method === "qualitative"
+                        ? "Vraisemblance (1–4)"
+                        : "Probabilité *"
+                    }
                     value={form.probabilite}
                     labels={probaLabels(form.type)}
                     onChange={(v) => touch({ probabilite: v })}
@@ -1294,7 +1869,7 @@ export function RisksPage() {
                 </div>
                 <div>
                   <Slider
-                    label="Gravité *"
+                    label={form.assessment_method === "qualitative" ? "Impact (1–4)" : "Gravité *"}
                     value={form.gravite}
                     labels={graviteLabels(form.type)}
                     onChange={(v) => touch({ gravite: v })}
@@ -1464,28 +2039,29 @@ export function RisksPage() {
         </div>
       )}
 
-      {detailId != null && (
+      {detailSelection != null && (
         <RiskDetailDialog
-          itemId={detailId}
+          itemId={detailSelection.id}
+          itemType={detailSelection.type}
           processes={processes}
           users={users}
-          onClose={() => setDetailId(null)}
+          onClose={() => setDetailSelection(null)}
           onEdit={openEdit}
         />
       )}
 
       <ConfirmDialog
-        open={confirmDeleteId != null}
+        open={confirmDeleteSelection != null}
         title="Supprimer cet élément ?"
         description="L'élément sera définitivement supprimé."
         confirmLabel="Supprimer"
         destructive
         onConfirm={() => {
-          const id = confirmDeleteId;
-          setConfirmDeleteId(null);
-          if (id != null) void doDestroy(id);
+          const selected = confirmDeleteSelection;
+          setConfirmDeleteSelection(null);
+          if (selected) void doDestroy(selected.id, selected.type);
         }}
-        onCancel={() => setConfirmDeleteId(null)}
+        onCancel={() => setConfirmDeleteSelection(null)}
       />
 
       <PromptDialog
@@ -1554,11 +2130,12 @@ function ActionDraftFields({
           aria-label="Utilisateurs impliqués"
         />
         <input
+          type="date"
           className={input}
           value={draft.deadline}
-          placeholder="Échéance ou fréquence"
+          required
           onChange={(e) => onChange({ deadline: e.target.value })}
-          aria-label="Échéance ou fréquence"
+          aria-label="Échéance de l’action"
         />
       </div>
     </div>

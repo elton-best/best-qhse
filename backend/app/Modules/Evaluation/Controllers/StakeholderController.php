@@ -3,11 +3,11 @@
 namespace App\Modules\Evaluation\Controllers;
 
 use App\Models\Document;
-use App\Models\Site;
 use App\Services\DocumentSyncService;
 use App\Services\StakeholderDocxGenerator;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\AuthorizesSiteAccess;
 use App\Http\Controllers\Api\Concerns\ResolvesGeneratedDocumentContext;
 use App\Http\Resources\StakeholderResource;
 use App\Http\Resources\DocumentResource;
@@ -17,11 +17,13 @@ use Illuminate\Http\Request;
 
 class StakeholderController extends Controller
 {
+    use AuthorizesSiteAccess;
     use ResolvesGeneratedDocumentContext;
 
     public function index(Request $request)
     {
         $query = Stakeholder::with(['site', 'responsible']);
+        $this->scopeToUserSites($request, $query);
 
         // Filter by type
         if ($request->has('type')) {
@@ -34,7 +36,7 @@ class StakeholderController extends Controller
         }
 
         // Filter by site_id
-        if ($request->has('site_id')) {
+        if ($request->filled('site_id')) {
             $query->where('site_id', $request->site_id);
         }
 
@@ -49,6 +51,7 @@ class StakeholderController extends Controller
             'type' => 'required|in:client,supplier,partner,regulator,employee,shareholder,other',
             'relevance_degree' => 'nullable|in:low,medium,high',
             'needs_expectations' => 'nullable|string',
+            'climate_expectations' => 'nullable|string',
             'requirements' => 'nullable|string',
             'actions' => 'nullable|string',
             'contact_person' => 'nullable|string|max:255',
@@ -67,6 +70,7 @@ class StakeholderController extends Controller
             'needs.*.requirements.*.actions.*.deadline' => 'nullable|date',
             'name' => 'required|string|max:255',
         ]);
+        $this->assertSiteAccess($request, (int) $validated['site_id']);
 
         if (array_key_exists('needs', $validated)) {
             $validated['needs'] = $this->normalizeNeedsPayload($validated['needs']);
@@ -76,18 +80,23 @@ class StakeholderController extends Controller
         return new StakeholderResource($stakeholder->load(['site', 'responsible']));
     }
 
-    public function show(Stakeholder $stakeholder)
+    public function show(Request $request, Stakeholder $stakeholder)
     {
+        $this->assertSiteAccess($request, (int) $stakeholder->site_id);
+
         return new StakeholderResource($stakeholder->load(['site', 'responsible']));
     }
 
     public function update(Request $request, Stakeholder $stakeholder)
     {
+        $this->assertSiteAccess($request, (int) $stakeholder->site_id);
+
         $validated = $request->validate([
             'site_id' => 'sometimes|exists:sites,id',
             'type' => 'sometimes|in:client,supplier,partner,regulator,employee,shareholder,other',
             'relevance_degree' => 'nullable|in:low,medium,high',
             'needs_expectations' => 'nullable|string',
+            'climate_expectations' => 'nullable|string',
             'requirements' => 'nullable|string',
             'actions' => 'nullable|string',
             'contact_person' => 'nullable|string|max:255',
@@ -106,6 +115,9 @@ class StakeholderController extends Controller
             'needs.*.requirements.*.actions.*.deadline' => 'nullable|date',
             'name' => 'sometimes|required|string|max:255',
         ]);
+        if (array_key_exists('site_id', $validated)) {
+            $this->assertSiteAccess($request, (int) $validated['site_id']);
+        }
 
         if (array_key_exists('needs', $validated)) {
             $validated['needs'] = $this->normalizeNeedsPayload($validated['needs']);
@@ -115,8 +127,10 @@ class StakeholderController extends Controller
         return new StakeholderResource($stakeholder->load(['site', 'responsible']));
     }
 
-    public function destroy(Stakeholder $stakeholder)
+    public function destroy(Request $request, Stakeholder $stakeholder)
     {
+        $this->assertSiteAccess($request, (int) $stakeholder->site_id);
+
         $stakeholder->delete();
         return response()->json(null, 204);
     }
@@ -126,6 +140,11 @@ class StakeholderController extends Controller
      */
     public function exportDocx(Request $request)
     {
+        $requestedSiteId = (int) $request->get('site_id', 0);
+        if ($requestedSiteId > 0) {
+            $this->assertSiteAccess($request, $requestedSiteId);
+        }
+
         try {
             $siteId = $request->get('site_id');
             if (!$siteId) {
@@ -194,6 +213,7 @@ class StakeholderController extends Controller
             return response()->json(['message' => 'site_id requis'], 400);
         }
         $siteId = (int) $siteId;
+        $this->assertSiteAccess($request, $siteId);
         $generationContext = $this->resolveGeneratedDocumentContext($request, $siteId);
 
         $query = Stakeholder::query();

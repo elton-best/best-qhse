@@ -37,6 +37,10 @@ class ActionObserver
 
     public function updated(Action $action): void
     {
+        if ($action->wasChanged(['progress', 'progress_rate', 'status'])) {
+            $this->refreshLinkedObjectiveProgress($action);
+        }
+
         if (
             $action->wasChanged('responsible_id')
             && !empty($action->responsible_id)
@@ -52,6 +56,18 @@ class ActionObserver
                 'action_url' => "/company/actions",
             ]);
         }
+    }
+
+    public function deleted(Action $action): void
+    {
+        $this->refreshLinkedObjectiveProgress($action);
+    }
+
+    private function refreshLinkedObjectiveProgress(Action $action): void
+    {
+        $action->objectives()->get()->each(
+            fn ($objective) => $objective->updateProgress(),
+        );
     }
 
     private function getUrgency(Action $action): string

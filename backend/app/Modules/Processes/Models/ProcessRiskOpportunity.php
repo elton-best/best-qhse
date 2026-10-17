@@ -21,6 +21,19 @@ class ProcessRiskOpportunity extends Model
         'title',
         'description',
         'normes_iso',
+        'source_category',
+        'source_detail',
+        'assessment_method',
+        'proportionality_rationale',
+        'decision_rationale',
+        'desired_effect',
+        'opportunity_decision',
+        'continuity_plan',
+        'continuity_indicator',
+        'effectiveness_result',
+        'effectiveness_review',
+        'effectiveness_review_date',
+        'effectiveness_reviewed_by',
         'cause',
         'consequence',
         'aspect_qualite',
@@ -51,6 +64,7 @@ class ProcessRiskOpportunity extends Model
         'planned_actions' => 'array',
         'action_types' => 'array',
         'target_date' => 'date',
+        'effectiveness_review_date' => 'date',
     ];
 
     /**
@@ -105,6 +119,11 @@ class ProcessRiskOpportunity extends Model
     public function responsibleUser()
     {
         return $this->belongsTo(User::class, 'responsible_user_id');
+    }
+
+    public function effectivenessReviewedBy()
+    {
+        return $this->belongsTo(User::class, 'effectiveness_reviewed_by');
     }
 
     public function creator()

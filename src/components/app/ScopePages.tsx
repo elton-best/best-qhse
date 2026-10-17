@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { useCurrentSite } from "@/hooks/use-workspace";
 import { backendApi } from "@/integrations/backend/client";
-import { flattenResource } from "@/integrations/backend/context";
+import { flattenResource, SCOPE_KEY } from "@/integrations/backend/context";
 import { useProcesses, useScope, useScopeMutations } from "@/integrations/backend/context";
 import { PENDING_DOCUMENTS_KEY } from "@/integrations/backend/documents";
 
@@ -54,10 +54,16 @@ const STEP_META: ReadonlyArray<readonly [string, LucideIcon]> = [
 ];
 
 type ItemForm = { value: string };
-type ScopeProcess = { id?: string | undefined; name: string; type: string; abbreviation?: string | undefined };
+type ScopeProcess = {
+  id?: string | undefined;
+  name: string;
+  type: string;
+  abbreviation?: string | undefined;
+};
 type NormExclusion = { chapters: string; justification: string };
 type ScopeForm = {
   version: string;
+  effectiveDate: string;
   objective: string;
   definition: string;
   documents: ItemForm[];
@@ -70,6 +76,8 @@ type ScopeForm = {
   isoExclusions: string;
   isoExclusionsJustification: string;
   normExclusions: Record<string, NormExclusion>;
+  impactReviewed: boolean;
+  impactReviewRationale: string;
 };
 
 type NormChapter = {
@@ -78,12 +86,18 @@ type NormChapter = {
   title: string;
   subchapters?: NormChapter[] | undefined;
 };
-type NormOption = { id?: string | number | undefined; code: string; name: string; chapters?: NormChapter[] | undefined };
+type NormOption = {
+  id?: string | number | undefined;
+  code: string;
+  name: string;
+  chapters?: NormChapter[] | undefined;
+};
 type DocumentTypeOption = { id: string; name: string; abbreviation: string };
 
 const emptyItem = (): ItemForm => ({ value: "" });
 const initialForm = (): ScopeForm => ({
   version: "1.0",
+  effectiveDate: new Date().toISOString().slice(0, 10),
   objective: `Ce document vise à définir clairement les limites du Système de management de la qualité (SMQ) de NOM DE LA STRUCTURE.\n\nIl s'applique à toute la documentation et aux activités au sein du SMQ de NOM DE LA STRUCTURE.\n\nLes utilisateurs de ce document sont les membres de la direction et l'équipe de mise en œuvre du projet de SMQ.`,
   definition: `Le domaine d'application du système de management de la qualité définit les limites physiques et organisationnelles auxquelles le SMQ s'applique.\n\nNOM DE LA STRUCTURE considère son contexte, les besoins et les attentes des parties intéressées, ainsi que l'étendue du contrôle et de l'influence qui peuvent s'exercer sur ses activités, ses produits et ses services.\n\nLe domaine d'application est une déclaration factuelle et représentative des opérations de NOM DE LA STRUCTURE dans les limites du SMQ.`,
   documents: [],
@@ -96,6 +110,8 @@ const initialForm = (): ScopeForm => ({
   isoExclusions: "",
   isoExclusionsJustification: "",
   normExclusions: {},
+  impactReviewed: false,
+  impactReviewRationale: "",
 });
 
 function Nav() {
@@ -381,7 +397,7 @@ export function ScopePage() {
   const { data: scopes = [], isLoading: loadingScope } = useScope(siteId);
   const { data: processResources = [], isLoading: loadingProcesses } = useProcesses(siteId);
   const { data: normOptions = [] } = useNorms(siteId);
-  const { save } = useScopeMutations(siteId);
+  const { save, publish } = useScopeMutations(siteId);
   const [step, setStep] = useState(1);
   const [isNewEntry, setIsNewEntry] = useState(false);
   const topRef = useRef<HTMLDivElement>(null);
@@ -430,6 +446,8 @@ export function ScopePage() {
 
     const rawNormExclusions = parseObject(existing["norm_exclusions"]);
     const justifications = parseObject(existing["norm_exclusions_justifications"]);
+    const metadata = parseObject(existing["metadata"]);
+    const impactAssessment = parseObject(metadata["scope_impact_assessment"]);
     const normalized: Record<string, NormExclusion> = {};
     Object.entries(rawNormExclusions).forEach(([key, value]) => {
       normalized[key] = {
@@ -440,6 +458,7 @@ export function ScopePage() {
 
     setForm({
       version: String(existing["version"] ?? "1.0"),
+      effectiveDate: String(existing["effective_date"] ?? metadata["scope_effective_date"] ?? ""),
       objective: String(existing["document_objective"] ?? existing["objective"] ?? ""),
       definition: String(existing["scope_definition"] ?? existing["scope"] ?? ""),
       documents: toLines(existing["referenced_documents"]),
@@ -452,6 +471,8 @@ export function ScopePage() {
       isoExclusions: String(existing["iso_exclusions"] ?? ""),
       isoExclusionsJustification: String(existing["iso_exclusions_justification"] ?? ""),
       normExclusions: normalized,
+      impactReviewed: Boolean(impactAssessment["reviewed"]),
+      impactReviewRationale: String(impactAssessment["rationale"] ?? ""),
     });
   }, [existing, processResources, isNewEntry]);
 
@@ -561,7 +582,11 @@ export function ScopePage() {
     }
     update("processes", [
       ...form.processes,
-      { ...manualProcess, name, abbreviation: (manualProcess.abbreviation ?? "").trim().toUpperCase() },
+      {
+        ...manualProcess,
+        name,
+        abbreviation: (manualProcess.abbreviation ?? "").trim().toUpperCase(),
+      },
     ]);
     setManualProcess({ name: "", type: "realization", abbreviation: "" });
   };
@@ -591,6 +616,12 @@ export function ScopePage() {
       .filter((code) => !normOptions.some((norm) => norm.code === code))
       .map((code) => ({ code, name: code })),
   ];
+  const requiresImpactAssessment = Object.values(form.normExclusions).some((exclusion) =>
+    exclusion.chapters
+      .split(",")
+      .map((chapter) => chapter.trim())
+      .some((chapter) => /^8(?:\.|$)/.test(chapter)),
+  );
 
   const validateStep = (currentStep: number): boolean => {
     if (currentStep === 1 && form.documents.some((item) => !item.value.trim())) {
@@ -625,6 +656,14 @@ export function ScopePage() {
       return false;
     }
     const exclusions = form.normExclusions;
+    if (currentStep === 7 && form.exclusions.trim() && !form.exclusionsJustification.trim()) {
+      toast.error("Étape Exclusions : justifiez les exclusions du périmètre.");
+      return false;
+    }
+    if (currentStep === 7 && form.isoExclusions.trim() && !form.isoExclusionsJustification.trim()) {
+      toast.error("Étape Exclusions : justifiez les exclusions normatives.");
+      return false;
+    }
     if (
       currentStep === 7 &&
       Object.values(exclusions).some(
@@ -634,14 +673,24 @@ export function ScopePage() {
       toast.error("Étape Exclusions : justifiez chaque exclusion par norme.");
       return false;
     }
+    if (
+      currentStep === 7 &&
+      requiresImpactAssessment &&
+      (!form.impactReviewed || form.impactReviewRationale.trim().length < 20)
+    ) {
+      toast.error(
+        "Évaluez l’impact des exclusions de l’article 8 et consignez une justification d’au moins 20 caractères.",
+      );
+      return false;
+    }
     return true;
   };
 
-  const saveForm = async (): Promise<boolean> => {
+  const saveForm = async (): Promise<string | undefined> => {
     for (let currentStep = 1; currentStep <= 7; currentStep += 1) {
       if (!validateStep(currentStep)) {
         setStep(currentStep);
-        return false;
+        return undefined;
       }
     }
 
@@ -674,7 +723,14 @@ export function ScopePage() {
         payload: {
           site_id: Number(siteId),
           version: form.version,
-          is_current: true,
+          metadata: {
+            ...parseObject(existing?.["metadata"]),
+            scope_effective_date: form.effectiveDate || null,
+            scope_impact_assessment: {
+              reviewed: form.impactReviewed,
+              rationale: form.impactReviewRationale.trim(),
+            },
+          },
           document_objective: form.objective,
           scope_definition: form.definition,
           objective: form.objective,
@@ -706,10 +762,11 @@ export function ScopePage() {
           ? (savedRoot["data"] as Record<string, unknown>)
           : savedRoot;
       const savedResource = flattenResource(savedData);
-      if (savedResource["id"] != null) setSavedScopeId(String(savedResource["id"]));
+      const savedId = savedResource["id"] == null ? undefined : String(savedResource["id"]);
+      if (savedId) setSavedScopeId(savedId);
       setIsNewEntry(false);
-      toast.success("Domaine d'application enregistré.");
-      return true;
+      toast.success("Brouillon du domaine d'application enregistré.");
+      return savedId;
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -717,12 +774,27 @@ export function ScopePage() {
           : "Impossible d'enregistrer le domaine d'application.",
       );
     }
-    return false;
+    return undefined;
+  };
+
+  const publishScope = async () => {
+    const draftId = await saveForm();
+    if (!draftId) return;
+
+    try {
+      await publish.mutateAsync(draftId);
+      await queryClient.invalidateQueries({ queryKey: [...SCOPE_KEY, siteId] });
+      toast.success("Périmètre publié et signature de validation enregistrée.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Impossible de publier le périmètre.",
+      );
+    }
   };
 
   const saveAndCreateAnother = async () => {
-    const saved = await saveForm();
-    if (!saved) return;
+    const savedId = await saveForm();
+    if (!savedId) return;
     setForm(initialForm());
     setSavedScopeId(undefined);
     setDocumentId(undefined);
@@ -740,13 +812,18 @@ export function ScopePage() {
   const extractDocumentInfo = (payload: unknown): { id?: string | undefined; code: string } => {
     const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
     const data =
-      root["data"] && typeof root["data"] === "object" ? (root["data"] as Record<string, unknown>) : root;
+      root["data"] && typeof root["data"] === "object"
+        ? (root["data"] as Record<string, unknown>)
+        : root;
     const attributes =
       data["attributes"] && typeof data["attributes"] === "object"
         ? (data["attributes"] as Record<string, unknown>)
         : data;
     return {
-      id: data["id"] == null && attributes["id"] == null ? undefined : String(data["id"] ?? attributes["id"]),
+      id:
+        data["id"] == null && attributes["id"] == null
+          ? undefined
+          : String(data["id"] ?? attributes["id"]),
       code: String(attributes["code"] ?? ""),
     };
   };
@@ -945,24 +1022,35 @@ export function ScopePage() {
         >
           <Plus className="h-4 w-4" /> Enregistrer et nouveau
         </button>
-        <button className={primary} onClick={saveForm} disabled={save.isPending}>
+        <button className={primary} onClick={saveForm} disabled={save.isPending || publish.isPending}>
           <Save className="h-4 w-4" />{" "}
           {save.isPending
             ? "Enregistrement…"
             : step === 8
-              ? "Enregistrer définitivement"
+              ? "Enregistrer le brouillon"
               : "Enregistrer"}
         </button>
       </Header>
       <Nav />
       {existing && (
         <div className={`${card} flex flex-wrap items-center gap-x-6 gap-y-2 p-4`}>
-          <span className="inline-flex items-center gap-2 rounded-full bg-success/10 px-3 py-1 text-xs font-extrabold uppercase tracking-wide text-success">
-            <CheckCircle2 className="h-3.5 w-3.5" /> Périmètre courant
-          </span>
+          {String(existing["status"] ?? (existing["is_current"] ? "published" : "draft")) ===
+          "published" ? (
+            <span className="inline-flex items-center gap-2 rounded-full bg-success/10 px-3 py-1 text-xs font-extrabold uppercase tracking-wide text-success">
+              <CheckCircle2 className="h-3.5 w-3.5" /> Périmètre publié
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-2 rounded-full bg-warning/10 px-3 py-1 text-xs font-extrabold uppercase tracking-wide text-warning-foreground">
+              <FileText className="h-3.5 w-3.5" /> Brouillon à valider
+            </span>
+          )}
           <span className="text-sm">
             <span className="font-bold">
               Version {String(existing["version"] ?? form.version ?? "1.0")}
+            </span>
+            <span className="ml-2 text-muted-foreground">
+              — effet le{" "}
+              {String(existing["effective_date"] ?? form.effectiveDate ?? "date à définir")}
             </span>
           </span>
           <span className={`text-sm ${muted}`}>
@@ -974,6 +1062,22 @@ export function ScopePage() {
           <span className={`text-sm ${muted}`}>
             {toLines(existing["locations"]).length} site(s) couvert(s)
           </span>
+          {existing["status"] === "published" && existing["published_at"] != null && (
+            <span className={`text-sm ${muted}`}>
+              Validé par {String(existing["published_by_name"] ?? "utilisateur")} le{" "}
+              {new Date(String(existing["published_at"])).toLocaleDateString("fr-FR")}
+            </span>
+          )}
+          {existing["status"] === "draft" && (
+            <button
+              className={primary}
+              onClick={() => void publishScope()}
+              disabled={save.isPending || publish.isPending}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              {publish.isPending ? "Publication…" : "Publier le brouillon"}
+            </button>
+          )}
         </div>
       )}
       <Stepper
@@ -1014,13 +1118,25 @@ export function ScopePage() {
               description="Formulez l'objectif du document et les limites du système de management."
             />
             <div className="space-y-5">
-              <div>
-                <Label>Version</Label>
-                <input
-                  className={`${input} max-w-full sm:max-w-[160px]`}
-                  value={form.version}
-                  onChange={(event) => update("version", event.target.value)}
-                />
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <Label>Version du domaine</Label>
+                  <input
+                    className={`${input} max-w-full sm:max-w-[200px]`}
+                    value={form.version}
+                    onChange={(event) => update("version", event.target.value)}
+                    placeholder="1.0"
+                  />
+                </div>
+                <div>
+                  <Label>Date d’effet du domaine</Label>
+                  <input
+                    className={`${input} max-w-full sm:max-w-[200px]`}
+                    type="date"
+                    value={form.effectiveDate}
+                    onChange={(event) => update("effectiveDate", event.target.value)}
+                  />
+                </div>
               </div>
               <div>
                 <Label>Objectif du document</Label>
@@ -1177,8 +1293,9 @@ export function ScopePage() {
                             <span className="font-display font-bold">{process.name}</span>
                             <span className="mt-1 block text-xs text-muted-foreground">
                               {String(
-                                processResources.find((item) => String(item["id"]) === process.id)
-                                  ?.["purpose"] ?? "Finalité non renseignée",
+                                processResources.find(
+                                  (item) => String(item["id"]) === process.id,
+                                )?.["purpose"] ?? "Finalité non renseignée",
                               )}
                             </span>
                           </span>
@@ -1392,6 +1509,39 @@ export function ScopePage() {
                   </div>
                 )}
               </div>
+              {requiresImpactAssessment && (
+                <div
+                  role="alert"
+                  className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"
+                >
+                  <p className="font-bold">
+                    Revue obligatoire : l’exclusion d’une exigence opérationnelle peut affecter la
+                    conformité des produits/services ou la satisfaction client.
+                  </p>
+                  <label className="flex items-start gap-2">
+                    <input
+                      className="mt-1"
+                      type="checkbox"
+                      checked={form.impactReviewed}
+                      onChange={(event) => update("impactReviewed", event.target.checked)}
+                    />
+                    <span>
+                      J’ai évalué l’impact des exclusions de l’article 8 et confirme qu’elles
+                      n’affectent ni la capacité à fournir des produits/services conformes ni la
+                      satisfaction client.
+                    </span>
+                  </label>
+                  <div>
+                    <Label>Analyse documentée de l’impact (20 caractères minimum)</Label>
+                    <textarea
+                      className={`${input} min-h-24`}
+                      value={form.impactReviewRationale}
+                      onChange={(event) => update("impactReviewRationale", event.target.value)}
+                      placeholder="Expliquez pourquoi ces exigences ne sont pas applicables au périmètre, au regard des produits/services et des attentes client."
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </section>
         )}

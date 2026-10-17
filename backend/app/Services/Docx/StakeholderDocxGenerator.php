@@ -70,6 +70,21 @@ class StakeholderDocxGenerator
 
             // Données - Structure plate
             foreach ($stakeholders as $stakeholder) {
+                $table->addRow();
+                $summaryCell = $table->addCell(10200, ['gridSpan' => 5]);
+                $summaryCell->addText(
+                    (string) ($stakeholder->name ?? 'Partie intéressée'),
+                    ['bold' => true, 'size' => 10]
+                );
+                $needsExpectations = trim((string) ($stakeholder->needs_expectations ?? ''));
+                if ($needsExpectations !== '') {
+                    $summaryCell->addText('Besoins et attentes : ' . $needsExpectations, ['size' => 9]);
+                }
+                $climateExpectations = trim((string) ($stakeholder->climate_expectations ?? ''));
+                if ($climateExpectations !== '') {
+                    $summaryCell->addText('Attentes climatiques : ' . $climateExpectations, ['size' => 9]);
+                }
+
                 if (!empty($stakeholder->needs)) {
                     foreach ($stakeholder->needs as $need) {
                         if (!empty($need['requirements'])) {

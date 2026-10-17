@@ -11,6 +11,7 @@ use App\Traits\HasWorkflowStates;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Activitylog\Traits\LogsActivity;
@@ -30,6 +31,7 @@ class Objective extends Model
         'enterprise_id',
         'process_id',
         'site_id',
+        'parent_objective_id',
         'strategic_axis_id',
         'workflow_state_id',
         'indicateur_id',
@@ -39,8 +41,11 @@ class Objective extends Model
         'title',
         'description',
         'start_date',
+        'level',
         'indicator',
+        'indicator_name',
         'unit',
+        'baseline_value',
         'target_value',
         'current_value',
         'progress',
@@ -49,6 +54,7 @@ class Objective extends Model
         'deadline',
         'allocated_budget',
         'required_resources',
+        'evaluation_method',
         'measurement_frequency',
         'applicable_norms',
         'status',
@@ -78,6 +84,16 @@ class Objective extends Model
     public function process(): BelongsTo
     {
         return $this->belongsTo(Process::class);
+    }
+
+    public function parentObjective(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_objective_id');
+    }
+
+    public function childObjectives(): HasMany
+    {
+        return $this->hasMany(self::class, 'parent_objective_id');
     }
 
     public function site(): BelongsTo
@@ -112,6 +128,17 @@ class Objective extends Model
 
     public function updateProgress(): void
     {
+        // Parent objectives report the average progress of their direct children.
+        $childrenProgress = $this->childObjectives()
+            ->selectRaw('AVG(COALESCE(progress, 0)) as avg_progress')
+            ->value('avg_progress');
+
+        if ($childrenProgress !== null) {
+            $this->progress = min(100, max(0, (int) round((float) $childrenProgress)));
+            $this->saveAndRefreshParentProgress();
+            return;
+        }
+
         // If objective has linked actions, compute average progress of those actions
         try {
             $actionsCount = $this->actions()->count();
@@ -126,25 +153,45 @@ class Objective extends Model
                 ->value('avg_progress');
 
             $this->progress = min(100, max(0, (int) round($avg ?? 0)));
-            $this->save();
+            $this->saveAndRefreshParentProgress();
             return;
         }
 
-        // Fallback to indicator values if no actions
-        if (!$this->target_value || !$this->current_value) {
+        // Fallback to measured values when no linked actions exist.
+        if (!is_numeric($this->target_value) || !is_numeric($this->current_value)) {
             $this->progress = 0;
-            $this->save();
+            $this->saveAndRefreshParentProgress();
             return;
         }
 
-        $progress = ($this->current_value / $this->target_value) * 100;
+        $baseline = is_numeric($this->baseline_value) ? (float) $this->baseline_value : 0.0;
+        $target = (float) $this->target_value;
+        $current = (float) $this->current_value;
+        $range = $target - $baseline;
+        $progress = abs($range) < 0.000001
+            ? ($current === $target ? 100 : 0)
+            : (($current - $baseline) / $range) * 100;
         $this->progress = min(100, max(0, round($progress)));
+        $this->saveAndRefreshParentProgress();
+    }
+
+    private function saveAndRefreshParentProgress(): void
+    {
         $this->save();
+        $this->parentObjective()->first()?->updateProgress();
     }
 
     public function isAchieved(): bool
     {
-        return $this->current_value >= $this->target_value;
+        if (!is_numeric($this->current_value) || !is_numeric($this->target_value)) {
+            return false;
+        }
+
+        $baseline = is_numeric($this->baseline_value) ? (float) $this->baseline_value : 0.0;
+        $current = (float) $this->current_value;
+        $target = (float) $this->target_value;
+
+        return $target < $baseline ? $current <= $target : $current >= $target;
     }
 
     public function isOverdue(): bool

@@ -3,6 +3,7 @@
 namespace App\Modules\Leadership\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\AuthorizesSiteAccess;
 use App\Http\Controllers\Api\Concerns\ResolvesGeneratedDocumentContext;
 use App\Http\Resources\ApplicationScopeResource;
 use App\Http\Resources\DocumentResource;
@@ -11,16 +12,20 @@ use App\Models\Process;
 use App\Models\Site;
 use App\Services\ProcessService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 class ApplicationScopeController extends Controller
 {
+    use AuthorizesSiteAccess;
     use ResolvesGeneratedDocumentContext;
 
     public function index(Request $request)
     {
-        $query = ApplicationScope::with(['site']);
+        $query = ApplicationScope::with(['site', 'publishedBy']);
+        $this->scopeToUserSites($request, $query);
 
         if ($request->has('site_id')) {
             $query->where('site_id', $request->site_id);
@@ -30,7 +35,11 @@ class ApplicationScopeController extends Controller
             $query->where('is_current', filter_var($request->is_current, FILTER_VALIDATE_BOOLEAN));
         }
 
-        $scopes = $query->orderByDesc('is_current')->orderByDesc('id')->paginate(20);
+        $perPage = min(max($request->integer('per_page', 20), 1), 100);
+        $scopes = $query
+            ->orderByRaw("CASE WHEN status = 'draft' THEN 0 WHEN is_current THEN 1 ELSE 2 END")
+            ->orderByDesc('id')
+            ->paginate($perPage);
         return ApplicationScopeResource::collection($scopes);
     }
 
@@ -42,8 +51,9 @@ class ApplicationScopeController extends Controller
         $validated = $request->validate([
             'site_id' => 'required|exists:sites,id',
         ]);
+        $this->assertSiteAccess($request, (int) $validated['site_id']);
 
-        $scope = ApplicationScope::with(['site'])
+        $scope = ApplicationScope::with(['site', 'publishedBy'])
             ->where('site_id', $validated['site_id'])
             ->where('is_current', true)
             ->orderByDesc('id')
@@ -57,17 +67,69 @@ class ApplicationScopeController extends Controller
     }
 
     /**
-     * Activer un périmètre comme périmètre courant du site (un seul courant par site).
+     * Publier une nouvelle version contrôlée du périmètre du site.
      */
-    public function activate(Request $request, ApplicationScope $applicationScope)
+    public function publish(Request $request, ApplicationScope $applicationScope)
     {
-        ApplicationScope::where('site_id', $applicationScope->site_id)
-            ->where('id', '!=', $applicationScope->id)
-            ->update(['is_current' => false]);
+        $this->assertSiteAccess($request, (int) $applicationScope->site_id);
+        $this->assertCanPublish($request);
 
-        $applicationScope->update(['is_current' => true]);
+        $publishedScope = DB::transaction(function () use ($request, $applicationScope) {
+            Site::query()->whereKey($applicationScope->site_id)->lockForUpdate()->firstOrFail();
+            $scope = ApplicationScope::query()
+                ->whereKey($applicationScope->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        return new ApplicationScopeResource($applicationScope->load(['site']));
+            if ($scope->status !== 'draft' || $scope->is_current) {
+                throw ValidationException::withMessages([
+                    'status' => 'Seul un brouillon peut être publié.',
+                ]);
+            }
+
+            $metadata = is_array($scope->metadata) ? $scope->metadata : [];
+            $errors = [];
+            if (trim((string) ($scope->objective ?: $scope->document_objective)) === '') {
+                $errors['objective'][] = 'L’objectif du périmètre est requis avant publication.';
+            }
+            if (trim((string) ($scope->scope ?: $scope->scope_definition)) === '') {
+                $errors['scope'][] = 'La définition du périmètre est requise avant publication.';
+            }
+            if (!is_array($scope->products_services) || count(array_filter(
+                $scope->products_services,
+                fn ($item) => trim((string) $item) !== '',
+            )) === 0) {
+                $errors['products_services'][] = 'Déclarez au moins un produit ou service couvert avant publication.';
+            }
+            if (empty($metadata['scope_effective_date'])) {
+                $errors['metadata.scope_effective_date'][] = 'La date d’effet est requise avant publication.';
+            }
+            if ($errors !== []) {
+                throw ValidationException::withMessages($errors);
+            }
+
+            $this->validateExclusionJustifications(['is_current' => true], $scope);
+
+            ApplicationScope::query()
+                ->where('site_id', $scope->site_id)
+                ->where('id', '!=', $scope->id)
+                ->where('is_current', true)
+                ->lockForUpdate()
+                ->update(['is_current' => false, 'status' => 'superseded']);
+
+            $scope->update([
+                'is_current' => true,
+                'status' => 'published',
+                'published_by' => $request->user()->id,
+                'published_at' => now(),
+            ]);
+
+            return $scope->fresh(['site', 'publishedBy']);
+        });
+
+        $this->syncProcessesToGlobal($publishedScope);
+
+        return new ApplicationScopeResource($publishedScope);
     }
 
     public function store(Request $request)
@@ -75,7 +137,6 @@ class ApplicationScopeController extends Controller
         $validated = $request->validate([
             'site_id' => 'required|exists:sites,id',
             'version' => 'nullable|string|max:50',
-            'is_current' => 'nullable|boolean',
             'objective' => 'nullable|string',
             'scope' => 'nullable|string',
             'document_objective' => 'nullable|string',
@@ -108,37 +169,41 @@ class ApplicationScopeController extends Controller
             'document_path' => 'nullable|string|max:500',
             'generated_at' => 'nullable|date',
             'metadata' => 'nullable|array',
+            'metadata.scope_effective_date' => 'nullable|date',
+            'metadata.scope_impact_assessment.reviewed' => 'nullable|boolean',
+            'metadata.scope_impact_assessment.rationale' => 'nullable|string|max:5000',
         ]);
 
         if (empty($validated['enterprise_id']) && !empty($validated['site_id'])) {
             $validated['enterprise_id'] = Site::where('id', $validated['site_id'])->value('enterprise_id');
         }
 
+        $this->assertSiteAccess($request, (int) $validated['site_id']);
+        $this->validateExclusionJustifications($validated);
         $validated = $this->normalizeNormExclusionsStorage($validated);
+        $validated['is_current'] = false;
+        $validated['status'] = 'draft';
+        $validated['published_by'] = null;
+        $validated['published_at'] = null;
         $scope = ApplicationScope::create($validated);
-
-        if ($scope->is_current) {
-            ApplicationScope::where('site_id', $scope->site_id)
-                ->where('id', '!=', $scope->id)
-                ->update(['is_current' => false]);
-        }
-        
-        $this->syncProcessesToGlobal($scope);
         
         return new ApplicationScopeResource($scope->load(['site']));
     }
 
-    public function show(ApplicationScope $applicationScope)
+    public function show(Request $request, ApplicationScope $applicationScope)
     {
-        return new ApplicationScopeResource($applicationScope->load(['site']));
+        $this->assertSiteAccess($request, (int) $applicationScope->site_id);
+
+        return new ApplicationScopeResource($applicationScope->load(['site', 'publishedBy']));
     }
 
     public function update(Request $request, ApplicationScope $applicationScope)
     {
+        $this->assertSiteAccess($request, (int) $applicationScope->site_id);
+
         $validated = $request->validate([
             'site_id' => 'sometimes|exists:sites,id',
             'version' => 'nullable|string|max:50',
-            'is_current' => 'nullable|boolean',
             'objective' => 'nullable|string',
             'scope' => 'nullable|string',
             'document_objective' => 'nullable|string',
@@ -171,29 +236,95 @@ class ApplicationScopeController extends Controller
             'document_path' => 'nullable|string|max:500',
             'generated_at' => 'nullable|date',
             'metadata' => 'nullable|array',
+            'metadata.scope_effective_date' => 'nullable|date',
+            'metadata.scope_impact_assessment.reviewed' => 'nullable|boolean',
+            'metadata.scope_impact_assessment.rationale' => 'nullable|string|max:5000',
         ]);
 
         if (empty($validated['enterprise_id']) && !empty($validated['site_id'])) {
             $validated['enterprise_id'] = Site::where('id', $validated['site_id'])->value('enterprise_id');
         }
-        $validated = $this->normalizeNormExclusionsStorage($validated, $applicationScope);
-        $applicationScope->update($validated);
-
-        if ($applicationScope->is_current) {
-            ApplicationScope::where('site_id', $applicationScope->site_id)
-                ->where('id', '!=', $applicationScope->id)
-                ->update(['is_current' => false]);
+        if (array_key_exists('site_id', $validated)) {
+            $this->assertSiteAccess($request, (int) $validated['site_id']);
+            if ((int) $validated['site_id'] !== (int) $applicationScope->site_id) {
+                throw ValidationException::withMessages([
+                    'site_id' => 'Un périmètre enregistré ne peut pas être déplacé vers un autre site.',
+                ]);
+            }
         }
-        
-        $this->syncProcessesToGlobal($applicationScope);
-        
-        return new ApplicationScopeResource($applicationScope->load(['site']));
+        $this->validateExclusionJustifications($validated, $applicationScope);
+        $validated = $this->normalizeNormExclusionsStorage($validated, $applicationScope);
+        $scope = DB::transaction(function () use ($applicationScope, $validated) {
+            Site::query()->whereKey($applicationScope->site_id)->lockForUpdate()->firstOrFail();
+            $source = ApplicationScope::query()
+                ->whereKey($applicationScope->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($source->is_current || $source->status === 'published') {
+                $draft = $source->replicate(['created_at', 'updated_at']);
+                $draft->is_current = false;
+                $draft->status = 'draft';
+                $draft->published_by = null;
+                $draft->published_at = null;
+                if (!isset($validated['version']) || $validated['version'] === $source->version) {
+                    $validated['version'] = $this->incrementVersion((string) $source->version);
+                }
+                $draft->save();
+                $draft->update($validated);
+
+                return $draft;
+            }
+
+            if ($source->status !== 'draft') {
+                throw ValidationException::withMessages([
+                    'status' => 'Seul un brouillon peut être modifié.',
+                ]);
+            }
+
+            $source->update($validated);
+
+            return $source;
+        });
+
+        return new ApplicationScopeResource($scope->load(['site', 'publishedBy']));
     }
 
-    public function destroy(ApplicationScope $applicationScope)
+    public function destroy(Request $request, ApplicationScope $applicationScope)
     {
+        $this->assertSiteAccess($request, (int) $applicationScope->site_id);
+
+        if ($applicationScope->is_current || $applicationScope->status === 'published') {
+            throw ValidationException::withMessages([
+                'status' => 'Un périmètre publié est conservé dans l’historique contrôlé.',
+            ]);
+        }
+
         $applicationScope->delete();
         return response()->json(null, 204);
+    }
+
+    private function assertCanPublish(Request $request): void
+    {
+        $user = $request->user();
+        abort_unless(
+            $user && (
+                $user->isSuperAdmin() ||
+                $user->isEnterpriseAdmin() ||
+                $user->isSiteManager()
+            ),
+            403,
+            'Seule la direction ou le responsable du site peut publier le périmètre.',
+        );
+    }
+
+    private function incrementVersion(string $version): string
+    {
+        if (preg_match('/^(\d+)\.(\d+)$/', $version, $matches)) {
+            return $matches[1] . '.' . ((int) $matches[2] + 1);
+        }
+
+        return $version . '.1';
     }
 
     /**
@@ -201,6 +332,8 @@ class ApplicationScopeController extends Controller
      */
     public function exportDocx(Request $request, ApplicationScope $applicationScope)
     {
+        $this->assertSiteAccess($request, (int) $applicationScope->site_id);
+
         try {
             $generationContext = $this->resolveGeneratedDocumentContext($request, (int) $applicationScope->site_id);
 
@@ -295,6 +428,8 @@ class ApplicationScopeController extends Controller
      */
     public function generateDraftDocx(Request $request, ApplicationScope $applicationScope)
     {
+        $this->assertSiteAccess($request, (int) $applicationScope->site_id);
+
         $generationContext = $this->resolveGeneratedDocumentContext($request, (int) $applicationScope->site_id);
 
         // Etape 1: Réserver le code et l'ID du document en base de données
@@ -368,6 +503,81 @@ class ApplicationScopeController extends Controller
         ]);
 
         return (new DocumentResource($document->load(['site', 'process', 'author'])))->response();
+    }
+
+    private function validateExclusionJustifications(
+        array $validated,
+        ?ApplicationScope $scope = null,
+    ): void {
+        $data = array_merge($scope?->attributesToArray() ?? [], $validated);
+        $errors = [];
+
+        $scopeExclusions = trim((string) ($data['scope_exclusions'] ?? $data['exclusions'] ?? ''));
+        if ($scopeExclusions !== '' && trim((string) ($data['exclusions_justification'] ?? '')) === '') {
+            $errors['exclusions_justification'][] =
+                'Justifiez les exclusions du périmètre avant de les enregistrer.';
+        }
+
+        $isoExclusions = trim((string) ($data['iso_exclusions'] ?? ''));
+        if ($isoExclusions !== '' && trim((string) ($data['iso_exclusions_justification'] ?? '')) === '') {
+            $errors['iso_exclusions_justification'][] =
+                'Justifiez les exclusions normatives avant de les enregistrer.';
+        }
+
+        $metadata = is_array($data['metadata'] ?? null) ? $data['metadata'] : [];
+        $normExclusions = $data['norm_exclusions'] ?? $metadata['norm_exclusions'] ?? [];
+        $normJustifications = $data['norm_exclusions_justifications']
+            ?? $metadata['norm_exclusions_justifications']
+            ?? [];
+        if (is_array($normExclusions) && is_array($normJustifications)) {
+            foreach ($normExclusions as $norm => $chapters) {
+                $hasExclusion = is_array($chapters)
+                    ? array_filter($chapters, fn ($chapter) => trim((string) $chapter) !== '') !== []
+                    : trim((string) $chapters) !== '';
+                if ($hasExclusion && trim((string) ($normJustifications[$norm] ?? '')) === '') {
+                    $errors["norm_exclusions_justifications.{$norm}"][] =
+                        'Justifiez chaque exclusion de clause par norme.';
+                }
+            }
+        }
+
+        $operationalExclusion = false;
+        if (is_array($normExclusions)) {
+            foreach ($normExclusions as $chapters) {
+                $items = is_array($chapters) ? $chapters : [$chapters];
+                foreach ($items as $chapter) {
+                    if (preg_match('/^8(?:\.\d+)*$/', trim((string) $chapter))) {
+                        $operationalExclusion = true;
+                        break 2;
+                    }
+                }
+            }
+        }
+        if (
+            !$operationalExclusion &&
+            preg_match('/(?:^|[^0-9])8(?:\.\d+)*(?:$|[^0-9])/', (string) ($data['iso_exclusions'] ?? ''))
+        ) {
+            $operationalExclusion = true;
+        }
+
+        $impactAssessment = is_array($metadata['scope_impact_assessment'] ?? null)
+            ? $metadata['scope_impact_assessment']
+            : [];
+        if (
+            $operationalExclusion &&
+            (bool) ($data['is_current'] ?? false) &&
+            (
+                !($impactAssessment['reviewed'] ?? false) ||
+                mb_strlen(trim((string) ($impactAssessment['rationale'] ?? ''))) < 20
+            )
+        ) {
+            $errors['metadata.scope_impact_assessment'][] =
+                'Évaluez et justifiez l’impact des exclusions de l’article 8 sur la conformité des produits/services et la satisfaction client avant publication.';
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
     }
 
     private function normalizeNormExclusionsStorage(array $validated, ?ApplicationScope $scope = null): array

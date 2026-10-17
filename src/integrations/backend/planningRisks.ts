@@ -25,6 +25,11 @@ export type PlannedAction = {
   responsible_user_id?: string | number | null | undefined;
   implicated_user_ids?: Array<string | number> | string | null | undefined;
   deadline?: string | null | undefined;
+  implementation_status?: "planned" | "in_progress" | "completed" | null | undefined;
+  effectiveness_result?: "efficace" | "partiellement_efficace" | "non_efficace" | null | undefined;
+  effectiveness_review?: string | null | undefined;
+  effectiveness_review_date?: string | null | undefined;
+  effectiveness_reviewed_by?: string | number | null | undefined;
   [key: string]: unknown;
 };
 
@@ -34,6 +39,19 @@ export type RiskOpportunity = {
   type?: string | null | undefined;
   title?: string | null | undefined;
   description?: string | null | undefined;
+  source_category?: string | null | undefined;
+  source_detail?: string | null | undefined;
+  assessment_method?: string | null | undefined;
+  proportionality_rationale?: string | null | undefined;
+  decision_rationale?: string | null | undefined;
+  desired_effect?: string | null | undefined;
+  opportunity_decision?: string | null | undefined;
+  continuity_plan?: string | null | undefined;
+  continuity_indicator?: string | null | undefined;
+  effectiveness_result?: "efficace" | "partiellement_efficace" | "non_efficace" | null | undefined;
+  effectiveness_review?: string | null | undefined;
+  effectiveness_review_date?: string | null | undefined;
+  effectiveness_reviewed_by?: string | number | null | undefined;
   cause?: string | null | undefined;
   consequence?: string | null | undefined;
   probabilite?: number | null | undefined;
@@ -86,14 +104,18 @@ function numberOrNull(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function listOf(payload: unknown): RiskOpportunity[] {
+function listOf(payload: unknown, type: RiskType = "risque"): RiskOpportunity[] {
   const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
   const data = root["data"] ?? payload;
   if (!Array.isArray(data)) return [];
   return data.map((item) => {
     const flat = flattenResource(item) as RiskOpportunity;
     const raw = (item ?? {}) as Record<string, unknown>;
-    const result: RiskOpportunity = { ...flat, id: (flat["id"] ?? "") as string | number };
+    const result: RiskOpportunity = {
+      ...flat,
+      id: (flat["id"] ?? "") as string | number,
+      type,
+    };
     // Conserve les relations imbriquées brutes (process, responsibleUser, planned_actions).
     for (const key of ["process", "responsibleUser", "planned_actions", "process_id"]) {
       const direct = raw[key];
@@ -104,13 +126,17 @@ function listOf(payload: unknown): RiskOpportunity[] {
   });
 }
 
-function oneOf(payload: unknown): RiskOpportunity | null {
+function oneOf(payload: unknown, type: RiskType = "risque"): RiskOpportunity | null {
   const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
   const data = root["data"] ?? payload;
   if (!data || typeof data !== "object" || Array.isArray(data)) return null;
   const flat = flattenResource(data) as RiskOpportunity;
   const raw = data as Record<string, unknown>;
-  const result: RiskOpportunity = { ...flat, id: (flat["id"] ?? "") as string | number };
+  const result: RiskOpportunity = {
+    ...flat,
+    id: (flat["id"] ?? "") as string | number,
+    type,
+  };
   for (const key of ["process", "responsibleUser", "planned_actions", "process_id"]) {
     const direct = raw[key];
     if (direct !== undefined) result[key] = direct as RiskOpportunity[typeof key];
@@ -153,28 +179,77 @@ export function riskCriticiteOf(item: RiskOpportunity): number | null {
 }
 
 export async function fetchRisks(filters: RiskFilters = {}): Promise<RiskOpportunity[]> {
+  if (filters.type === "opportunite") {
+    return fetchOpportunities(filters);
+  }
+
   const query = new URLSearchParams();
   if (filters.site_id) query.set("site_id", filters.site_id);
   if (filters.process_id) query.set("process_id", filters.process_id);
-  if (filters.type) query.set("type", filters.type);
+  query.set("type", "risque");
   if (filters.status) query.set("status", filters.status);
   if (filters.search) query.set("search", filters.search);
   const suffix = query.toString() ? `?${query.toString()}` : "";
   const payload = await backendApi.request<unknown>(`risks-opportunities${suffix}`);
-  return listOf(payload);
+  const risks = listOf(payload, "risque");
+  if (filters.type === "risque") return risks;
+
+  const opportunities = await fetchOpportunities(filters);
+  return [...risks, ...opportunities];
 }
 
-export async function fetchRisk(id: string | number): Promise<RiskOpportunity | null> {
+async function fetchOpportunities(filters: RiskFilters): Promise<RiskOpportunity[]> {
+  const query = new URLSearchParams({ per_page: "100" });
+  if (filters.site_id) query.set("site_id", filters.site_id);
+  if (filters.process_id) query.set("process_id", filters.process_id);
+  if (filters.status) query.set("status", filters.status);
+  if (filters.search) query.set("search", filters.search);
+
+  const items: RiskOpportunity[] = [];
+  for (let page = 1; page <= 1000; page += 1) {
+    query.set("page", String(page));
+    const payload = await backendApi.request<unknown>(`opportunities?${query.toString()}`);
+    const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    items.push(...listOf(payload, "opportunite"));
+
+    const meta =
+      root["meta"] && typeof root["meta"] === "object"
+        ? (root["meta"] as Record<string, unknown>)
+        : {};
+    const lastPage = Number(meta["last_page"] ?? 0);
+    if (
+      lastPage > 0 ? page >= lastPage : !Array.isArray(root["data"]) || root["data"].length < 100
+    ) {
+      break;
+    }
+  }
+
+  return items;
+}
+
+export async function fetchRisk(
+  id: string | number,
+  type: RiskType = "risque",
+): Promise<RiskOpportunity | null> {
+  const resource = type === "opportunite" ? "opportunities" : "risks-opportunities";
   const payload = await backendApi.request<unknown>(
-    `risks-opportunities/${encodeURIComponent(String(id))}`,
+    `${resource}/${encodeURIComponent(String(id))}`,
   );
-  return oneOf(payload);
+  return oneOf(payload, type);
 }
 
 export async function createRisk(
   processId: string | number,
   payload: RiskSavePayload,
 ): Promise<RiskOpportunity | null> {
+  if (payload["type"] === "opportunite") {
+    const result = await backendApi.request<unknown>("opportunities", {
+      method: "POST",
+      body: JSON.stringify({ ...payload, process_id: processId }),
+    });
+    return oneOf(result, "opportunite");
+  }
+
   const result = await backendApi.request<unknown>(
     `processes/${encodeURIComponent(String(processId))}/risks-opportunities`,
     { method: "POST", body: JSON.stringify(payload) },
@@ -185,7 +260,16 @@ export async function createRisk(
 export async function updateRisk(
   id: string | number,
   payload: RiskSavePayload,
+  type: RiskType = payload["type"] === "opportunite" ? "opportunite" : "risque",
 ): Promise<RiskOpportunity | null> {
+  if (type === "opportunite") {
+    const result = await backendApi.request<unknown>(
+      `opportunities/${encodeURIComponent(String(id))}`,
+      { method: "PUT", body: JSON.stringify(payload) },
+    );
+    return oneOf(result, "opportunite");
+  }
+
   const result = await backendApi.request<unknown>(
     `risks-opportunities/${encodeURIComponent(String(id))}`,
     { method: "PUT", body: JSON.stringify(payload) },
@@ -193,8 +277,9 @@ export async function updateRisk(
   return oneOf(result);
 }
 
-export async function deleteRisk(id: string | number): Promise<unknown> {
-  return backendApi.request<unknown>(`risks-opportunities/${encodeURIComponent(String(id))}`, {
+export async function deleteRisk(id: string | number, type: RiskType = "risque"): Promise<unknown> {
+  const resource = type === "opportunite" ? "opportunities" : "risks-opportunities";
+  return backendApi.request<unknown>(`${resource}/${encodeURIComponent(String(id))}`, {
     method: "DELETE",
   });
 }
@@ -202,7 +287,16 @@ export async function deleteRisk(id: string | number): Promise<unknown> {
 export async function evaluateRisk(
   id: string | number,
   payload: RiskEvaluationPayload,
+  type: RiskType = "risque",
 ): Promise<RiskOpportunity | null> {
+  if (type === "opportunite") {
+    const result = await backendApi.request<unknown>(
+      `opportunities/${encodeURIComponent(String(id))}`,
+      { method: "PUT", body: JSON.stringify(payload) },
+    );
+    return oneOf(result, "opportunite");
+  }
+
   const result = await backendApi.request<unknown>(
     `risks-opportunities/${encodeURIComponent(String(id))}/evaluation`,
     { method: "PATCH", body: JSON.stringify(payload) },
@@ -260,10 +354,10 @@ export function useRisks(filters: RiskFilters) {
   });
 }
 
-export function useRisk(id: string | number | null) {
+export function useRisk(id: string | number | null, type: RiskType = "risque") {
   return useQuery({
-    queryKey: [...RISKS_KEY, "detail", id],
-    queryFn: () => fetchRisk(id as string | number),
+    queryKey: [...RISKS_KEY, "detail", type, id],
+    queryFn: () => fetchRisk(id as string | number, type),
     enabled: id != null && String(id) !== "",
     staleTime: 60_000,
   });
@@ -290,17 +384,24 @@ export function useRiskMutations() {
       onSuccess: invalidate,
     }),
     update: useMutation({
-      mutationFn: (input: { id: string | number; payload: RiskSavePayload }) =>
-        updateRisk(input.id, input.payload),
+      mutationFn: (input: {
+        id: string | number;
+        payload: RiskSavePayload;
+        type?: RiskType | undefined;
+      }) => updateRisk(input.id, input.payload, input.type),
       onSuccess: invalidate,
     }),
     remove: useMutation({
-      mutationFn: (id: string | number) => deleteRisk(id),
+      mutationFn: (input: { id: string | number; type: RiskType }) =>
+        deleteRisk(input.id, input.type),
       onSuccess: invalidate,
     }),
     evaluate: useMutation({
-      mutationFn: (input: { id: string | number; payload: RiskEvaluationPayload }) =>
-        evaluateRisk(input.id, input.payload),
+      mutationFn: (input: {
+        id: string | number;
+        payload: RiskEvaluationPayload;
+        type?: RiskType | undefined;
+      }) => evaluateRisk(input.id, input.payload, input.type),
       onSuccess: invalidate,
     }),
   };

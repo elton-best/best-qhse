@@ -75,6 +75,34 @@ type Indicator = Record<string, unknown> & {
   values?: unknown[];
 };
 type UserOption = { id: string; name: string };
+type ProcessSequenceDraft = {
+  id?: string | undefined;
+  sequence_order: number;
+  input_description: string;
+  activity_description: string;
+  output_description: string;
+  sub_activities: string[];
+  supplier_processes: string[];
+  client_processes: string[];
+  responsible_user_id?: string | undefined;
+  duration_minutes?: number | undefined;
+  documents?: unknown[] | undefined;
+};
+type IsoCoverage = {
+  id?: string | undefined;
+  norme: string;
+  version: string;
+  clause_number: string;
+  clause_title: string;
+  clause_description: string;
+  coverage_level: "none" | "partial" | "full";
+  coverage_percentage: string;
+  coverage_comment: string;
+  evidence: string[];
+  conformity_status: string;
+  last_audit_date: string;
+  next_audit_date: string;
+};
 
 const tabs = [
   ["general", "Général"],
@@ -83,6 +111,7 @@ const tabs = [
   ["resources", "Ressources"],
   ["risks", "Risques & opportunités"],
   ["indicators", "KPI"],
+  ["coverage", "Couverture ISO"],
   ["versions", "Versions"],
   ["interactions", "Interactions"],
   ["workflow", "Workflow"],
@@ -120,7 +149,9 @@ function stringList(value: unknown): string[] {
     return value
       .map((item) =>
         item && typeof item === "object"
-          ? String(asRecord(item)["name"] ?? asRecord(item)["title"] ?? asRecord(item)["label"] ?? "")
+          ? String(
+              asRecord(item)["name"] ?? asRecord(item)["title"] ?? asRecord(item)["label"] ?? "",
+            )
           : String(item ?? ""),
       )
       .map((item) => item.trim())
@@ -140,7 +171,8 @@ function stringList(value: unknown): string[] {
 
 function currentIndicatorValue(indicator: Indicator): string {
   const values = asArray(indicator.values);
-  const latest = values[0] && typeof values[0] === "object" ? asRecord(values[0])["value"] : undefined;
+  const latest =
+    values[0] && typeof values[0] === "object" ? asRecord(values[0])["value"] : undefined;
   return String(indicator["current_value"] ?? latest ?? "N/A");
 }
 
@@ -153,7 +185,9 @@ function resourceGroups(value: unknown): ResourceGroups {
     technological: Array.isArray(root["technological"])
       ? root["technological"].map(resourceItem)
       : make(root["technological"]),
-    material: Array.isArray(root["material"]) ? root["material"].map(resourceItem) : make(root["material"]),
+    material: Array.isArray(root["material"])
+      ? root["material"].map(resourceItem)
+      : make(root["material"]),
     documentary: Array.isArray(root["documentary"])
       ? root["documentary"].map(resourceItem)
       : make(root["documentary"]),
@@ -183,7 +217,7 @@ function emptyRisk(type: Risk["type"]): Risk {
     actions_prevues: "",
   };
 }
-function emptySequence(sequence_order = 1) {
+function emptySequence(sequence_order = 1): ProcessSequenceDraft {
   return {
     sequence_order,
     input_description: "",
@@ -396,16 +430,22 @@ function NewProcessSequencesEditor({
   setSequences,
   processOptions,
   users,
+  documents,
+  documentsLoading,
 }: {
-  sequences: any[];
-  setSequences: React.Dispatch<React.SetStateAction<any[]>>;
+  sequences: ProcessSequenceDraft[];
+  setSequences: React.Dispatch<React.SetStateAction<ProcessSequenceDraft[]>>;
   processOptions: string[];
   users: UserOption[];
+  documents: { id: string; title: string; code: string }[];
+  documentsLoading: boolean;
 }) {
-  const update = (index: number, key: string, value: unknown) =>
+  const update = (index: number, key: keyof ProcessSequenceDraft, value: unknown) =>
     setSequences((current) =>
       current.map((sequence, sequenceIndex) =>
-        sequenceIndex === index ? { ...sequence, [key]: value } : sequence,
+        sequenceIndex === index
+          ? ({ ...sequence, [key]: value } as ProcessSequenceDraft)
+          : sequence,
       ),
     );
   const add = () => setSequences((current) => [...current, emptySequence(current.length + 1)]);
@@ -420,7 +460,11 @@ function NewProcessSequencesEditor({
       const target = index + direction;
       if (target < 0 || target >= current.length) return current;
       const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
+      const selected = next[index];
+      const destination = next[target];
+      if (!selected || !destination) return current;
+      next[index] = destination;
+      next[target] = selected;
       return next.map((item, itemIndex) => ({ ...item, sequence_order: itemIndex + 1 }));
     });
   return (
@@ -567,6 +611,40 @@ function NewProcessSequencesEditor({
                 />
               </div>
             </div>
+            <div className="mt-4">
+              <Label>Informations documentées d’appui et preuves liées</Label>
+              <select
+                multiple
+                className={`${input} min-h-24`}
+                value={(sequence.documents ?? []).map((document) =>
+                  String(asRecord(document)["id"] ?? document),
+                )}
+                onChange={(event) => {
+                  const selectedIds = Array.from(event.target.selectedOptions).map(
+                    (option) => option.value,
+                  );
+                  update(
+                    index,
+                    "documents",
+                    selectedIds.map(
+                      (id) => documents.find((document) => document.id === id) ?? { id },
+                    ),
+                  );
+                }}
+              >
+                {documents.map((document) => (
+                  <option key={document.id} value={document.id}>
+                    {document.code ? `${document.code} — ` : ""}
+                    {document.title}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {documentsLoading
+                  ? "Chargement des documents du site…"
+                  : "Sélection facultative ; les références sont conservées avec cette séquence."}
+              </p>
+            </div>
           </div>
         ))}
         {sequences.length === 0 && (
@@ -608,6 +686,27 @@ export function ProcessFullPage({
     enabled: Boolean(siteId),
     staleTime: 30_000,
   });
+  const documentsQuery = useQuery({
+    queryKey: ["process-full-documents", siteId],
+    queryFn: async () =>
+      asArray(
+        await backendApi.request<unknown>(
+          `documents?site_id=${encodeURIComponent(siteId)}&per_page=100`,
+        ),
+      )
+        .map((item) => {
+          const row = asRecord(item);
+          const attributes = asRecord(row["attributes"] ?? row);
+          return {
+            id: String(row["id"] ?? attributes["id"] ?? ""),
+            title: String(attributes["title"] ?? attributes["name"] ?? ""),
+            code: String(attributes["code"] ?? attributes["ref"] ?? ""),
+          };
+        })
+        .filter((document) => document.id && document.title),
+    enabled: Boolean(siteId),
+    staleTime: 60_000,
+  });
   const normsQuery = useQuery({
     queryKey: ["process-full-norms"],
     queryFn: async () => {
@@ -626,6 +725,7 @@ export function ProcessFullPage({
     category: "pilotage",
     purpose: "",
     observation: "",
+    methodes: [] as string[],
     interfaces: [] as string[],
     pilot_id: "",
     copilot_ids: [] as string[],
@@ -634,7 +734,7 @@ export function ProcessFullPage({
     aspect_sante_securite: false,
     normes_iso: [] as string[],
   });
-  const [sequences, setSequences] = useState<any[]>([emptySequence()]);
+  const [sequences, setSequences] = useState<ProcessSequenceDraft[]>([emptySequence()]);
   const [resources, setResources] = useState<ResourceGroups>({
     human: [],
     technological: [],
@@ -644,6 +744,7 @@ export function ProcessFullPage({
   const [objectives, setObjectives] = useState<Objective[]>([]);
   const [risks, setRisks] = useState<Risk[]>([]);
   const [indicators, setIndicators] = useState<Indicator[]>([]);
+  const [isoCoverages, setIsoCoverages] = useState<IsoCoverage[]>([]);
   const [indicatorDraft, setIndicatorDraft] = useState({
     name: "",
     type: "performance",
@@ -672,6 +773,7 @@ export function ProcessFullPage({
       category: String(existing["category"] ?? existing["type"] ?? "pilotage"),
       purpose: String(existing["purpose"] ?? existing["finalite"] ?? ""),
       observation: String(existing["observation"] ?? ""),
+      methodes: stringList(existing["methodes"]),
       interfaces: stringList(existing["interfaces"]),
       pilot_id: existing["pilot_id"] ? String(existing["pilot_id"]) : "",
       copilot_ids: Array.isArray(existing["copilot_ids"])
@@ -740,6 +842,29 @@ export function ProcessFullPage({
         };
       }),
     );
+    setIsoCoverages(
+      asArray(existing["iso_coverages"]).map((item) => {
+        const row = asRecord(item);
+        return {
+          id: row["id"] == null ? undefined : String(row["id"]),
+          norme: String(row["norme"] ?? "9001"),
+          version: String(row["version"] ?? "2015"),
+          clause_number: String(row["clause_number"] ?? ""),
+          clause_title: String(row["clause_title"] ?? ""),
+          clause_description: String(row["clause_description"] ?? ""),
+          coverage_level: ["none", "partial", "full"].includes(String(row["coverage_level"]))
+            ? (String(row["coverage_level"]) as IsoCoverage["coverage_level"])
+            : "none",
+          coverage_percentage:
+            row["coverage_percentage"] == null ? "" : String(row["coverage_percentage"]),
+          coverage_comment: String(row["coverage_comment"] ?? ""),
+          evidence: stringList(row["evidence"]),
+          conformity_status: String(row["conformity_status"] ?? "amelioration"),
+          last_audit_date: String(row["last_audit_date"] ?? "").slice(0, 10),
+          next_audit_date: String(row["next_audit_date"] ?? "").slice(0, 10),
+        };
+      }),
+    );
   }, [existing]);
 
   useEffect(() => {
@@ -771,6 +896,64 @@ export function ProcessFullPage({
     setRisks((current) =>
       current.map((item, itemIndex) => (itemIndex === index ? { ...item, [key]: value } : item)),
     );
+  const updateIsoCoverage = (index: number, key: keyof IsoCoverage, value: unknown) =>
+    setIsoCoverages((current) =>
+      current.map((item, itemIndex) => (itemIndex === index ? { ...item, [key]: value } : item)),
+    );
+  const saveIsoCoverage = async (index: number) => {
+    const coverage = isoCoverages[index];
+    if (!coverage || !processId) return;
+    if (!coverage.clause_number.trim() || !coverage.clause_title.trim()) {
+      toast.error("Le numéro et le titre de la clause sont obligatoires.");
+      return;
+    }
+    const payload = {
+      norme: coverage.norme.trim(),
+      version: coverage.version.trim() || null,
+      clause_number: coverage.clause_number.trim(),
+      clause_title: coverage.clause_title.trim(),
+      clause_description: coverage.clause_description.trim() || null,
+      coverage_level: coverage.coverage_level,
+      coverage_percentage:
+        coverage.coverage_percentage.trim() === "" ? null : Number(coverage.coverage_percentage),
+      coverage_comment: coverage.coverage_comment.trim() || null,
+      evidence: coverage.evidence,
+      conformity_status: coverage.conformity_status,
+      last_audit_date: coverage.last_audit_date || null,
+      next_audit_date: coverage.next_audit_date || null,
+    };
+    try {
+      await backendApi.request(
+        coverage.id
+          ? `processes/${processId}/iso-coverage/${coverage.id}`
+          : `processes/${processId}/iso-coverage`,
+        {
+          method: coverage.id ? "PUT" : "POST",
+          body: JSON.stringify(payload),
+        },
+      );
+      await refetch();
+      toast.success("Couverture ISO enregistrée.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Impossible d’enregistrer la couverture.",
+      );
+    }
+  };
+  const deleteIsoCoverage = async (coverage: IsoCoverage) => {
+    if (!processId || !coverage.id) return;
+    try {
+      await backendApi.request(`processes/${processId}/iso-coverage/${coverage.id}`, {
+        method: "DELETE",
+      });
+      await refetch();
+      toast.success("Couverture ISO supprimée.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Impossible de supprimer la couverture.",
+      );
+    }
+  };
 
   const persistChildren = async (id: string, isUpdate: boolean) => {
     const originalObjectiveIds = new Set(
@@ -898,6 +1081,7 @@ export function ProcessFullPage({
         purpose: form.purpose.trim(),
         finalite: form.purpose.trim(),
         observation: form.observation.trim() || null,
+        methodes: form.methodes,
         interfaces: form.interfaces,
         pilot_id: form.pilot_id ? Number(form.pilot_id) : null,
         copilot_ids: copilotIds,
@@ -917,7 +1101,7 @@ export function ProcessFullPage({
           supplier_processes: stringList(sequence.supplier_processes),
           client_processes: stringList(sequence.client_processes),
           document_ids: (sequence.documents ?? [])
-            .map((document: Record<string, unknown>) => Number(document["id"]))
+            .map((document) => Number(asRecord(document)["id"]))
             .filter(Boolean),
         })),
       };
@@ -927,7 +1111,9 @@ export function ProcessFullPage({
       );
       const root = asRecord(response);
       const data = asRecord(root["data"]);
-      const id = String(data["id"] ?? asRecord(data["attributes"])["id"] ?? root["id"] ?? processId ?? "");
+      const id = String(
+        data["id"] ?? asRecord(data["attributes"])["id"] ?? root["id"] ?? processId ?? "",
+      );
       if (!id) throw new Error("Le processus n'a pas retourné d'identifiant.");
       await persistChildren(id, Boolean(processId));
       await persistIndicators(id, !processId);
@@ -1390,6 +1576,23 @@ export function ProcessFullPage({
               />
             </div>
             <div className="md:col-span-2">
+              <Label>Critères et méthodes de maîtrise</Label>
+              <textarea
+                className={`${input} min-h-24`}
+                value={form.methodes.join("\n")}
+                onChange={(event) =>
+                  updateForm(
+                    "methodes",
+                    event.target.value
+                      .split("\n")
+                      .map((method) => method.trim())
+                      .filter(Boolean),
+                  )
+                }
+                placeholder="Décrivez les critères d’acceptation, la surveillance, les mesures et leur fréquence — une méthode par ligne."
+              />
+            </div>
+            <div className="md:col-span-2">
               <Label>Interfaces avec les autres processus</Label>
               <textarea
                 className={`${input} min-h-20`}
@@ -1408,11 +1611,13 @@ export function ProcessFullPage({
             </div>
           </div>
           <div className="mt-6 grid gap-3 md:grid-cols-3">
-            {([
-              ["aspect_qualite", "Qualité"],
-              ["aspect_environnement", "Environnement"],
-              ["aspect_sante_securite", "Santé & sécurité"],
-            ] as [string, string][]).map(([key, label]) => (
+            {(
+              [
+                ["aspect_qualite", "Qualité"],
+                ["aspect_environnement", "Environnement"],
+                ["aspect_sante_securite", "Santé & sécurité"],
+              ] as [string, string][]
+            ).map(([key, label]) => (
               <label
                 key={key}
                 className="flex items-center gap-2 rounded-xl border border-border p-3 text-sm font-semibold"
@@ -1459,6 +1664,8 @@ export function ProcessFullPage({
             setSequences={setSequences}
             processOptions={processOptions}
             users={usersQuery.data ?? []}
+            documents={documentsQuery.data ?? []}
+            documentsLoading={documentsQuery.isLoading}
           />
         ))}
       {tab === "objectives" && (
@@ -1869,6 +2076,249 @@ export function ProcessFullPage({
           </div>
         </section>
       )}
+      {tab === "coverage" && (
+        <section className={`${card} p-6`}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="font-display text-xl font-bold">Couverture des exigences ISO</h2>
+              <p className={muted}>
+                Reliez une clause applicable à ce processus et consignez le niveau, la conformité et
+                les preuves vérifiables. Cette liste n’est pas une bibliothèque exhaustive des
+                clauses normatives.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={secondary}
+              disabled={!processId}
+              onClick={() =>
+                setIsoCoverages((current) => [
+                  ...current,
+                  {
+                    norme: "9001",
+                    version: "2026",
+                    clause_number: "",
+                    clause_title: "",
+                    clause_description: "",
+                    coverage_level: "none",
+                    coverage_percentage: "",
+                    coverage_comment: "",
+                    evidence: [],
+                    conformity_status: "amelioration",
+                    last_audit_date: "",
+                    next_audit_date: "",
+                  },
+                ])
+              }
+            >
+              <Plus className="h-4 w-4" /> Ajouter une clause
+            </button>
+          </div>
+          {!processId && (
+            <p className="mt-4 rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
+              Créez d’abord le processus pour enregistrer sa couverture ISO.
+            </p>
+          )}
+          <div className="mt-5 space-y-4">
+            {isoCoverages.map((coverage, index) => (
+              <article
+                key={coverage.id ?? `new-${index}`}
+                className="rounded-xl border border-border bg-background p-4"
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <Label>Norme</Label>
+                    <select
+                      className={input}
+                      value={coverage.norme}
+                      onChange={(event) => updateIsoCoverage(index, "norme", event.target.value)}
+                    >
+                      {Array.from(
+                        new Set([
+                          "9001",
+                          ...["14001", "45001", "27001", "22000"].filter((code) =>
+                            ["9001", ...stringList(normsQuery.data)].some(
+                              (candidate) => candidate.replace(/^ISO\s*/i, "") === code,
+                            ),
+                          ),
+                        ]),
+                      ).map((norm) => (
+                        <option key={norm} value={norm.replace(/^ISO\s*/i, "")}>
+                          {norm.startsWith("ISO ") ? norm : `ISO ${norm}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Édition</Label>
+                    <input
+                      className={input}
+                      value={coverage.version}
+                      onChange={(event) => updateIsoCoverage(index, "version", event.target.value)}
+                      placeholder="2026"
+                    />
+                  </div>
+                  <div>
+                    <Label>Numéro de clause *</Label>
+                    <input
+                      className={input}
+                      value={coverage.clause_number}
+                      onChange={(event) =>
+                        updateIsoCoverage(index, "clause_number", event.target.value)
+                      }
+                      placeholder="Ex. 4.1"
+                    />
+                  </div>
+                  <div>
+                    <Label>Titre de clause *</Label>
+                    <input
+                      className={input}
+                      value={coverage.clause_title}
+                      onChange={(event) =>
+                        updateIsoCoverage(index, "clause_title", event.target.value)
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>Niveau de couverture</Label>
+                    <select
+                      className={input}
+                      value={coverage.coverage_level}
+                      onChange={(event) =>
+                        updateIsoCoverage(
+                          index,
+                          "coverage_level",
+                          event.target.value as IsoCoverage["coverage_level"],
+                        )
+                      }
+                    >
+                      <option value="none">Aucune</option>
+                      <option value="partial">Partielle</option>
+                      <option value="full">Complète</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Estimation de couverture (%)</Label>
+                    <input
+                      className={input}
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={coverage.coverage_percentage}
+                      onChange={(event) =>
+                        updateIsoCoverage(index, "coverage_percentage", event.target.value)
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>État de conformité</Label>
+                    <select
+                      className={input}
+                      value={coverage.conformity_status}
+                      onChange={(event) =>
+                        updateIsoCoverage(index, "conformity_status", event.target.value)
+                      }
+                    >
+                      <option value="conforme">Conforme</option>
+                      <option value="amelioration">À améliorer</option>
+                      <option value="non_conforme">Non conforme</option>
+                      <option value="non_applicable">Non applicable</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Dernier audit</Label>
+                    <input
+                      className={input}
+                      type="date"
+                      value={coverage.last_audit_date}
+                      onChange={(event) =>
+                        updateIsoCoverage(index, "last_audit_date", event.target.value)
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>Prochain audit</Label>
+                    <input
+                      className={input}
+                      type="date"
+                      value={coverage.next_audit_date}
+                      onChange={(event) =>
+                        updateIsoCoverage(index, "next_audit_date", event.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label>Description / applicabilité au processus</Label>
+                    <textarea
+                      className={`${input} min-h-20`}
+                      value={coverage.clause_description}
+                      onChange={(event) =>
+                        updateIsoCoverage(index, "clause_description", event.target.value)
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>Commentaire et décision</Label>
+                    <textarea
+                      className={`${input} min-h-20`}
+                      value={coverage.coverage_comment}
+                      onChange={(event) =>
+                        updateIsoCoverage(index, "coverage_comment", event.target.value)
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>Références des preuves (une par ligne)</Label>
+                    <textarea
+                      className={`${input} min-h-20`}
+                      value={coverage.evidence.join("\n")}
+                      onChange={(event) =>
+                        updateIsoCoverage(
+                          index,
+                          "evidence",
+                          event.target.value
+                            .split("\n")
+                            .map((line) => line.trim())
+                            .filter(Boolean),
+                        )
+                      }
+                      placeholder="Code documentaire, URL ou identifiant d’enregistrement"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    className={secondary}
+                    onClick={() =>
+                      coverage.id
+                        ? void deleteIsoCoverage(coverage)
+                        : setIsoCoverages((current) =>
+                            current.filter((_, itemIndex) => itemIndex !== index),
+                          )
+                    }
+                  >
+                    <Trash2 className="h-4 w-4" /> Supprimer
+                  </button>
+                  <button
+                    type="button"
+                    className={primary}
+                    onClick={() => void saveIsoCoverage(index)}
+                  >
+                    <Save className="h-4 w-4" /> Enregistrer la couverture
+                  </button>
+                </div>
+              </article>
+            ))}
+            {isoCoverages.length === 0 && (
+              <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                Aucune clause enregistrée pour ce processus.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
       {tab === "versions" && (
         <section className={`${card} p-6`}>
           <div className="flex flex-wrap items-end gap-3">
@@ -2087,7 +2537,79 @@ export function ProcessFullPage({
             </p>
           </div>
           <div className={`${card} p-5 md:col-span-2`}>
-            <h2 className="font-display text-lg font-bold">Chaînage</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="font-display text-lg font-bold">Fiche tortue — vue imprimable</h2>
+              <button type="button" className={secondary} onClick={() => window.print()}>
+                <FileText className="h-4 w-4" /> Imprimer
+              </button>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              {[
+                [
+                  "Entrées",
+                  sequences
+                    .map((sequence) => String(sequence.input_description ?? "").trim())
+                    .filter(Boolean),
+                ],
+                [
+                  "Sorties",
+                  sequences
+                    .map((sequence) => String(sequence.output_description ?? "").trim())
+                    .filter(Boolean),
+                ],
+                [
+                  "Ressources",
+                  Object.values(resources)
+                    .flat()
+                    .map((resource) => resource.name)
+                    .filter(Boolean),
+                ],
+                [
+                  "Compétences / responsables",
+                  Array.from(
+                    new Set(
+                      sequences
+                        .map(
+                          (sequence) =>
+                            usersQuery.data?.find(
+                              (user) => user.id === String(sequence.responsible_user_id ?? ""),
+                            )?.name,
+                        )
+                        .filter((name): name is string => Boolean(name)),
+                    ),
+                  ),
+                ],
+                ["Méthodes et critères", form.methodes],
+                [
+                  "Indicateurs",
+                  indicators.map(
+                    (indicator) =>
+                      `${indicator.name}${indicator.unit ? ` (${indicator.unit})` : ""}`,
+                  ),
+                ],
+              ].map(([label, items]) => (
+                <div
+                  key={String(label)}
+                  className="rounded-xl border border-border bg-background p-3"
+                >
+                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    {String(label)}
+                  </p>
+                  {Array.isArray(items) && items.length > 0 ? (
+                    <ul className="mt-2 list-inside list-disc space-y-1 text-sm">
+                      {items.map((item, index) => (
+                        <li key={`${String(label)}-${index}`}>{String(item)}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-2 text-sm text-muted-foreground">Non renseigné</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className={`${card} p-5 md:col-span-2`}>
+            <h2 className="font-display text-lg font-bold">Séquence et interactions</h2>
             <div className="mt-3 grid gap-3 md:grid-cols-3">
               {sequences.map((sequence, index) => (
                 <div key={index} className="rounded-xl bg-background p-3 text-sm">

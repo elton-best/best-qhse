@@ -8,26 +8,30 @@ export const PROCESSES_KEY = ["organisation-processes"] as const;
 function resource(payload: unknown) {
   if (!payload || typeof payload !== "object") return {};
   const root = payload as Record<string, unknown>;
-  const item = (root["data"] && typeof root["data"] === "object" && !Array.isArray(root["data"])
-    ? root["data"]
-    : payload) as Record<string, unknown>;
-  const attributes = item["attributes"] && typeof item["attributes"] === "object"
-    ? item["attributes"] as Record<string, unknown>
-    : item;
+  const item = (
+    root["data"] && typeof root["data"] === "object" && !Array.isArray(root["data"])
+      ? root["data"]
+      : payload
+  ) as Record<string, unknown>;
+  const attributes =
+    item["attributes"] && typeof item["attributes"] === "object"
+      ? (item["attributes"] as Record<string, unknown>)
+      : item;
   const result: Record<string, unknown> = {
     ...attributes,
     id: item["id"] ?? attributes["id"],
   };
-  const relationships = item["relationships"] && typeof item["relationships"] === "object"
-    ? item["relationships"] as Record<string, unknown>
-    : {};
+  const relationships =
+    item["relationships"] && typeof item["relationships"] === "object"
+      ? (item["relationships"] as Record<string, unknown>)
+      : {};
   Object.entries(relationships).forEach(([key, value]) => {
-    const relation = value && typeof value === "object" && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : value;
-    const data = relation && typeof relation === "object" && "data" in relation
-      ? relation.data
-      : relation;
+    const relation =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : value;
+    const data =
+      relation && typeof relation === "object" && "data" in relation ? relation.data : relation;
     if (Array.isArray(data)) {
       result[key] = data.map((entry) => resource(entry));
     } else if (data && typeof data === "object") {
@@ -42,7 +46,12 @@ function resource(payload: unknown) {
 function arrayValue(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   if (typeof value !== "string") return [];
-  try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchProcess(id: string) {
@@ -61,34 +70,59 @@ export function useProcess(id?: string) {
 
 export function normalizeProcessSequences(value: unknown) {
   return arrayValue(value).map((item, index) => {
-    const source = item && typeof item === "object" ? item as Record<string, unknown> : {};
+    const source = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
     const list = (candidate: unknown): string[] => {
       if (Array.isArray(candidate)) {
-        return candidate.map((entry) => {
-          if (entry && typeof entry === "object") {
-            const object = entry as Record<string, unknown>;
-            return String(object["name"] ?? object["title"] ?? object["label"] ?? object["code"] ?? object["id"] ?? "").trim();
-          }
-          return String(entry ?? "").trim();
-        }).filter(Boolean);
+        return candidate
+          .map((entry) => {
+            if (entry && typeof entry === "object") {
+              const object = entry as Record<string, unknown>;
+              return String(
+                object["name"] ??
+                  object["title"] ??
+                  object["label"] ??
+                  object["code"] ??
+                  object["id"] ??
+                  "",
+              ).trim();
+            }
+            return String(entry ?? "").trim();
+          })
+          .filter(Boolean);
       }
       if (typeof candidate === "string") {
         const parsed = arrayValue(candidate);
-        return parsed.length > 0 ? list(parsed) : candidate.split(",").map((entry) => entry.trim()).filter(Boolean);
+        return parsed.length > 0
+          ? list(parsed)
+          : candidate
+              .split(",")
+              .map((entry) => entry.trim())
+              .filter(Boolean);
       }
       return [];
     };
     return {
       id: source["id"] == null ? undefined : String(source["id"]),
       sequence_order: Number(source["sequence_order"] ?? source["order"] ?? index + 1),
-      input_description: String(source["input_description"] ?? source["inputDescription"] ?? source["inputs"] ?? ""),
-      activity_description: String(source["activity_description"] ?? source["activityDescription"] ?? source["activities"] ?? ""),
-      output_description: String(source["output_description"] ?? source["outputDescription"] ?? source["outputs"] ?? ""),
+      input_description: String(
+        source["input_description"] ?? source["inputDescription"] ?? source["inputs"] ?? "",
+      ),
+      activity_description: String(
+        source["activity_description"] ??
+          source["activityDescription"] ??
+          source["activities"] ??
+          "",
+      ),
+      output_description: String(
+        source["output_description"] ?? source["outputDescription"] ?? source["outputs"] ?? "",
+      ),
       sub_activities: list(source["sub_activities"] ?? source["subActivities"]),
       supplier_processes: list(source["supplier_processes"] ?? source["supplierProcesses"]),
       client_processes: list(source["client_processes"] ?? source["clientProcesses"]),
-      responsible_user_id: source["responsible_user_id"] == null ? undefined : String(source["responsible_user_id"]),
-      duration_minutes: source["duration_minutes"] == null ? undefined : Number(source["duration_minutes"]),
+      responsible_user_id:
+        source["responsible_user_id"] == null ? undefined : String(source["responsible_user_id"]),
+      duration_minutes:
+        source["duration_minutes"] == null ? undefined : Number(source["duration_minutes"]),
       documents: Array.isArray(source["documents"]) ? source["documents"] : [],
     };
   });
@@ -114,7 +148,11 @@ export async function createProcessSequence(processId: string, payload: ProcessS
   });
 }
 
-export async function updateProcessSequence(processId: string, sequenceId: string, payload: ProcessSequencePayload) {
+export async function updateProcessSequence(
+  processId: string,
+  sequenceId: string,
+  payload: ProcessSequencePayload,
+) {
   return backendApi.request(`processes/${processId}/sequences/${sequenceId}`, {
     method: "PUT",
     body: JSON.stringify(payload),
@@ -133,10 +171,17 @@ export function useProcessMutations(siteId: string) {
   };
   return {
     save: useMutation({
-      mutationFn: (input: { id?: string | undefined; payload: Record<string, unknown> }) => backendApi.request(input.id ? `processes/${input.id}` : "processes", { method: input.id ? "PUT" : "POST", body: JSON.stringify(input.payload) }),
+      mutationFn: (input: { id?: string | undefined; payload: Record<string, unknown> }) =>
+        backendApi.request(input.id ? `processes/${input.id}` : "processes", {
+          method: input.id ? "PUT" : "POST",
+          body: JSON.stringify(input.payload),
+        }),
       onSuccess: invalidate,
     }),
-    remove: useMutation({ mutationFn: (id: string) => backendApi.request(`processes/${id}`, { method: "DELETE" }), onSuccess: invalidate }),
+    remove: useMutation({
+      mutationFn: (id: string) => backendApi.request(`processes/${id}`, { method: "DELETE" }),
+      onSuccess: invalidate,
+    }),
   };
 }
 
@@ -145,8 +190,7 @@ export const PROCESS_REVIEWS_KEY = ["process-reviews"] as const;
 /** Collection REST des revues de processus (backend feat/modular-backend-iso-exports). */
 export async function fetchProcessReviews(processId: string) {
   const payload = await backendApi.request<unknown>(`processes/${processId}/reviews`);
-  const root =
-    payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+  const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
   const data = root["data"] ?? payload;
   if (Array.isArray(data)) return data.map(flattenResource);
   return [];
@@ -163,7 +207,8 @@ export function useProcessReviews(processId?: string) {
 
 export function useProcessReviewMutations(processId: string) {
   const client = useQueryClient();
-  const invalidate = () => client.invalidateQueries({ queryKey: [...PROCESS_REVIEWS_KEY, processId] });
+  const invalidate = () =>
+    client.invalidateQueries({ queryKey: [...PROCESS_REVIEWS_KEY, processId] });
   return {
     save: useMutation({
       mutationFn: (input: { id?: string | number; payload: Record<string, unknown> }) =>
@@ -258,7 +303,13 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function cartographyList(value: unknown): CartographyProcess[] {
   if (!Array.isArray(value)) return [];
-  return value.map((item) => ({ ...resource(item), id: (asRecord(resource(item))["id"] ?? "") as string | number }) as CartographyProcess);
+  return value.map(
+    (item) =>
+      ({
+        ...resource(item),
+        id: (asRecord(resource(item))["id"] ?? "") as string | number,
+      }) as CartographyProcess,
+  );
 }
 
 function parseCartography(payload: unknown): CartographyData {
@@ -313,9 +364,7 @@ export function downloadCartographyPdf(siteId: string) {
 
 /** Export DOCX de la cartographie (canevas 4 colonnes côté Laravel). */
 export function downloadCartographyDocx(siteId: string) {
-  return backendApi.blob(
-    `processes-cartography/export-docx?site_id=${encodeURIComponent(siteId)}`,
-  );
+  return backendApi.blob(`processes-cartography/export-docx?site_id=${encodeURIComponent(siteId)}`);
 }
 
 /** Codification du document SMQ (POST `processes-cartography/generate-draft`). */
@@ -335,6 +384,15 @@ export type IsoCoverageRow = Record<string, unknown> & {
   conformity?: string;
 };
 
+export type IsoCoverageSummary = {
+  evaluated_clauses: number;
+  average_coverage_percentage: number;
+  full_coverage: number;
+  partial_coverage: number;
+  no_coverage: number;
+  nonconformities: number;
+};
+
 /** Matrice de couverture ISO (contrat `iso-coverage-matrix?site_id=…&norme=…`). */
 export async function fetchIsoCoverageMatrix(siteId: string, norme = "9001") {
   const payload = await backendApi.request<unknown>(
@@ -346,6 +404,16 @@ export async function fetchIsoCoverageMatrix(siteId: string, norme = "9001") {
     rows: (Array.isArray(data) ? data : []) as IsoCoverageRow[],
     norme: String(root["norme"] ?? norme),
     total: Number(root["total"] ?? (Array.isArray(data) ? data.length : 0)),
+    summary: {
+      evaluated_clauses: Number(asRecord(root["summary"])["evaluated_clauses"] ?? 0),
+      average_coverage_percentage: Number(
+        asRecord(root["summary"])["average_coverage_percentage"] ?? 0,
+      ),
+      full_coverage: Number(asRecord(root["summary"])["full_coverage"] ?? 0),
+      partial_coverage: Number(asRecord(root["summary"])["partial_coverage"] ?? 0),
+      no_coverage: Number(asRecord(root["summary"])["no_coverage"] ?? 0),
+      nonconformities: Number(asRecord(root["summary"])["nonconformities"] ?? 0),
+    } satisfies IsoCoverageSummary,
   };
 }
 

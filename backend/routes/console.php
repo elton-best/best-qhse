@@ -26,6 +26,7 @@ Schedule::command('incidents:check-alerts')->dailyAt('09:05');
 Schedule::command('subscriptions:check-expiry')->dailyAt('07:00');
 Schedule::command('trial:check')->daily();
 Schedule::command('communications:check-reminders')->dailyAt('08:00');
+Schedule::command('contexts:check-review-reminders')->dailyAt('08:10');
 Schedule::command('maintenances:check-reminders')->dailyAt('08:15');
 Schedule::command('formations:check-reminders')->dailyAt('08:30');
 Schedule::command('risks:check-reassessments')->monthlyOn(1, '09:00');

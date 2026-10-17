@@ -14,22 +14,34 @@ class ObjectiveService
     public function create(array $data): Objective
     {
         return DB::transaction(function () use ($data) {
+            $this->validateHierarchy(
+                (string) $data['level'],
+                isset($data['parent_objective_id']) ? (int) $data['parent_objective_id'] : null,
+                (int) $data['site_id'],
+            );
+
             $objective = Objective::create([
                 'ref' => $this->generateReference(),
                 'site_id' => $data['site_id'],
+                'parent_objective_id' => $data['parent_objective_id'] ?? null,
                 'process_id' => $data['process_id'] ?? null,
                 'strategic_axis_id' => $data['strategic_axis_id'] ?? null,
                 'indicateur_id' => $data['indicateur_id'] ?? null,
                 'type' => $data['type'] ?? 'operational',
+                'level' => $data['level'],
                 'title' => $data['title'],
                 'description' => $data['description'] ?? null,
                 'start_date' => $data['start_date'] ?? now(),
+                'indicator_name' => $data['indicator_name'],
+                'baseline_value' => $data['baseline_value'],
                 'target_value' => $data['target_value'],
                 'responsible_id' => $data['responsible_id'] ?? null,
                 'deadline' => $data['deadline'],
                 'allocated_budget' => $data['allocated_budget'] ?? null,
-                'required_resources' => $data['required_resources'] ?? null,
-                'measurement_frequency' => $data['measurement_frequency'] ?? null,
+                'required_resources' => $data['required_resources'],
+                'evaluation_method' => $data['evaluation_method'],
+                'measurement_frequency' => $data['measurement_frequency'],
+                'applicable_norms' => $data['applicable_norms'] ?? [],
                 'unit' => $data['unit'] ?? null,
             ]);
 
@@ -58,12 +70,41 @@ class ObjectiveService
                 ->causedBy(auth()->user())
                 ->log('Objectif créé');
 
-            return $objective->load(['axes', 'workflowState', 'indicateur', 'actions', 'responsible']);
+            return $objective->load([
+                'axes',
+                'workflowState',
+                'indicateur',
+                'actions',
+                'responsible',
+                'parentObjective',
+            ]);
         });
     }
 
     public function update(Objective $objective, array $data): Objective
     {
+        if (array_key_exists('level', $data) || array_key_exists('parent_objective_id', $data)) {
+            $level = (string) ($data['level'] ?? $objective->level);
+            $parentId = array_key_exists('parent_objective_id', $data)
+                ? ($data['parent_objective_id'] === null ? null : (int) $data['parent_objective_id'])
+                : ($objective->parent_objective_id === null ? null : (int) $objective->parent_objective_id);
+            $this->validateHierarchy($level, $parentId, (int) $objective->site_id, (int) $objective->id);
+
+            $childLevel = match ($level) {
+                'strategic' => 'tactical',
+                'tactical' => 'operational',
+                default => null,
+            };
+            if (
+                $objective->childObjectives()->exists() &&
+                ($childLevel === null || $objective->childObjectives()->where('level', '!=', $childLevel)->exists())
+            ) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'level' => ['Le niveau ne peut pas être modifié car des objectifs enfants en dépendent.'],
+                ]);
+            }
+        }
+
         $objective->update($data);
 
         if (isset($data['axes'])) {
@@ -88,7 +129,7 @@ class ObjectiveService
             ->causedBy(auth()->user())
             ->log('Objectif mis à jour');
 
-        return $objective->fresh();
+        return $objective->fresh(['parentObjective']);
     }
 
     public function activate(Objective $objective): Objective
@@ -377,5 +418,48 @@ class ObjectiveService
         }
 
         return sprintf('OBJ-%d-%03d', $year, $newNumber);
+    }
+
+    private function validateHierarchy(
+        string $level,
+        ?int $parentId,
+        int $siteId,
+        ?int $objectiveId = null,
+    ): void {
+        if ($level === 'strategic') {
+            if ($parentId !== null) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'parent_objective_id' => ['Un objectif stratégique est une racine et ne peut avoir de parent.'],
+                ]);
+            }
+            return;
+        }
+
+        $expectedParentLevel = match ($level) {
+            'tactical' => 'strategic',
+            'operational' => 'tactical',
+            default => null,
+        };
+        if ($expectedParentLevel === null || $parentId === null) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'parent_objective_id' => ['Sélectionnez l’objectif parent requis pour ce niveau.'],
+            ]);
+        }
+        if ($objectiveId !== null && $parentId === $objectiveId) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'parent_objective_id' => ['Un objectif ne peut pas être son propre parent.'],
+            ]);
+        }
+
+        $parent = Objective::query()
+            ->where('site_id', $siteId)
+            ->find($parentId);
+        if (!$parent || $parent->level !== $expectedParentLevel) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'parent_objective_id' => [
+                    "Le parent doit être un objectif {$expectedParentLevel} du même site.",
+                ],
+            ]);
+        }
     }
 }

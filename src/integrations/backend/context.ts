@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { backendApi } from "@/integrations/backend/client";
 
 export const CONTEXT_KEY = ["organisation-context"] as const;
+export const CONTEXT_REVIEW_KEY = ["organisation-context-reviews"] as const;
 export const STAKEHOLDERS_KEY = ["organisation-stakeholders"] as const;
 export const SCOPE_KEY = ["organisation-scope"] as const;
 export const PROCESSES_KEY = ["organisation-processes"] as const;
@@ -42,7 +43,7 @@ async function fetchResources(endpoint: string, params: Record<string, string | 
 
 export const SWOT_PESTEL_TYPE = "swot_pestel" as const;
 
-/** Internal criteria keys (Vue SWOTPestel parity: culture/values/performance/knowledge/other_internal). */
+/** Critères internes du formulaire de contexte. */
 export const INTERNAL_CRITERIA = [
   "culture",
   "values",
@@ -50,7 +51,7 @@ export const INTERNAL_CRITERIA = [
   "knowledge",
   "other_internal",
 ] as const;
-/** External criteria keys (Vue SWOTPestel parity plus the ISO-relevant environmental factor). */
+/** Critères externes du formulaire de contexte. */
 export const EXTERNAL_CRITERIA = [
   "political",
   "economic",
@@ -60,7 +61,14 @@ export const EXTERNAL_CRITERIA = [
   "legal",
 ] as const;
 
-export type IssueCriterionData = { favorable: string[]; unfavorable: string[] };
+export type ContextIssue = {
+  id: string;
+  text: string;
+  climate_change_relevant: boolean | null;
+  climate_change_rationale: string;
+};
+
+export type IssueCriterionData = { favorable: ContextIssue[]; unfavorable: ContextIssue[] };
 
 export type SwotPestelIssuesForm = {
   internal: Record<string, IssueCriterionData>;
@@ -70,13 +78,51 @@ export type SwotPestelIssuesForm = {
   majorIssues: string[];
 };
 
-function issueList(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+function issueList(value: unknown, criterion: string, polarity: string): ContextIssue[] {
+  if (Array.isArray(value)) {
+    return value.map((item, index) => {
+      if (typeof item === "string") {
+        return {
+          id: `legacy-${criterion}-${polarity}-${index}`,
+          text: item,
+          climate_change_relevant: null,
+          climate_change_rationale: "",
+        };
+      }
+      const issue = objectOf(item);
+      return {
+        id: String(issue["id"] ?? `legacy-${criterion}-${polarity}-${index}`),
+        text: String(issue["text"] ?? issue["description"] ?? ""),
+        climate_change_relevant:
+          typeof issue["climate_change_relevant"] === "boolean"
+            ? issue["climate_change_relevant"]
+            : null,
+        climate_change_rationale: String(issue["climate_change_rationale"] ?? ""),
+      };
+    });
+  }
   return [];
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function emptyCriterion(): IssueCriterionData {
   return { favorable: [], unfavorable: [] };
+}
+
+export function newContextIssue(): ContextIssue {
+  return {
+    id:
+      globalThis.crypto?.randomUUID?.() ??
+      `issue-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    text: "",
+    climate_change_relevant: null,
+    climate_change_rationale: "",
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -90,7 +136,7 @@ function asRecord(value: unknown): Record<string, unknown> {
   return objectOf(value);
 }
 
-/** Parse a Vue-format criterion map (JSON string or object) into {favorable, unfavorable} lists. */
+/** Parse a persisted criterion map into lists of assessed context issues. */
 export function parseCriterionMap(
   value: unknown,
   criteria: readonly string[],
@@ -101,17 +147,20 @@ export function parseCriterionMap(
       const entry = objectOf(raw[criterion]);
       return [
         criterion,
-        { favorable: issueList(entry["favorable"]), unfavorable: issueList(entry["unfavorable"]) },
+        {
+          favorable: issueList(entry["favorable"], criterion, "favorable"),
+          unfavorable: issueList(entry["unfavorable"], criterion, "unfavorable"),
+        },
       ];
     }),
   );
 }
 
-/** Parse the Vue-format major-issues JSON array (string or array). */
+/** Parse the persisted major-issues JSON array (string or array). */
 export function parseMajorIssues(value: unknown): string[] {
   if (typeof value === "string") {
     try {
-      return issueList(JSON.parse(value) as unknown);
+      return stringList(JSON.parse(value) as unknown);
     } catch {
       return value
         .split("\n")
@@ -119,7 +168,19 @@ export function parseMajorIssues(value: unknown): string[] {
         .filter(Boolean);
     }
   }
-  return issueList(value);
+  return stringList(value);
+}
+
+export function countIncompleteClimateAssessments(form: SwotPestelIssuesForm): number {
+  return [...Object.values(form.internal), ...Object.values(form.external)]
+    .flatMap((criterion) => [...criterion.favorable, ...criterion.unfavorable])
+    .filter((issue) => {
+      if (!issue.text.trim()) return false;
+      return (
+        issue.climate_change_relevant === null ||
+        (issue.climate_change_relevant === false && !issue.climate_change_rationale.trim())
+      );
+    }).length;
 }
 
 export function emptyIssuesForm(): SwotPestelIssuesForm {
@@ -136,7 +197,7 @@ export function emptyIssuesForm(): SwotPestelIssuesForm {
   };
 }
 
-/** Map a flattened contexts record to the Vue-format issues form (syntheses + internal/external + major). */
+/** Map a flattened Laravel context record to the React form. */
 export function issuesFormFromRecord(record: Record<string, unknown>): SwotPestelIssuesForm {
   return {
     internal: parseCriterionMap(record["swot_weaknesses"], INTERNAL_CRITERIA),
@@ -149,7 +210,7 @@ export function issuesFormFromRecord(record: Record<string, unknown>): SwotPeste
   };
 }
 
-/** Build the Laravel payload matching the Vue SWOTPestel contract (JSON blobs + syntheses). */
+/** Build the Laravel payload with structured SWOT/PESTEL issues and their assessments. */
 export function buildSwotPestelPayload(
   siteId: string,
   form: SwotPestelIssuesForm,
@@ -172,12 +233,17 @@ export async function fetchContexts(siteId: string) {
   return fetchResources("contexts", { site_id: siteId, type: SWOT_PESTEL_TYPE });
 }
 
+export async function fetchContextReviews(contextId: string) {
+  const payload = await backendApi.request<unknown>(`contexts/${contextId}/reviews`);
+  return collection(payload).map(flattenResource);
+}
+
 export async function fetchStakeholders(siteId: string) {
   return fetchResources("stakeholders", { site_id: siteId, per_page: "100" });
 }
 
 export async function fetchScopes(siteId: string) {
-  return fetchResources("application-scopes", { site_id: siteId, is_current: "true" });
+  return fetchResources("application-scopes", { site_id: siteId, per_page: "100" });
 }
 
 export async function fetchProcesses(siteId: string) {
@@ -211,6 +277,15 @@ export function useContexts(siteId: string) {
     queryKey: [...CONTEXT_KEY, siteId],
     queryFn: () => fetchContexts(siteId),
     enabled: Boolean(siteId),
+    staleTime: 20_000,
+  });
+}
+
+export function useContextReviews(contextId?: string) {
+  return useQuery({
+    queryKey: [...CONTEXT_REVIEW_KEY, contextId],
+    queryFn: () => fetchContextReviews(contextId!),
+    enabled: Boolean(contextId),
     staleTime: 20_000,
   });
 }
@@ -266,6 +341,19 @@ export function useContextMutations(siteId: string) {
       },
       onSuccess: invalidate,
     }),
+    review: useMutation({
+      mutationFn: async (input: { id: string; summary: string }) =>
+        backendApi.request(`contexts/${input.id}/reviews`, {
+          method: "POST",
+          body: JSON.stringify({ summary: input.summary }),
+        }),
+      onSuccess: async (_result, input) => {
+        await invalidate();
+        await queryClient.invalidateQueries({
+          queryKey: [...CONTEXT_REVIEW_KEY, input.id],
+        });
+      },
+    }),
     remove: useMutation({
       mutationFn: (id: string) => backendApi.request(`contexts/${id}`, { method: "DELETE" }),
       onSuccess: invalidate,
@@ -307,6 +395,11 @@ export function useScopeMutations(siteId: string) {
           body: JSON.stringify(input.payload),
         });
       },
+      onSuccess: invalidate,
+    }),
+    publish: useMutation({
+      mutationFn: (id: string) =>
+        backendApi.request(`application-scopes/${id}/publish`, { method: "POST" }),
       onSuccess: invalidate,
     }),
   };

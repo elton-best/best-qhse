@@ -24,6 +24,28 @@ class Opportunity extends Model
         'opportunity_number',
         'title',
         'description',
+        'exploitation_actions',
+        'source_category',
+        'source_detail',
+        'assessment_method',
+        'desired_effect',
+        'opportunity_decision',
+        'decision_rationale',
+        'quality_status',
+        'legacy_process_risk_opportunity_id',
+        'probabilite',
+        'gravite',
+        'criticite',
+        'niveau',
+        'probabilite_residuelle',
+        'gravite_residuelle',
+        'criticite_residuelle',
+        'planned_actions',
+        'normes_iso',
+        'effectiveness_result',
+        'effectiveness_review',
+        'effectiveness_review_date',
+        'effectiveness_reviewed_by',
         'potential_impact',
         'feasibility_score',
         'priority_level',
@@ -41,7 +63,10 @@ class Opportunity extends Model
             'feasibility_score' => 'integer',
             'action_ids' => 'array',
             'applicable_norms' => 'array',
+            'planned_actions' => 'array',
+            'normes_iso' => 'array',
             'deadline' => 'date',
+            'effectiveness_review_date' => 'date',
         ];
     }
 
@@ -84,5 +109,10 @@ class Opportunity extends Model
     public function responsibleUser()
     {
         return $this->belongsTo(User::class, 'responsible_user_id');
+    }
+
+    public function effectivenessReviewedBy()
+    {
+        return $this->belongsTo(User::class, 'effectiveness_reviewed_by');
     }
 }
