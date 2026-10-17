@@ -7,6 +7,7 @@ use App\Http\Resources\ModificationResource;
 use App\Models\Action;
 use App\Models\Document;
 use App\Models\Modification;
+use App\Services\ScopeReviewService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -31,6 +32,7 @@ class ModificationController extends Controller
         }
 
         $modifications = $query->orderByDesc('date')->paginate($request->integer('per_page', 20));
+
         return ModificationResource::collection($modifications);
     }
 
@@ -56,9 +58,10 @@ class ModificationController extends Controller
         $validated['enterprise_id'] = $user?->enterprise_id;
         $validated['initiator_id'] = $user?->id;
         $validated['workflow_status'] = 'brouillon'; // REQ-6.3-02 : Démarre en brouillon
-        $validated['number'] = $validated['number'] ?? ('MOD-' . date('Ymd-His'));
+        $validated['number'] = $validated['number'] ?? ('MOD-'.date('Ymd-His'));
 
         $modification = Modification::create($validated);
+
         return new ModificationResource($modification->load(['site', 'initiator', 'responsible']));
     }
 
@@ -91,6 +94,7 @@ class ModificationController extends Controller
         ]);
 
         $modification->update($validated);
+
         return new ModificationResource($modification->load(['site', 'initiator', 'responsible', 'rqVerifier', 'ceoApprover']));
     }
 
@@ -136,7 +140,7 @@ class ModificationController extends Controller
         ]);
 
         // Si le RQ a ajouté des actions dans le cadre de la modification
-        if (!empty($validated['additional_actions'])) {
+        if (! empty($validated['additional_actions'])) {
             foreach ($validated['additional_actions'] as $actionData) {
                 Action::create([
                     'enterprise_id' => $modification->enterprise_id,
@@ -184,8 +188,12 @@ class ModificationController extends Controller
             'validated_at' => now(),
         ]);
 
+        app(ScopeReviewService::class)->flagChange(
+            (int) $modification->site_id, "Modification approuvée {$modification->ref} : {$modification->object}",
+        );
+
         // REQ-6.3-04 : La version du document ne change qu'à l'approbation du CEO
-        if (!empty($modification->affected_document_ids)) {
+        if (! empty($modification->affected_document_ids)) {
             foreach ($modification->affected_document_ids as $docId) {
                 $doc = Document::find($docId);
                 if ($doc) {
@@ -230,6 +238,7 @@ class ModificationController extends Controller
     public function destroy(Modification $modification)
     {
         $modification->delete();
+
         return response()->json(null, 204);
     }
 }

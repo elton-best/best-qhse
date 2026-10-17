@@ -42,10 +42,7 @@ class AuditPermissionMatrixTest extends TestCase
         ]);
 
         // Permission système volontairement non mappée.
-        Permission::create([
-            'name' => 'users.read',
-            'guard_name' => 'web',
-        ]);
+        Permission::findOrCreate('users.read', 'web');
 
         $code = Artisan::call('permissions:audit-matrix', [
             '--fail-on-critical' => true,

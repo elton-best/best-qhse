@@ -1,3 +1,4 @@
+import { LeadershipReviewPage } from "@/components/app/iso/LeadershipReviewPage";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { SECTIONS } from "@/components/app/sections";
 import { SectionView } from "@/components/app/SectionView";
@@ -13,7 +14,6 @@ import {
 } from "@/components/app/CustomPages";
 import { InboxPage, MyActionsPage } from "@/components/app/Extras";
 import {
-  DuerpView,
   GuideSection,
   ManagementConsolidation,
   ObjectivesGrid,
@@ -63,6 +63,14 @@ import {
 import { AesPage, IntegratedSystemPage } from "@/components/app/aes";
 import { ComplianceRegisterPage } from "@/components/app/compliance";
 import { EmergencyPage } from "@/components/app/emergency";
+import { ChangesPage } from "@/components/app/changes";
+import { PerformancePage } from "@/components/app/performance";
+import { AwarenessCampaignsPage } from "@/components/app/awareness";
+import { AuditsPage } from "@/components/app/audits";
+import { ReviewPage } from "@/components/app/review";
+import { ReadinessPage, SetupGuidePage } from "@/components/app/guide";
+import { NcPage, OpportunitiesPage } from "@/components/app/nonconformities";
+import { DuerpPage } from "@/components/app/duerp";
 import { HabilitationsPage } from "@/components/app/HabilitationsPage";
 import { SitesPage } from "@/components/app/SitesPage";
 import {
@@ -84,7 +92,7 @@ const GUIDE: Record<string, { id: string; label: string; render: () => React.Rea
       render: () => <RisksView />,
     },
   ],
-  dangers: [{ id: "duerp", label: "DUERP par unité de travail", render: () => <DuerpView /> }],
+  dangers: [{ id: "duerp", label: "DUERP par unité de travail", render: () => <DuerpPage /> }],
   objectifs: [
     { id: "grid", label: "Grille mensuelle & taux d'atteinte", render: () => <ObjectivesGrid /> },
   ],
@@ -101,6 +109,7 @@ const GUIDE: Record<string, { id: string; label: string; render: () => React.Rea
 };
 
 const CUSTOM = [
+  "engagements-leadership",
   "entreprise",
   "roles",
   "abonnement",
@@ -118,6 +127,15 @@ const CUSTOM = [
   "maitrise-operationnelle",
   "exigences",
   "obligations",
+  "changements",
+  "performance-environnementale",
+  "campagnes-sensibilisation",
+  "audits",
+  "revue-direction",
+  "demarrage",
+  "preparation-certification",
+  "non-conformites",
+  "amelioration",
   "conception",
   "fournisseurs",
   "production",
@@ -145,6 +163,7 @@ type Search = {
   origin?: string | undefined;
   kind?: string | undefined;
   tab?: string | undefined;
+  emargement?: string | undefined;
 };
 
 function normalizeSearchId(value: unknown): string | undefined {
@@ -167,6 +186,7 @@ export const Route = createFileRoute("/_authenticated/app/$section")({
     origin: typeof s["origin"] === "string" ? (s["origin"] as string) : undefined,
     kind: typeof s["kind"] === "string" ? (s["kind"] as string) : undefined,
     tab: typeof s["tab"] === "string" ? (s["tab"] as string) : undefined,
+    emargement: typeof s["emargement"] === "string" ? (s["emargement"] as string) : undefined,
   }),
   loader: ({ params }) => {
     if (!SECTIONS[params.section] && !CUSTOM.includes(params.section)) throw notFound();
@@ -256,6 +276,8 @@ function SectionPage() {
       return <CollaboratorsPage />;
     case "fiches-poste":
       return <JobDescriptionsPage />;
+    case "engagements-leadership":
+      return <LeadershipReviewPage />;
     case "responsabilites":
       return <ResponsibilitiesPage />;
     case "risques":
@@ -272,6 +294,24 @@ function SectionPage() {
       return <OperationalControlPage />;
     case "exigences":
       return <RequirementsPage />;
+    case "non-conformites":
+      return <NcPage />;
+    case "amelioration":
+      return <OpportunitiesPage />;
+    case "demarrage":
+      return <SetupGuidePage />;
+    case "preparation-certification":
+      return <ReadinessPage />;
+    case "revue-direction":
+      return <ReviewPage />;
+    case "audits":
+      return <AuditsPage />;
+    case "campagnes-sensibilisation":
+      return <AwarenessCampaignsPage signingToken={search.emargement} />;
+    case "performance-environnementale":
+      return <PerformancePage />;
+    case "changements":
+      return <ChangesPage />;
     case "obligations":
       return <ComplianceRegisterPage />;
     case "conception":

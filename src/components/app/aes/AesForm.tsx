@@ -1,3 +1,4 @@
+import { useI18n } from "@/lib/i18n";
 import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, X } from "lucide-react";
 import type { Aes, AesInput, AesSettings } from "@/integrations/backend/aes";
@@ -30,6 +31,8 @@ type FormState = {
   process_id: string;
   sub_process: string;
   group_label: string;
+  group_members: string;
+  group_characteristics: string;
   aspect_number: string;
   aspect_type: string;
   lifecycle_phase: string;
@@ -64,6 +67,8 @@ function initialState(aspect: Aes | null): FormState {
     process_id: text(aspect?.process_id),
     sub_process: text(aspect?.sub_process),
     group_label: text(aspect?.group_label),
+    group_members: aspect?.group_members?.join("\n") ?? "",
+    group_characteristics: text(aspect?.group_characteristics),
     aspect_number: text(aspect?.aspect_number),
     aspect_type: text(aspect?.aspect_type),
     lifecycle_phase: text(aspect?.lifecycle_phase),
@@ -176,6 +181,7 @@ export function AesForm({
   onSubmit: (input: AesInput) => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const [form, setForm] = useState<FormState>(() => initialState(aspect));
   const [media, setMedia] = useState<Record<string, boolean>>({});
   const [localError, setLocalError] = useState<string | null>(null);
@@ -225,6 +231,8 @@ export function AesForm({
       process_id: number(form.process_id),
       sub_process: text(form.sub_process),
       group_label: text(form.group_label),
+      group_members: form.group_members.trim() ? form.group_members.split("\n").map((s) => s.trim()).filter(Boolean) : null,
+      group_characteristics: text(form.group_characteristics),
       ...(form.aspect_number.trim() ? { aspect_number: form.aspect_number.trim() } : {}),
       aspect_type: text(form.aspect_type),
       lifecycle_phase: text(form.lifecycle_phase),
@@ -323,6 +331,14 @@ export function AesForm({
                 value={form.group_label}
                 onChange={(e) => set("group_label", e.target.value)}
               />
+            </div>
+            <div>
+              <Label>{t("Activités ou produits regroupés (un par ligne)")}</Label>
+              <textarea className={input} value={form.group_members} onChange={(e) => set("group_members", e.target.value)} placeholder="Atelier A\nAtelier B" />
+            </div>
+            <div>
+              <Label>{t("Caractéristiques communes justifiant le regroupement")}</Label>
+              <textarea className={input} value={form.group_characteristics} onChange={(e) => set("group_characteristics", e.target.value)} />
             </div>
             <div>
               <Label>N° (généré si vide)</Label>

@@ -3,12 +3,14 @@
 namespace App\Modules\Hse\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Modules\Hse\Models\WorkAccident;
-use App\Modules\Hse\Models\DuerpDanger;
 use App\Models\Action;
+use App\Modules\Hse\Models\Duerp;
+use App\Modules\Hse\Models\DuerpDanger;
+use App\Modules\Hse\Models\WorkAccident;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Rule;
 
 class WorkAccidentController extends Controller
 {
@@ -18,7 +20,7 @@ class WorkAccidentController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = Auth::user();
-        if (!$user) {
+        if (! $user) {
             return response()->json(['message' => 'Non authentifié.'], 401);
         }
 
@@ -60,14 +62,14 @@ class WorkAccidentController extends Controller
     public function store(Request $request): JsonResponse
     {
         $user = Auth::user();
-        if (!$user) {
+        if (! $user) {
             return response()->json(['message' => 'Non authentifié.'], 401);
         }
 
         $validated = $request->validate([
-            'site_id' => 'nullable|exists:sites,id',
-            'process_id' => 'nullable|exists:processes,id',
-            'duerp_danger_id' => 'nullable|exists:duerp_dangers,id',
+            'site_id' => ['nullable', Rule::exists('sites', 'id')->where('enterprise_id', Auth::user()->enterprise_id)],
+            'process_id' => ['nullable', Rule::exists('processes', 'id')->where('enterprise_id', Auth::user()->enterprise_id)],
+            'duerp_danger_id' => ['nullable', Rule::exists('duerp_dangers', 'id')->where(fn ($q) => $q->whereIn('duerp_id', Duerp::query()->where('enterprise_id', Auth::user()->enterprise_id)->select('id')))],
             'type' => 'required|string|in:accident_avec_arret,accident_sans_arret,accident_trajet,presqu_accident,incident_materiel',
             'accident_date' => 'required|date',
             'location' => 'nullable|string|max:255',
@@ -82,10 +84,10 @@ class WorkAccidentController extends Controller
             'severity_level' => 'nullable|in:benin,moyen,grave,mortel',
             'root_cause_analysis' => 'nullable|array',
             'preventive_recommendations' => 'nullable|string',
-            'investigator_id' => 'nullable|exists:users,id',
+            'investigator_id' => ['nullable', Rule::exists('users', 'id')->where('enterprise_id', Auth::user()->enterprise_id)],
             'investigation_date' => 'nullable|date',
             'create_corrective_action' => 'nullable|boolean',
-            'action_responsible_id' => 'nullable|exists:users,id',
+            'action_responsible_id' => ['nullable', Rule::exists('users', 'id')->where('enterprise_id', Auth::user()->enterprise_id)],
             'action_deadline' => 'nullable|date',
         ]);
 
@@ -97,7 +99,7 @@ class WorkAccidentController extends Controller
         $accident = WorkAccident::create($validated);
 
         // Si demandé, créer automatiquement l'action corrective liée
-        if ($request->boolean('create_corrective_action') && !empty($validated['preventive_recommendations'])) {
+        if ($request->boolean('create_corrective_action') && ! empty($validated['preventive_recommendations'])) {
             $action = Action::create([
                 'enterprise_id' => $user->enterprise_id,
                 'site_id' => $validated['site_id'] ?? $user->site_id,
@@ -115,14 +117,17 @@ class WorkAccidentController extends Controller
             $accident->update(['corrective_action_id' => $action->id]);
         }
 
-        // Si lié à une ligne DUERP, mettre à jour la révision du risque lié (REQ-6.1-D09)
+        // Accident lié à une ligne du DUERP : l'évaluation approuvée n'est pas modifiée en silence ; la ligne et le
+        // document sont signalés « à réévaluer » (R.4121-2 : mise à jour après un accident du travail).
         if ($accident->duerp_danger_id) {
-            $danger = DuerpDanger::find($accident->duerp_danger_id);
-            if ($danger && $accident->lost_days_count > 0 && ($danger->gravity ?? 1) < 3) {
-                // Suggérer ou rehausser la gravité suite à accident réel
-                $danger->update([
-                    'gravity' => max((int) $danger->gravity, 3),
-                ]);
+            $danger = DuerpDanger::query()->with('duerp')->find($accident->duerp_danger_id);
+            if ($danger && $danger->duerp?->enterprise_id === $user->enterprise_id) {
+                $danger->forceFill(['needs_review' => true, 'review_reason' => "Accident {$accident->ref}"])->save();
+                $danger->duerp->forceFill([
+                    'update_required' => true,
+                    'update_reason' => "Accident du travail {$accident->ref} lié à une ligne du document",
+                    'update_flagged_at' => now(),
+                ])->save();
             }
         }
 
@@ -158,8 +163,8 @@ class WorkAccidentController extends Controller
         $accident = WorkAccident::where('enterprise_id', $user->enterprise_id)->findOrFail($id);
 
         $validated = $request->validate([
-            'process_id' => 'nullable|exists:processes,id',
-            'duerp_danger_id' => 'nullable|exists:duerp_dangers,id',
+            'process_id' => ['nullable', Rule::exists('processes', 'id')->where('enterprise_id', Auth::user()->enterprise_id)],
+            'duerp_danger_id' => ['nullable', Rule::exists('duerp_dangers', 'id')->where(fn ($q) => $q->whereIn('duerp_id', Duerp::query()->where('enterprise_id', Auth::user()->enterprise_id)->select('id')))],
             'type' => 'sometimes|string|in:accident_avec_arret,accident_sans_arret,accident_trajet,presqu_accident,incident_materiel',
             'accident_date' => 'sometimes|date',
             'location' => 'nullable|string|max:255',
@@ -174,7 +179,7 @@ class WorkAccidentController extends Controller
             'severity_level' => 'nullable|in:benin,moyen,grave,mortel',
             'root_cause_analysis' => 'nullable|array',
             'preventive_recommendations' => 'nullable|string',
-            'investigator_id' => 'nullable|exists:users,id',
+            'investigator_id' => ['nullable', Rule::exists('users', 'id')->where('enterprise_id', Auth::user()->enterprise_id)],
             'investigation_date' => 'nullable|date',
             'status' => 'nullable|in:declare,en_enquete,actions_en_cours,resolu,cloture',
         ]);
@@ -222,7 +227,7 @@ class WorkAccidentController extends Controller
     public function statistics(Request $request): JsonResponse
     {
         $user = Auth::user();
-        if (!$user) {
+        if (! $user) {
             return response()->json(['message' => 'Non authentifié.'], 401);
         }
 
@@ -269,4 +274,3 @@ class WorkAccidentController extends Controller
         ]);
     }
 }
-

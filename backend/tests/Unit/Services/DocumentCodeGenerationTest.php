@@ -2,12 +2,13 @@
 
 namespace Tests\Unit\Services;
 
-use App\Models\CodeStructurePart;
-use App\Models\DocumentTypeConfiguration;
+use App\Models\DocumentTypeCatalog;
 use App\Models\Enterprise;
+use App\Models\NomenclatureTemplate;
 use App\Models\Site;
 use App\Services\DocumentCodeGenerationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class DocumentCodeGenerationTest extends TestCase
@@ -29,47 +30,42 @@ class DocumentCodeGenerationTest extends TestCase
         ]);
     }
 
-    public function test_it_returns_fallback_when_no_configuration_exists(): void
+    public function test_it_refuses_generation_when_no_published_template_exists(): void
     {
-        $result = $this->service->generateForSiteAndType($this->site->id, 'PROC');
+        $this->expectException(ValidationException::class);
 
-        $this->assertTrue($result['is_fallback']);
-        $this->assertSame('[NON-CONFIGURÉ-PROC]', $result['code']);
-        $this->assertNull($result['document_type_configuration_id']);
+        $this->service->generateForSiteAndType($this->site->id, 'PROC');
     }
 
-    public function test_it_generates_code_from_active_configuration(): void
+    public function test_it_generates_code_from_published_template(): void
     {
-        $config = DocumentTypeConfiguration::factory()->create([
-            'abbreviation' => 'PROC',
+        $catalog = DocumentTypeCatalog::query()->create([
             'enterprise_id' => $this->enterprise->id,
             'site_id' => $this->site->id,
+            'name' => 'Procédure',
+            'abbreviation' => 'PROC',
             'is_active' => true,
         ]);
 
-        CodeStructurePart::create([
-            'document_type_configuration_id' => $config->id,
-            'part_order' => 1,
-            'part_name' => 'Type',
-            'part_type' => 'fixed_abbreviation',
-            'default_value' => 'PROC',
-            'separator_after' => '-',
-        ]);
-
-        CodeStructurePart::create([
-            'document_type_configuration_id' => $config->id,
-            'part_order' => 2,
-            'part_name' => 'Sequence',
-            'part_type' => 'sequence',
-            'part_length' => 3,
-            'is_required' => true,
-            'sequence_scope' => 'global',
+        $template = NomenclatureTemplate::query()->create([
+            'enterprise_id' => $this->enterprise->id,
+            'site_id' => $this->site->id,
+            'document_type_catalog_id' => $catalog->id,
+            'name' => 'Template PROC',
+            'version' => 1,
+            'status' => 'published',
+            'is_active' => true,
+            'separator' => '-',
+            'format_structure' => [
+                ['order' => 1, 'type' => 'document_type', 'label' => 'Type', 'length' => 4],
+                ['order' => 2, 'type' => 'sequential_number', 'label' => 'Sequence', 'length' => 3],
+            ],
         ]);
 
         $result = $this->service->generateForSiteAndType($this->site->id, 'PROC');
 
         $this->assertFalse($result['is_fallback']);
-        $this->assertSame($config->id, $result['document_type_configuration_id']);
+        $this->assertSame($template->id, $result['nomenclature_template_id']);
         $this->assertStringStartsWith('PROC-', $result['code']);
         $this->assertMatchesRegularExpression('/PROC-\d{3}/', $result['code']);
     }

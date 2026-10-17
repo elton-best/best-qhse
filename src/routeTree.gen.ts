@@ -17,6 +17,8 @@ import { Route as AuthenticatedSuperadminRouteRouteImport } from './routes/_auth
 import { Route as AuthForgotPasswordRouteImport } from './routes/auth/forgot-password'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthResetPasswordRouteImport } from './routes/auth/reset-password'
+import { Route as PerimetrePublicTokenRouteImport } from './routes/perimetre-public.$token'
+import { Route as SensibilisationTokenRouteImport } from './routes/sensibilisation.$token'
 import { Route as AuthenticatedAppIndexRouteImport } from './routes/_authenticated/app/index'
 import { Route as AuthenticatedAppSectionRouteImport } from './routes/_authenticated/app/$section'
 import { Route as AuthenticatedSuperadminIndexRouteImport } from './routes/_authenticated/superadmin/index'
@@ -65,6 +67,16 @@ const AuthResetPasswordRoute = AuthResetPasswordRouteImport.update({
   path: '/auth/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PerimetrePublicTokenRoute = PerimetrePublicTokenRouteImport.update({
+  id: '/perimetre-public/$token',
+  path: '/perimetre-public/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SensibilisationTokenRoute = SensibilisationTokenRouteImport.update({
+  id: '/sensibilisation/$token',
+  path: '/sensibilisation/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedAppIndexRoute = AuthenticatedAppIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -111,6 +123,8 @@ export interface FileRoutesByFullPath {
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
+  '/perimetre-public/$token': typeof PerimetrePublicTokenRoute
+  '/sensibilisation/$token': typeof SensibilisationTokenRoute
   '/app/$section': typeof AuthenticatedAppSectionRoute
   '/superadmin/$section': typeof AuthenticatedSuperadminSectionRoute
   '/auth/signup/company': typeof AuthSignupCompanyRoute
@@ -125,6 +139,8 @@ export interface FileRoutesByTo {
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
+  '/perimetre-public/$token': typeof PerimetrePublicTokenRoute
+  '/sensibilisation/$token': typeof SensibilisationTokenRoute
   '/app/$section': typeof AuthenticatedAppSectionRoute
   '/superadmin/$section': typeof AuthenticatedSuperadminSectionRoute
   '/auth/signup/company': typeof AuthSignupCompanyRoute
@@ -143,6 +159,8 @@ export interface FileRoutesById {
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
+  '/perimetre-public/$token': typeof PerimetrePublicTokenRoute
+  '/sensibilisation/$token': typeof SensibilisationTokenRoute
   '/_authenticated/app/$section': typeof AuthenticatedAppSectionRoute
   '/_authenticated/superadmin/$section': typeof AuthenticatedSuperadminSectionRoute
   '/auth/signup/company': typeof AuthSignupCompanyRoute
@@ -161,6 +179,8 @@ export interface FileRouteTypes {
     | '/auth/forgot-password'
     | '/auth/login'
     | '/auth/reset-password'
+    | '/perimetre-public/$token'
+    | '/sensibilisation/$token'
     | '/app/$section'
     | '/superadmin/$section'
     | '/auth/signup/company'
@@ -175,6 +195,8 @@ export interface FileRouteTypes {
     | '/auth/forgot-password'
     | '/auth/login'
     | '/auth/reset-password'
+    | '/perimetre-public/$token'
+    | '/sensibilisation/$token'
     | '/app/$section'
     | '/superadmin/$section'
     | '/auth/signup/company'
@@ -192,6 +214,8 @@ export interface FileRouteTypes {
     | '/auth/forgot-password'
     | '/auth/login'
     | '/auth/reset-password'
+    | '/perimetre-public/$token'
+    | '/sensibilisation/$token'
     | '/_authenticated/app/$section'
     | '/_authenticated/superadmin/$section'
     | '/auth/signup/company'
@@ -207,6 +231,8 @@ export interface RootRouteChildren {
   AuthForgotPasswordRoute: typeof AuthForgotPasswordRoute
   AuthLoginRoute: typeof AuthLoginRoute
   AuthResetPasswordRoute: typeof AuthResetPasswordRoute
+  PerimetrePublicTokenRoute: typeof PerimetrePublicTokenRoute
+  SensibilisationTokenRoute: typeof SensibilisationTokenRoute
   AuthSignupCompanyRoute: typeof AuthSignupCompanyRoute
   AuthSignupIndividualRoute: typeof AuthSignupIndividualRoute
   AuthSignupIndexRoute: typeof AuthSignupIndexRoute
@@ -268,6 +294,20 @@ declare module '@tanstack/react-router' {
       path: '/auth/reset-password'
       fullPath: '/auth/reset-password'
       preLoaderRoute: typeof AuthResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/perimetre-public/$token': {
+      id: '/perimetre-public/$token'
+      path: '/perimetre-public/$token'
+      fullPath: '/perimetre-public/$token'
+      preLoaderRoute: typeof PerimetrePublicTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sensibilisation/$token': {
+      id: '/sensibilisation/$token'
+      path: '/sensibilisation/$token'
+      fullPath: '/sensibilisation/$token'
+      preLoaderRoute: typeof SensibilisationTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/app/': {
@@ -375,6 +415,8 @@ const rootRouteChildren: RootRouteChildren = {
   AuthForgotPasswordRoute: AuthForgotPasswordRoute,
   AuthLoginRoute: AuthLoginRoute,
   AuthResetPasswordRoute: AuthResetPasswordRoute,
+  PerimetrePublicTokenRoute: PerimetrePublicTokenRoute,
+  SensibilisationTokenRoute: SensibilisationTokenRoute,
   AuthSignupCompanyRoute: AuthSignupCompanyRoute,
   AuthSignupIndividualRoute: AuthSignupIndividualRoute,
   AuthSignupIndexRoute: AuthSignupIndexRoute,

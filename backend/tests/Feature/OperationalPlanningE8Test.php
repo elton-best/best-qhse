@@ -107,7 +107,7 @@ class OperationalPlanningE8Test extends TestCase
 
         $this->assertDatabaseHas('task_tracking', [
             'user_id' => $this->user->id,
-            'trackable_type' => \App\Models\OperationalProjectActivity::class,
+            'trackable_type' => \App\Modules\Planning\Models\OperationalProjectActivity::class,
             'trackable_id' => $activityId,
             'status' => 'en_cours',
         ]);
@@ -124,7 +124,7 @@ class OperationalPlanningE8Test extends TestCase
 
         $this->assertDatabaseHas('task_tracking', [
             'user_id' => $this->user->id,
-            'trackable_type' => \App\Models\OperationalProjectTask::class,
+            'trackable_type' => \App\Modules\Planning\Models\OperationalProjectTask::class,
             'trackable_id' => $taskId,
             'status' => 'non_demarre',
             'progress_rate' => 0,

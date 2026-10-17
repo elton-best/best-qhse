@@ -1,3 +1,4 @@
+import { ObjectiveCommunicationButton, ObjectiveInbox } from "@/components/app/iso/ObjectiveCommunications";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -1791,6 +1792,7 @@ export function ObjectivesPage() {
       </Header>
 
       {!siteId && <SiteNotice />}
+      <ObjectiveInbox key={siteId} siteId={siteId} />
 
       <div className={`${card} grid grid-cols-2 gap-3 p-4 lg:grid-cols-4`}>
         <Stat value={stats.total} label="Objectifs" />
@@ -1992,6 +1994,7 @@ export function ObjectivesPage() {
                       )}
                     </div>
                     <ObjectiveActionsBlock obj={obj} />
+                    <ObjectiveCommunicationButton objectiveId={obj.id} />
                     <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
                       <button
                         type="button"
@@ -2097,6 +2100,7 @@ export function ObjectivesPage() {
                           <td className="px-4 py-3">{centralActionsCount(obj)}</td>
                           <td className="px-4 py-3">
                             <div className="flex justify-end gap-1">
+                              <ObjectiveCommunicationButton objectiveId={obj.id} />
                               <button
                                 type="button"
                                 className="rounded-lg p-2 hover:bg-background"

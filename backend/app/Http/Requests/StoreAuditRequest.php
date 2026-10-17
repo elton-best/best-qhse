@@ -2,33 +2,37 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ScopedExistsRules;
+use App\Models\Audit;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreAuditRequest extends FormRequest
 {
+    use ScopedExistsRules;
+
     public function authorize(): bool
     {
-        return $this->user()->can('create', \App\Models\Audit::class);
+        return $this->user()->can('create', Audit::class);
     }
 
     public function rules(): array
     {
         return [
-            'audit_program_id' => 'nullable|exists:audit_programs,id',
-            'site_id' => 'required|exists:sites,id',
+            'audit_program_id' => ['nullable', ...$this->ownedProgramExists()],
+            'site_id' => ['required', ...$this->ownedExists('sites')],
             'type' => 'required|in:internal,external,certification,system,process,product,supplier,thematic,surveillance',
             'title' => 'required|string|max:255',
             'planned_date' => 'required|date|after_or_equal:today',
             'quarter' => 'nullable|integer|between:1,4',
             'frequency' => 'nullable|in:annual,biannual,quarterly,monthly,ad_hoc',
-            'lead_auditor_id' => 'required|exists:users,id',
-            'assigned_to' => 'required_if:type,internal|exists:users,id',
+            'lead_auditor_id' => ['required', ...$this->ownedExists('users')],
+            'assigned_to' => ['required_if:type,internal', ...$this->ownedExists('users')],
             'team_members' => 'nullable|array',
-            'team_members.*' => 'exists:users,id',
+            'team_members.*' => $this->ownedExists('users'),
             'auditor_ids' => 'nullable|array',
-            'auditor_ids.*' => 'exists:users,id',
+            'auditor_ids.*' => $this->ownedExists('users'),
             'auditee_ids' => 'nullable|array',
-            'auditee_ids.*' => 'exists:users,id',
+            'auditee_ids.*' => $this->ownedExists('users'),
             'scope' => 'nullable|string|max:2000',
             'objectives' => 'required_if:type,internal|string|max:2000',
             'reference_documents' => 'required_if:type,internal|string|max:3000',
@@ -38,9 +42,9 @@ class StoreAuditRequest extends FormRequest
             'axes' => 'nullable|array',
             'axes.*' => 'string|in:Q,HS,E',
             'processes' => 'nullable|array',
-            'processes.*' => 'exists:processes,id',
+            'processes.*' => $this->ownedExists('processes'),
             'process_ids' => 'nullable|array',
-            'process_ids.*' => 'exists:processes,id',
+            'process_ids.*' => $this->ownedExists('processes'),
         ];
     }
 }

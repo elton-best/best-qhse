@@ -1,20 +1,22 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use App\Modules\Evaluation\Controllers\IndicateurController;
 use App\Modules\Evaluation\Controllers\AuditController;
+use App\Modules\Evaluation\Controllers\AuditFieldworkController;
 use App\Modules\Evaluation\Controllers\AuditProgramController;
+use App\Modules\Evaluation\Controllers\ClientSatisfactionFormController;
+use App\Modules\Evaluation\Controllers\EvaluationCriteriaController;
+use App\Modules\Evaluation\Controllers\EvaluationRequestController;
+use App\Modules\Evaluation\Controllers\IndicateurController;
+use App\Modules\Evaluation\Controllers\ManagementReviewController;
+use App\Modules\Evaluation\Controllers\ManagementReviewIsoController;
+use App\Modules\Evaluation\Controllers\SatisfactionSurveyController;
 use App\Modules\Evaluation\Controllers\StakeholderController;
 use App\Modules\Leadership\Controllers\ApplicationScopeController;
 use App\Modules\Leadership\Controllers\ContextController;
 use App\Modules\Leadership\Controllers\ContextReviewController;
-use App\Modules\Evaluation\Controllers\SatisfactionSurveyController;
-use App\Modules\Evaluation\Controllers\ClientSatisfactionFormController;
 use App\Modules\Support\Controllers\EmployeeEvaluationController;
 use App\Modules\Support\Controllers\ProviderPartnerController;
-use App\Modules\Evaluation\Controllers\EvaluationCriteriaController;
-use App\Modules\Evaluation\Controllers\EvaluationRequestController;
-use App\Modules\Evaluation\Controllers\ManagementReviewController;
+use Illuminate\Support\Facades\Route;
 
 // ============================================================
 // CHAPITRE 9 : ÉVALUATION DES PERFORMANCES (AUDITS, KPIS, REVUES, SATISFACTION)
@@ -30,6 +32,12 @@ Route::prefix('indicateurs')->group(function () {
 Route::apiResource('indicateurs', IndicateurController::class);
 
 // --- Audits internes (§9.2 / ISO 19011) ---
+Route::get('audit-programs/proposals', [AuditFieldworkController::class, 'proposals']);
+Route::get('audits/iso-clauses', [AuditFieldworkController::class, 'clauses']);
+Route::get('audits/eligible-auditors', [AuditFieldworkController::class, 'eligibleAuditors']);
+Route::post('audits/check-independence', [AuditFieldworkController::class, 'checkIndependence']);
+Route::post('audits/{auditId}/findings/{findingId}/evidence', [AuditFieldworkController::class, 'addEvidence'])->whereNumber(['auditId', 'findingId']);
+Route::get('audits/{auditId}/findings/{findingId}/evidence/{index}', [AuditFieldworkController::class, 'evidence'])->whereNumber(['auditId', 'findingId', 'index']);
 Route::prefix('audits')->group(function () {
     Route::match(['put', 'post'], '{id}/status', [AuditController::class, 'updateStatus']);
     Route::post('{id}/start', [AuditController::class, 'start']);
@@ -140,6 +148,15 @@ Route::prefix('evaluation-requests')->group(function () {
 Route::apiResource('evaluation-requests', EvaluationRequestController::class);
 
 // --- Revue de direction (§9.3) ---
+$mr = fn (string $action) => ["permission:evaluation.revue_direction.{$action}"];
+Route::get('management-reviews/schedule', [ManagementReviewIsoController::class, 'schedule'])->middleware($mr('read'));
+Route::get('management-reviews/{id}/workspace', [ManagementReviewIsoController::class, 'workspace'])->whereNumber('id')->middleware($mr('read'));
+Route::post('management-reviews/{id}/dossier', [ManagementReviewIsoController::class, 'dossier'])->whereNumber('id')->middleware($mr('update'));
+Route::post('management-reviews/{id}/sessions', [ManagementReviewIsoController::class, 'sessions'])->whereNumber('id')->middleware($mr('update'));
+Route::put('management-reviews/{id}/conclusions', [ManagementReviewIsoController::class, 'conclusions'])->whereNumber('id')->middleware($mr('update'));
+Route::post('management-reviews/{id}/decisions', [ManagementReviewIsoController::class, 'addDecision'])->whereNumber('id')->middleware($mr('update'));
+Route::delete('management-reviews/{id}/decisions/{decisionId}', [ManagementReviewIsoController::class, 'removeDecision'])->whereNumber(['id', 'decisionId'])->middleware($mr('update'));
+Route::post('management-reviews/{id}/sign', [ManagementReviewIsoController::class, 'sign'])->whereNumber('id')->middleware($mr('validate'));
 Route::get('management-reviews/{managementReview}/export-docx', [ManagementReviewController::class, 'exportDocx']);
 Route::post('management-reviews/{managementReview}/generate-draft', [ManagementReviewController::class, 'generateDraftDocx']);
 Route::get('management-reviews/sm-synthesis', [ManagementReviewController::class, 'getSmSynthesis']);
@@ -151,4 +168,3 @@ Route::post('management-reviews/{managementReview}/send-invitations', [Managemen
 Route::get('management-reviews/templates/procedure', [ManagementReviewController::class, 'downloadProcedureTemplate']);
 Route::get('management-reviews/templates/invitation', [ManagementReviewController::class, 'downloadInvitationTemplate']);
 Route::apiResource('management-reviews', ManagementReviewController::class);
-

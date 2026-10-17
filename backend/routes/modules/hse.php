@@ -4,6 +4,10 @@ use App\Modules\Hse\Controllers\AesRegistryVersionController;
 use App\Modules\Hse\Controllers\AesSettingsController;
 use App\Modules\Hse\Controllers\ApplicableRequirementController;
 use App\Modules\Hse\Controllers\AspectEnvironnementalController;
+use App\Modules\Hse\Controllers\AwarenessCampaignController;
+use App\Modules\Hse\Controllers\AwarenessOverviewController;
+use App\Modules\Hse\Controllers\AwarenessParticipationController;
+use App\Modules\Hse\Controllers\AwarenessTalkController;
 use App\Modules\Hse\Controllers\ComplianceObligationAspectController;
 use App\Modules\Hse\Controllers\ComplianceObligationController;
 use App\Modules\Hse\Controllers\ComplianceRegisterController;
@@ -25,11 +29,17 @@ use App\Modules\Hse\Controllers\EnergyMonitoringRecordController;
 use App\Modules\Hse\Controllers\EnergyObjectiveController;
 use App\Modules\Hse\Controllers\EnergyPurchaseController;
 use App\Modules\Hse\Controllers\EnvironmentalAspectController;
+use App\Modules\Hse\Controllers\EnvironmentalIndicatorController;
 use App\Modules\Hse\Controllers\EpiController;
+use App\Modules\Hse\Controllers\IndicatorReadingController;
 use App\Modules\Hse\Controllers\IpeController;
+use App\Modules\Hse\Controllers\ManagementChangeController;
 use App\Modules\Hse\Controllers\ManagementSystemOverviewController;
+use App\Modules\Hse\Controllers\MonitoringInstrumentController;
 use App\Modules\Hse\Controllers\ObligationConformiteEnvironnementaleController;
+use App\Modules\Hse\Controllers\PerformanceOverviewController;
 use App\Modules\Hse\Controllers\ProductServiceRequirementController;
+use App\Modules\Hse\Controllers\SetupGuideController;
 use App\Modules\Hse\Controllers\VerificationReglementaireController;
 use App\Modules\Hse\Controllers\WorkAccidentController;
 use App\Modules\Support\Controllers\HabilitationController;
@@ -81,34 +91,39 @@ Route::apiResource('obligations-conformite-environnementales', ObligationConform
 
 // --- 2. ISO 45001 : Santé & Sécurité au Travail (DUERP, Habilitations, EPI, VGP) ---
 // DUERP & Dangers (Canevas INRS & Dynamique)
-Route::get('duerp/inrs-families', [DuerpController::class, 'riskFamilies']);
-Route::get('duerp/export-xlsx', [DuerpController::class, 'exportXlsx']);
-Route::get('duerp/{id}/tree', [DuerpController::class, 'tree']);
-Route::post('duerp/{id}/submit', [DuerpController::class, 'submitForVerification']);
-Route::post('duerp/{id}/submit-verification', [DuerpController::class, 'submitForVerification']);
-Route::post('duerp/{id}/approve', [DuerpController::class, 'approveByCeo']);
-Route::post('duerp/{id}/reject', [DuerpController::class, 'reject']);
-Route::post('duerp/{id}/dangers', [DuerpController::class, 'storeDanger']);
-Route::put('duerp/{id}/dangers/{dangerId}', [DuerpController::class, 'updateDanger']);
-Route::delete('duerp/{id}/dangers/{dangerId}', [DuerpController::class, 'destroyDanger']);
-Route::apiResource('duerp', DuerpController::class);
+$duerp = fn (string $action) => ['module.subscribed:duerp,identification_dangers_sst', "permission:sst.duerp.{$action}|sst.identification_dangers.{$action}"];
+Route::get('duerp/inrs-families', [DuerpController::class, 'riskFamilies'])->middleware($duerp('read'));
+Route::get('duerp/export-xlsx', [DuerpController::class, 'exportXlsx'])->middleware($duerp('export'));
+Route::get('duerp', [DuerpController::class, 'index'])->middleware($duerp('read'));
+Route::post('duerp', [DuerpController::class, 'store'])->middleware($duerp('create'));
+Route::get('duerp/{id}', [DuerpController::class, 'show'])->whereNumber('id')->middleware($duerp('read'));
+Route::put('duerp/{id}', [DuerpController::class, 'update'])->whereNumber('id')->middleware($duerp('update'));
+Route::patch('duerp/{id}', [DuerpController::class, 'update'])->whereNumber('id')->middleware($duerp('update'));
+Route::delete('duerp/{id}', [DuerpController::class, 'destroy'])->whereNumber('id')->middleware($duerp('delete'));
+Route::get('duerp/{id}/tree', [DuerpController::class, 'tree'])->whereNumber('id')->middleware($duerp('read'));
+Route::get('duerp/{id}/conformity', [DuerpController::class, 'conformity'])->whereNumber('id')->middleware($duerp('read'));
+Route::get('duerp/{id}/versions', [DuerpController::class, 'versions'])->whereNumber('id')->middleware($duerp('read'));
+Route::post('duerp/{id}/revise', [DuerpController::class, 'revise'])->whereNumber('id')->middleware($duerp('create'));
+Route::post('duerp/{id}/submit', [DuerpController::class, 'submitForVerification'])->whereNumber('id')->middleware($duerp('update'));
+Route::post('duerp/{id}/submit-verification', [DuerpController::class, 'submitForVerification'])->whereNumber('id')->middleware($duerp('update'));
+Route::post('duerp/{id}/approve', [DuerpController::class, 'approveByCeo'])->whereNumber('id')->middleware($duerp('approve'));
+Route::post('duerp/{id}/reject', [DuerpController::class, 'reject'])->whereNumber('id')->middleware($duerp('approve'));
+Route::post('duerp/{id}/dangers', [DuerpController::class, 'storeDanger'])->whereNumber('id')->middleware($duerp('update'));
+Route::put('duerp/{id}/dangers/{dangerId}', [DuerpController::class, 'updateDanger'])->whereNumber(['id', 'dangerId'])->middleware($duerp('update'));
+Route::delete('duerp/{id}/dangers/{dangerId}', [DuerpController::class, 'destroyDanger'])->whereNumber(['id', 'dangerId'])->middleware($duerp('update'));
 
-// Types / Familles de risques personnalisables
-Route::get('duerp-risk-families', [DuerpController::class, 'riskFamilies']);
-Route::post('duerp-risk-families', [DuerpController::class, 'storeRiskFamily']);
-Route::put('duerp-risk-families/{id}', [DuerpController::class, 'updateRiskFamily']);
-Route::delete('duerp-risk-families/{id}', [DuerpController::class, 'destroyRiskFamily']);
-
-// Échelles de cotation dynamiques (Gravité & Fréquence)
-Route::get('duerp-scoring-scales', [DuerpController::class, 'scoringScales']);
-Route::post('duerp-scoring-scales', [DuerpController::class, 'updateScoringScales']);
-Route::put('duerp-scoring-scales', [DuerpController::class, 'updateScoringScales']);
-
-// Unités de travail (Work Units)
-Route::get('duerp-work-units', [DuerpController::class, 'workUnits']);
-Route::post('duerp-work-units', [DuerpController::class, 'storeWorkUnit']);
-Route::put('duerp-work-units/{id}', [DuerpController::class, 'updateWorkUnit']);
-Route::delete('duerp-work-units/{id}', [DuerpController::class, 'destroyWorkUnit']);
+// Familles de risques, échelles de cotation et unités de travail
+Route::get('duerp-risk-families', [DuerpController::class, 'riskFamilies'])->middleware($duerp('read'));
+Route::post('duerp-risk-families', [DuerpController::class, 'storeRiskFamily'])->middleware($duerp('update'));
+Route::put('duerp-risk-families/{id}', [DuerpController::class, 'updateRiskFamily'])->whereNumber('id')->middleware($duerp('update'));
+Route::delete('duerp-risk-families/{id}', [DuerpController::class, 'destroyRiskFamily'])->whereNumber('id')->middleware($duerp('update'));
+Route::get('duerp-scoring-scales', [DuerpController::class, 'scoringScales'])->middleware($duerp('read'));
+Route::post('duerp-scoring-scales', [DuerpController::class, 'updateScoringScales'])->middleware($duerp('update'));
+Route::put('duerp-scoring-scales', [DuerpController::class, 'updateScoringScales'])->middleware($duerp('update'));
+Route::get('duerp-work-units', [DuerpController::class, 'workUnits'])->middleware($duerp('read'));
+Route::post('duerp-work-units', [DuerpController::class, 'storeWorkUnit'])->middleware($duerp('update'));
+Route::put('duerp-work-units/{id}', [DuerpController::class, 'updateWorkUnit'])->whereNumber('id')->middleware($duerp('update'));
+Route::delete('duerp-work-units/{id}', [DuerpController::class, 'destroyWorkUnit'])->whereNumber('id')->middleware($duerp('update'));
 
 // Accidents & Incidents SST (ISO 45001 - REQ-6.1-D08 / REQ-6.1-D09)
 Route::get('work-accidents/statistics', [WorkAccidentController::class, 'statistics']);
@@ -147,6 +162,89 @@ Route::post('emergency-exercises/{id}/cancel', [EmergencyExerciseController::cla
 Route::post('emergency-events/{id}/timeline', [EmergencyEventController::class, 'addTimeline'])->whereNumber('id')->middleware($urg('update'));
 Route::post('emergency-events/{id}/contain', [EmergencyEventController::class, 'contain'])->whereNumber('id')->middleware($urg('update'));
 Route::post('emergency-events/{id}/close', [EmergencyEventController::class, 'close'])->whereNumber('id')->middleware($urg('update'));
+
+// Gestion des changements (ISO 14001 §6.3)
+$chg = fn (string $action) => ['module.subscribed:gestion_changements', "permission:planification.changements.{$action}"];
+Route::get('management-changes/period-summary', [ManagementChangeController::class, 'periodSummary'])->middleware($chg('read'));
+Route::get('management-changes/template', [ManagementChangeController::class, 'downloadTemplate'])->middleware($chg('read'));
+Route::get('management-changes/export-xlsx', [ManagementChangeController::class, 'exportXlsx'])->middleware($chg('read'));
+Route::get('management-change-tasks', [ManagementChangeController::class, 'myTasks'])->middleware($chg('read'));
+Route::post('management-change-tasks/{taskId}/complete', [ManagementChangeController::class, 'completeTask'])->whereNumber('taskId')->middleware($chg('update'));
+Route::get('management-changes', [ManagementChangeController::class, 'index'])->middleware($chg('read'));
+Route::post('management-changes', [ManagementChangeController::class, 'store'])->middleware($chg('create'));
+Route::get('management-changes/{id}', [ManagementChangeController::class, 'show'])->whereNumber('id')->middleware($chg('read'));
+Route::put('management-changes/{id}', [ManagementChangeController::class, 'update'])->whereNumber('id')->middleware($chg('update'));
+Route::patch('management-changes/{id}', [ManagementChangeController::class, 'update'])->whereNumber('id')->middleware($chg('update'));
+Route::delete('management-changes/{id}', [ManagementChangeController::class, 'destroy'])->whereNumber('id')->middleware($chg('delete'));
+Route::put('management-changes/{id}/analysis', [ManagementChangeController::class, 'saveAnalysis'])->whereNumber('id')->middleware($chg('update'));
+Route::post('management-changes/{id}/submit', [ManagementChangeController::class, 'submit'])->whereNumber('id')->middleware($chg('update'));
+Route::post('management-changes/{id}/decision', [ManagementChangeController::class, 'decide'])->whereNumber('id')->middleware($chg('approve'));
+Route::post('management-changes/{id}/review', [ManagementChangeController::class, 'review'])->whereNumber('id')->middleware($chg('update'));
+
+// Performance environnementale et surveillance (ISO 14001 §9.1.1)
+$perf = fn (string $action) => ['module.subscribed:performance_environnementale', "permission:evaluation.performance_environnementale.{$action}"];
+Route::get('performance/overview', [PerformanceOverviewController::class, 'overview'])->middleware($perf('read'));
+Route::get('performance/report', [PerformanceOverviewController::class, 'report'])->middleware($perf('read'));
+Route::get('environmental-indicator-library', [EnvironmentalIndicatorController::class, 'library'])->middleware($perf('read'));
+Route::post('environmental-indicator-library/activate', [EnvironmentalIndicatorController::class, 'activateLibrary'])->middleware($perf('create'));
+Route::get('environmental-indicators/{id}/analysis', [EnvironmentalIndicatorController::class, 'analysis'])->whereNumber('id')->middleware($perf('read'));
+Route::post('environmental-indicators/{id}/actions', [EnvironmentalIndicatorController::class, 'createAction'])->whereNumber('id')->middleware($perf('create'));
+Route::post('monitoring-instruments/{id}/calibrations', [MonitoringInstrumentController::class, 'calibrate'])->whereNumber('id')->middleware($perf('update'));
+foreach (['environmental-indicators' => EnvironmentalIndicatorController::class, 'monitoring-instruments' => MonitoringInstrumentController::class] as $uri => $controller) {
+    Route::get("{$uri}/template", [$controller, 'downloadTemplate'])->middleware($perf('read'));
+    Route::get("{$uri}/export-xlsx", [$controller, 'exportXlsx'])->middleware($perf('read'));
+    Route::post("{$uri}/import-xlsx", [$controller, 'importXlsx'])->middleware($perf('create'));
+    Route::get($uri, [$controller, 'index'])->middleware($perf('read'));
+    Route::post($uri, [$controller, 'store'])->middleware($perf('create'));
+    Route::get("{$uri}/{id}", [$controller, 'show'])->whereNumber('id')->middleware($perf('read'));
+    Route::put("{$uri}/{id}", [$controller, 'update'])->whereNumber('id')->middleware($perf('update'));
+    Route::patch("{$uri}/{id}", [$controller, 'update'])->whereNumber('id')->middleware($perf('update'));
+    Route::delete("{$uri}/{id}", [$controller, 'destroy'])->whereNumber('id')->middleware($perf('delete'));
+}
+Route::get('indicator-readings', [IndicatorReadingController::class, 'index'])->middleware($perf('read'));
+Route::post('indicator-readings', [IndicatorReadingController::class, 'store'])->middleware($perf('create'));
+Route::post('indicator-readings/batch', [IndicatorReadingController::class, 'batch'])->middleware($perf('create'));
+Route::post('indicator-readings/import-xlsx', [IndicatorReadingController::class, 'importXlsx'])->middleware($perf('create'));
+Route::post('indicator-readings/{id}/correct', [IndicatorReadingController::class, 'correct'])->whereNumber('id')->middleware($perf('update'));
+Route::get('indicator-readings/{id}/evidence', [IndicatorReadingController::class, 'evidence'])->whereNumber('id')->middleware($perf('read'));
+
+// Campagnes de sensibilisation (ISO 14001 §7.3)
+$awareManage = fn (string $action) => ['module.subscribed:campagnes_sensibilisation', "permission:support.campagnes_sensibilisation.{$action}"];
+$awareMember = ['module.subscribed:campagnes_sensibilisation'];
+Route::get('awareness/my', [AwarenessParticipationController::class, 'index'])->middleware($awareMember);
+Route::get('awareness/my/{campaignId}', [AwarenessParticipationController::class, 'show'])->whereNumber('campaignId')->middleware($awareMember);
+Route::post('awareness/my/{campaignId}/materials/{materialId}/read', [AwarenessParticipationController::class, 'read'])->whereNumber(['campaignId', 'materialId'])->middleware($awareMember);
+Route::post('awareness/my/{campaignId}/materials/{materialId}/quiz', [AwarenessParticipationController::class, 'quiz'])->whereNumber(['campaignId', 'materialId'])->middleware($awareMember);
+Route::get('awareness/my/{campaignId}/attestation', [AwarenessParticipationController::class, 'attestation'])->whereNumber('campaignId')->middleware($awareMember);
+Route::post('awareness-talks/sign', [AwarenessTalkController::class, 'sign'])->middleware($awareMember);
+Route::get('awareness/overview', [AwarenessOverviewController::class, 'overview'])->middleware($awareManage('read'));
+Route::get('awareness-campaigns/{id}/participants', [AwarenessCampaignController::class, 'participants'])->whereNumber('id')->middleware($awareManage('read'));
+Route::get('awareness-campaigns/{id}/suggested-aspects', [AwarenessCampaignController::class, 'suggestedAspects'])->whereNumber('id')->middleware($awareManage('read'));
+Route::post('awareness-campaigns/{id}/materials', [AwarenessCampaignController::class, 'storeMaterial'])->whereNumber('id')->middleware($awareManage('update'));
+Route::put('awareness-materials/{materialId}', [AwarenessCampaignController::class, 'updateMaterial'])->whereNumber('materialId')->middleware($awareManage('update'));
+Route::delete('awareness-materials/{materialId}', [AwarenessCampaignController::class, 'destroyMaterial'])->whereNumber('materialId')->middleware($awareManage('update'));
+Route::post('awareness-campaigns/{id}/activate', [AwarenessCampaignController::class, 'activate'])->whereNumber('id')->middleware($awareManage('update'));
+Route::post('awareness-campaigns/{id}/close', [AwarenessCampaignController::class, 'close'])->whereNumber('id')->middleware($awareManage('update'));
+Route::post('awareness-campaigns/{id}/invitations', [AwarenessCampaignController::class, 'invite'])->whereNumber('id')->middleware($awareManage('update'));
+Route::get('awareness-talks/{id}/qr', [AwarenessTalkController::class, 'qr'])->whereNumber('id')->middleware($awareManage('read'));
+Route::post('awareness-talks/{id}/attendees', [AwarenessTalkController::class, 'addAttendee'])->whereNumber('id')->middleware($awareManage('update'));
+Route::post('awareness-talks/{id}/close', [AwarenessTalkController::class, 'close'])->whereNumber('id')->middleware($awareManage('update'));
+foreach (['awareness-campaigns' => AwarenessCampaignController::class, 'awareness-talks' => AwarenessTalkController::class] as $uri => $controller) {
+    Route::get("{$uri}/template", [$controller, 'downloadTemplate'])->middleware($awareManage('read'));
+    Route::get("{$uri}/export-xlsx", [$controller, 'exportXlsx'])->middleware($awareManage('read'));
+    Route::get($uri, [$controller, 'index'])->middleware($awareManage('read'));
+    Route::post($uri, [$controller, 'store'])->middleware($awareManage('create'));
+    Route::get("{$uri}/{id}", [$controller, 'show'])->whereNumber('id')->middleware($awareManage('read'));
+    Route::put("{$uri}/{id}", [$controller, 'update'])->whereNumber('id')->middleware($awareManage('update'));
+    Route::patch("{$uri}/{id}", [$controller, 'update'])->whereNumber('id')->middleware($awareManage('update'));
+    Route::delete("{$uri}/{id}", [$controller, 'destroy'])->whereNumber('id')->middleware($awareManage('delete'));
+}
+
+// Assistant de démarrage (T-01) et préparation à la certification (T-03)
+Route::get('setup-guide', [SetupGuideController::class, 'status']);
+Route::post('setup-guide/{step}/apply', [SetupGuideController::class, 'apply']);
+Route::post('setup-guide/{step}/skip', [SetupGuideController::class, 'skip']);
+Route::get('certification-readiness', [SetupGuideController::class, 'readiness']);
 
 // Habilitations
 Route::get('habilitations/expires-soon', [HabilitationController::class, 'expiresSoon']);

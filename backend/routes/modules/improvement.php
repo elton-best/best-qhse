@@ -1,22 +1,37 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use App\Modules\Improvement\Controllers\NonConformityController;
-use App\Modules\Improvement\Controllers\ReclamationController;
-use App\Modules\Improvement\Controllers\ComplaintController;
 use App\Modules\Improvement\Controllers\ActionController;
-use App\Modules\Improvement\Controllers\PlanActionController;
+use App\Modules\Improvement\Controllers\ActionPlanTrackingController;
+use App\Modules\Improvement\Controllers\ComplaintController;
 use App\Modules\Improvement\Controllers\ImprovementDashboardController;
+use App\Modules\Improvement\Controllers\ImprovementOpportunityController;
 use App\Modules\Improvement\Controllers\ImprovementSuggestionController;
 use App\Modules\Improvement\Controllers\MyTasksController;
-use App\Modules\Improvement\Controllers\ActionPlanTrackingController;
 use App\Modules\Improvement\Controllers\NonconformingOutputController;
+use App\Modules\Improvement\Controllers\NonConformityController;
+use App\Modules\Improvement\Controllers\NonConformityHandlingController;
+use App\Modules\Improvement\Controllers\PlanActionController;
+use App\Modules\Improvement\Controllers\ReclamationController;
+use Illuminate\Support\Facades\Route;
 
 // ============================================================
 // CHAPITRE 10 : AMÉLIORATION CONTINUE (NC, RÉCLAMATIONS, ACTIONS, PLANS)
 // ============================================================
 
 // --- Non-conformités (NC - §10.2) ---
+Route::post('non-conformities/quick-declare', [NonConformityHandlingController::class, 'quickDeclare']);
+Route::post('non-conformities/quick-declare/batch', [NonConformityHandlingController::class, 'quickDeclareBatch']);
+Route::get('non-conformities/dashboard', [NonConformityHandlingController::class, 'dashboard']);
+Route::get('non-conformities/{id}/photos/{index}', [NonConformityHandlingController::class, 'photo'])->whereNumber(['id', 'index']);
+Route::put('non-conformities/{id}/immediate-treatment', [NonConformityHandlingController::class, 'immediateTreatment'])->whereNumber('id');
+Route::post('non-conformities/{id}/decision', [NonConformityHandlingController::class, 'decide'])->whereNumber('id');
+Route::get('non-conformities/{id}/similar', [NonConformityHandlingController::class, 'similar'])->whereNumber('id');
+Route::put('non-conformities/{id}/root-cause', [NonConformityHandlingController::class, 'rootCause'])->whereNumber('id');
+Route::post('non-conformities/{id}/corrective-plan', [NonConformityHandlingController::class, 'correctivePlan'])->whereNumber('id');
+Route::post('non-conformities/{id}/sme-update-done', [NonConformityHandlingController::class, 'smeUpdateDone'])->whereNumber('id');
+Route::post('improvement-suggestions/from-source', [ImprovementOpportunityController::class, 'fromSource']);
+Route::get('improvement-suggestions/summary', [ImprovementOpportunityController::class, 'summary']);
+Route::post('improvement-suggestions/{id}/decide', [ImprovementOpportunityController::class, 'decide'])->whereNumber('id');
 Route::prefix('non-conformities')->group(function () {
     Route::post('{id}/status', [NonConformityController::class, 'updateStatus']);
     Route::post('{id}/assign', [NonConformityController::class, 'assignResponsible']);
@@ -103,4 +118,3 @@ Route::post('nonconforming-outputs/{nonconformingOutput}/cloturer', [Nonconformi
 Route::apiResource('nonconforming-outputs', NonconformingOutputController::class)->parameters([
     'nonconforming-outputs' => 'nonconformingOutput',
 ]);
-

@@ -28,6 +28,8 @@ import { flattenResource, SCOPE_KEY } from "@/integrations/backend/context";
 import { useProcesses, useScope, useScopeMutations } from "@/integrations/backend/context";
 import { PENDING_DOCUMENTS_KEY } from "@/integrations/backend/documents";
 
+import { ScopePublicationPanel } from "@/components/app/iso/ScopePublicationPanel";
+
 const card = "rounded-2xl border border-border bg-card";
 const input =
   "w-full rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15";
@@ -1031,6 +1033,7 @@ export function ScopePage() {
               : "Enregistrer"}
         </button>
       </Header>
+      {currentScopeId && <ScopePublicationPanel key={currentScopeId} scopeId={currentScopeId} />}
       <Nav />
       {existing && (
         <div className={`${card} flex flex-wrap items-center gap-x-6 gap-y-2 p-4`}>

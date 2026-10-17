@@ -132,7 +132,7 @@ class DocumentInventoryExportWorkflowGateTest extends TestCase
         $response->assertStatus(422);
         $response->assertJsonPath(
             'message',
-            'Le processus sélectionné n’est pas autorisé pour ce type documentaire.'
+            "Le processus sélectionné n'est pas autorisé pour ce type documentaire."
         );
     }
 }

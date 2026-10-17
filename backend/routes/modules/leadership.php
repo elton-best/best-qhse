@@ -1,18 +1,20 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
 use App\Modules\Leadership\Controllers\CultureCommitmentController;
 use App\Modules\Leadership\Controllers\EthicsReportController;
-use App\Modules\Leadership\Controllers\QhsePolicyController;
 use App\Modules\Leadership\Controllers\QhseEthicsReportController;
 use App\Modules\Leadership\Controllers\QhseCultureSurveyController;
-use App\Modules\Leadership\Controllers\StrategicAxisController;
-use App\Modules\Leadership\Controllers\OrgChartController;
-use App\Modules\Leadership\Controllers\ResponsibilityController;
-use App\Modules\Leadership\Controllers\RoleController;
 use App\Modules\Leadership\Controllers\JobDescriptionController;
 use App\Modules\Leadership\Controllers\JobDescriptionImportController;
+use App\Modules\Leadership\Controllers\LeadershipReviewController;
+use App\Modules\Leadership\Controllers\OrgChartController;
+use App\Modules\Leadership\Controllers\QhsePolicyController;
+use App\Modules\Leadership\Controllers\ResponsibilityController;
+use App\Modules\Leadership\Controllers\RoleController;
+use App\Modules\Leadership\Controllers\ScopePublicationController;
+use App\Modules\Leadership\Controllers\StrategicAxisController;
 use App\Modules\Leadership\Controllers\TeamMemberController;
+use Illuminate\Support\Facades\Route;
 
 // ============================================================
 // CHAPITRE 5 : LEADERSHIP & ENGAGEMENT
@@ -86,6 +88,14 @@ Route::apiResource('roles', RoleController::class)->middleware([
 ]);
 Route::post('roles/{role}/permissions', [RoleController::class, 'syncPermissions'])
     ->middleware(['permission:roles.update', 'validate.permission.assignment']);
+
+// ISO 14001 M1-05/06 et M3-04
+Route::get('application-scopes/{id}/publications', [ScopePublicationController::class, 'index'])->whereNumber('id');
+Route::post('application-scopes/{id}/publications', [ScopePublicationController::class, 'store'])->whereNumber('id');
+Route::delete('application-scopes/{id}/publications/{publication}', [ScopePublicationController::class, 'revoke'])->whereNumber(['id', 'publication']);
+Route::post('application-scopes/{id}/review', [ScopePublicationController::class, 'review'])->whereNumber('id');
+Route::get('leadership-reviews', [LeadershipReviewController::class, 'index']);
+Route::post('leadership-reviews', [LeadershipReviewController::class, 'store']);
 
 // --- Culture de la qualité et comportement éthique (§5.1.1 i, §7.3 e — Q3-06) ---
 Route::apiResource('culture-commitments', CultureCommitmentController::class)->parameters([

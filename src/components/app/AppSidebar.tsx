@@ -1,3 +1,4 @@
+import { useI18n } from "@/lib/i18n";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { ChevronDown, ChevronLeft, ChevronRight, LogOut } from "lucide-react";
 import { useState } from "react";
@@ -21,12 +22,13 @@ type Props = {
 };
 
 export function AppSidebar({ collapsed, onToggle, name, email, company, onSignOut, onNavigate, activeNorms, accessible, counts = {} }: Props) {
+  const { t } = useI18n();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const activeSlug = pathname.startsWith("/app/") ? pathname.slice(5) : "";
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
     Object.fromEntries([...NAV_GROUPS.map((g) => [g.id, true]), [CONFIG_GROUP.id, false]])
   );
-  const lbl = (it: NavItem) => (it.slug === "politique" ? policyTitle(activeNorms) : it.label);
+  const lbl = (it: NavItem) => t(it.slug === "politique" ? policyTitle(activeNorms) : it.label);
   const visible = (it: NavItem) => isNavItemVisible(it, activeNorms, accessible);
   const groups: NavGroup[] = [...NAV_GROUPS, CONFIG_GROUP]
     .map((g) => ({ ...g, items: g.items.filter(visible) }))
@@ -74,7 +76,7 @@ export function AppSidebar({ collapsed, onToggle, name, email, company, onSignOu
         {!collapsed && (
           <div className="min-w-0 flex-1">
             <p className="font-display text-[15px] font-extrabold leading-tight text-foreground">LOGIQUALI</p>
-            <p className="truncate text-[11px] font-semibold text-muted-foreground">{company || "Espace entreprise"}</p>
+            <p className="truncate text-[11px] font-semibold text-muted-foreground">{company || t("Espace entreprise")}</p>
           </div>
         )}
         <button
@@ -101,11 +103,11 @@ export function AppSidebar({ collapsed, onToggle, name, email, company, onSignOu
           }`}
         >
           <Dash className="h-[18px] w-[18px] shrink-0" />
-          {!collapsed && "Tableau de bord"}
+          {!collapsed && t("Tableau de bord")}
         </Link>
 
         <div className="space-y-0.5 pt-1">{TOP_ITEMS.filter(visible).map((it) => itemLink(it, false))}</div>
-        {!collapsed && <p className="px-3.5 pt-3 text-[10.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Normes & Système</p>}
+        {!collapsed && <p className="px-3.5 pt-3 text-[10.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{t("Normes & Système")}</p>}
 
         {groups.map((g) =>
           collapsed ? (
@@ -119,7 +121,7 @@ export function AppSidebar({ collapsed, onToggle, name, email, company, onSignOu
                 className="flex w-full items-center gap-3 rounded-xl border border-border bg-background px-3.5 py-2.5 text-left text-[13.5px] font-bold text-foreground transition-colors hover:border-primary/40"
               >
                 <g.icon className="h-[18px] w-[18px] shrink-0 text-primary" />
-                <span className="flex-1">{g.label}</span>
+                <span className="flex-1">{t(g.label)}</span>
                 <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${open[g.id] ? "rotate-180" : ""}`} />
               </button>
               <div className="grid transition-all duration-300" style={{ gridTemplateRows: open[g.id] ? "1fr" : "0fr" }}>
@@ -151,8 +153,8 @@ export function AppSidebar({ collapsed, onToggle, name, email, company, onSignOu
         )}
         <button
           onClick={onSignOut}
-          aria-label="Se déconnecter"
-          title="Se déconnecter"
+          aria-label={t("Se déconnecter")}
+          title={t("Se déconnecter")}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:border-destructive hover:text-destructive"
         >
           <LogOut className="h-4 w-4" />

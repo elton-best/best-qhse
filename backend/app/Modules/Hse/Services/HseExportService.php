@@ -47,8 +47,22 @@ class HseExportService
         $lastColumn = 'AC';
         $enterpriseName = $enterprise?->name ?? 'ENTREPRISE';
         $siteName = $site ? ' - Site : ' . $site->name : ' - Tous les sites';
+        $documentMeta = $dangers->pluck('duerp')->filter()->unique('id')->map(
+            fn ($document) => 'v' . ($document->version ?? '1.0')
+                . ' — évaluation du ' . ($document->evaluation_date?->format('d/m/Y') ?? '—')
+                . ' — prochaine mise à jour ' . ($document->next_evaluation_date?->format('d/m/Y') ?? '—')
+                . ' — ' . match ($document->workflow_status) {
+                    'approved_by_ceo' => 'approuvé le ' . ($document->approved_at?->format('d/m/Y') ?? ''),
+                    'submitted_by_rq' => 'soumis à validation',
+                    default => 'brouillon',
+                },
+        )->implode(' | ');
         $sheet->setCellValue('B2', "DOCUMENT UNIQUE D'ÉVALUATION DES RISQUES PROFESSIONNELS (DUERP)");
-        $sheet->setCellValue('B3', "Entreprise : {$enterpriseName}{$siteName} | Date d'extraction : " . date('d/m/Y H:i'));
+        $subtitle = "Entreprise : {$enterpriseName}{$siteName} | Date d'extraction : " . date('d/m/Y H:i');
+        if ($documentMeta !== '') {
+            $subtitle .= " | {$documentMeta}";
+        }
+        $sheet->setCellValue('B3', $subtitle);
         $sheet->mergeCells("B2:{$lastColumn}2");
         $sheet->mergeCells("B3:{$lastColumn}3");
 
@@ -122,6 +136,15 @@ class HseExportService
                 $rawRiskScore <= 8 => 'Moyen',
                 default => 'Significatif',
             };
+            $observationDetails = array_filter([
+                $danger->observations,
+                $danger->assessed_risk_score !== null
+                    ? 'Risque évalué : ' . $danger->assessed_risk_score . ' (' . ($danger->assessed_risk_level ?? 'niveau non renseigné') . ')'
+                    : null,
+                $danger->exposed_workers_count !== null
+                    ? 'Effectif exposé : ' . $danger->exposed_workers_count
+                    : null,
+            ], static fn ($detail) => $detail !== null && $detail !== '');
             $values = [
                 $danger->process?->title ?? '—',
                 $danger->activity ?: ($danger->activity_name ?? '—'),
@@ -150,7 +173,7 @@ class HseExportService
                 $danger->action_evaluation_date?->format('d/m/Y'),
                 $danger->action_effectivity_criteria ?? '—',
                 $danger->action_efficacy_criteria ?? '—',
-                $danger->observations ?? '—',
+                implode("\n", $observationDetails) ?: '—',
             ];
             foreach ($values as $index => $value) {
                 $column = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($index + 2);
@@ -165,6 +188,13 @@ class HseExportService
                 $sheet->getStyle("K{$row}")->getFont()->setBold(true);
             } elseif ($level === 'moyen') {
                 $sheet->getStyle("K{$row}")->getFont()->getColor()->setARGB('FFD97706');
+            }
+            $residualLevel = mb_strtolower((string) ($danger->residual_risk_level ?? ''));
+            if (in_array($residualLevel, ['significatif', 'fort'], true)) {
+                $sheet->getStyle("R{$row}")->getFont()->getColor()->setARGB('FFDC2626');
+                $sheet->getStyle("R{$row}")->getFont()->setBold(true);
+            } elseif ($residualLevel === 'moyen') {
+                $sheet->getStyle("R{$row}")->getFont()->getColor()->setARGB('FFD97706');
             }
 
             $row++;
@@ -277,6 +307,19 @@ class HseExportService
 
         $row = 6;
         foreach ($aspects as $aspect) {
+            $groupDetails = array_filter([
+                $aspect->group_label ? 'Regroupement : ' . $aspect->group_label : null,
+                !empty($aspect->group_members)
+                    ? 'Activités / produits regroupés : ' . implode(', ', $aspect->group_members)
+                    : null,
+                $aspect->group_characteristics
+                    ? 'Caractéristiques communes : ' . $aspect->group_characteristics
+                    : null,
+            ], static fn ($detail) => $detail !== null && $detail !== '');
+            $observationDetails = array_filter([
+                $aspect->observations,
+                ...$groupDetails,
+            ], static fn ($detail) => $detail !== null && $detail !== '');
             $values = [
                 $aspect->process?->title ?? 'Général',
                 $aspect->sub_process ?: $aspect->activity,
@@ -294,7 +337,7 @@ class HseExportService
                 $aspect->additional_actions ?: '—',
                 $aspect->responsible?->name ?: ($aspect->responsible_name ?: 'Non assigné'),
                 $aspect->deadline?->format('d/m/Y'),
-                $aspect->observations ?? '—',
+                implode("\n", $observationDetails) ?: '—',
                 $aspect->effectiveness_criterion ?? '—',
                 $aspect->efficiency_criterion ?? '—',
             ];

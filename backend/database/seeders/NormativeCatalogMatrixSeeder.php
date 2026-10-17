@@ -49,6 +49,8 @@ class NormativeCatalogMatrixSeeder extends Seeder
             'non_conformites_actions',
             'amelioration_continue',
             'obligations_conformite',
+            'gestion_changements',
+            'campagnes_sensibilisation',
         ];
 
         $commonSectionCodes = [

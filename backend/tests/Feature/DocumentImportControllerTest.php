@@ -49,6 +49,28 @@ class DocumentImportControllerTest extends TestCase
             'site_id' => $this->site->id,
         ]);
         $this->documentTypeCatalog->processes()->sync([$this->process->id]);
+
+        $procedureCatalog = \App\Models\DocumentTypeCatalog::query()->create([
+            'enterprise_id' => $this->site->enterprise_id,
+            'site_id' => $this->site->id,
+            'name' => 'Procédure (import)',
+            'abbreviation' => 'PROCEDURE',
+            'is_active' => true,
+        ]);
+        \App\Models\NomenclatureTemplate::query()->create([
+            'enterprise_id' => $this->site->enterprise_id,
+            'site_id' => $this->site->id,
+            'document_type_catalog_id' => $procedureCatalog->id,
+            'name' => 'Template PROCEDURE',
+            'version' => 1,
+            'status' => 'published',
+            'is_active' => true,
+            'separator' => '-',
+            'format_structure' => [
+                ['order' => 1, 'type' => 'document_type', 'label' => 'Type', 'length' => 9],
+                ['order' => 2, 'type' => 'sequential_number', 'label' => 'Sequence', 'length' => 3],
+            ],
+        ]);
         
         $this->actingAs($this->user);
     }

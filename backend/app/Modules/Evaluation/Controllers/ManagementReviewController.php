@@ -2,13 +2,15 @@
 
 namespace App\Modules\Evaluation\Controllers;
 
+use App\Http\Controllers\Controller;
+use App\Http\Resources\ManagementReviewResource;
 use App\Models\Action;
 use App\Models\Audit;
 use App\Models\AuditFinding;
-use App\Models\Document;
 use App\Models\EvaluationRequest;
 use App\Models\EvaluationResponse;
 use App\Models\Indicateur;
+use App\Models\ManagementReview;
 use App\Models\NonConformity;
 use App\Models\ProcessObjective;
 use App\Models\ProcessRiskOpportunity;
@@ -16,16 +18,17 @@ use App\Models\ProviderPartner;
 use App\Models\Report;
 use App\Models\Site;
 use App\Models\User;
+use App\Modules\Evaluation\Models\ManagementReviewRecord;
+use App\Notifications\ManagementReviewInvitation;
 use App\Services\DocumentSyncService;
 use App\Services\InvitationRevueDocxGenerator;
 use App\Services\ManagementReviewDocxGenerator;
 use App\Services\ProcedureRevueDirectionDocxGenerator;
-
-use App\Http\Controllers\Controller;
-use App\Http\Resources\ManagementReviewResource;
-use App\Models\ManagementReview;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class ManagementReviewController extends Controller
 {
@@ -82,14 +85,14 @@ class ManagementReviewController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'site_id' => 'required|exists:sites,id',
+            'site_id' => ['required', Rule::exists('sites', 'id')->where('enterprise_id', $request->user()?->enterprise_id)],
             'title' => 'nullable|string|max:255',
             'scheduled_date' => 'nullable|date',
             'planned_date' => 'nullable|date',
             'actual_date' => 'nullable|date',
             'year' => 'nullable|integer',
             'quarter' => 'nullable|string|max:10',
-            'chairman_id' => 'nullable|exists:users,id',
+            'chairman_id' => ['nullable', Rule::exists('users', 'id')->where('enterprise_id', $request->user()?->enterprise_id)],
             'participants' => 'nullable|array',
             'previous_actions_status' => 'nullable|string',
             'context_changes' => 'nullable|string',
@@ -124,13 +127,18 @@ class ManagementReviewController extends Controller
             'status' => 'nullable|in:planned,in_progress,completed,reported',
         ]);
 
-        if (!empty($validated['resources_data']['synthese_observations']) && empty($validated['resources_adequacy'])) {
+        if (! empty($validated['resources_data']['synthese_observations']) && empty($validated['resources_adequacy'])) {
             $validated['resources_adequacy'] = $validated['resources_data']['synthese_observations'];
         }
 
         if (empty($validated['status'])) {
             $validated['status'] = 'planned';
         }
+
+        // `planned_date` est obligatoire en base : elle suit la date programmée à défaut d'être précisée.
+        $validated['planned_date'] ??= $validated['scheduled_date'] ?? now()->toDateString();
+        $validated['scheduled_date'] ??= $validated['planned_date'];
+        $validated['chairman_id'] ??= $request->user()->id;
 
         $review = ManagementReview::create($validated);
 
@@ -147,16 +155,17 @@ class ManagementReviewController extends Controller
     public function update(Request $request, ManagementReview $managementReview)
     {
         $this->ensureAccessible($managementReview, $request->user());
+        $this->assertNotSigned($managementReview);
 
         $validated = $request->validate([
-            'site_id' => 'sometimes|exists:sites,id',
+            'site_id' => ['sometimes', Rule::exists('sites', 'id')->where('enterprise_id', $request->user()?->enterprise_id)],
             'title' => 'nullable|string|max:255',
             'scheduled_date' => 'nullable|date',
             'planned_date' => 'nullable|date',
             'actual_date' => 'nullable|date',
             'year' => 'nullable|integer',
             'quarter' => 'nullable|string|max:10',
-            'chairman_id' => 'nullable|exists:users,id',
+            'chairman_id' => ['nullable', Rule::exists('users', 'id')->where('enterprise_id', $request->user()?->enterprise_id)],
             'participants' => 'nullable|array',
             'previous_actions_status' => 'nullable|string',
             'context_changes' => 'nullable|string',
@@ -191,7 +200,7 @@ class ManagementReviewController extends Controller
             'status' => 'sometimes|in:planned,in_progress,completed,reported',
         ]);
 
-        if (!empty($validated['resources_data']['synthese_observations']) && empty($validated['resources_adequacy'])) {
+        if (! empty($validated['resources_data']['synthese_observations']) && empty($validated['resources_adequacy'])) {
             $validated['resources_adequacy'] = $validated['resources_data']['synthese_observations'];
         }
 
@@ -203,6 +212,7 @@ class ManagementReviewController extends Controller
     public function destroy(ManagementReview $managementReview)
     {
         $this->ensureAccessible($managementReview, request()->user());
+        $this->assertNotSigned($managementReview);
         $managementReview->delete();
 
         return response()->json(null, 204);
@@ -215,8 +225,9 @@ class ManagementReviewController extends Controller
     {
         $user = $request->user();
         $this->ensureAccessible($managementReview, $user);
+        $this->assertNotSigned($managementReview);
 
-        if (!$this->canManageReviewLifecycle($user, $managementReview, 'open')) {
+        if (! $this->canManageReviewLifecycle($user, $managementReview, 'open')) {
             return response()->json([
                 'message' => 'Action non autorisée. Seul le Responsable Qualité (RQ), la Direction Générale (CEO) ou un utilisateur avec permission dédiée peut ouvrir la revue de direction.',
             ], 403);
@@ -258,8 +269,9 @@ class ManagementReviewController extends Controller
     {
         $user = $request->user();
         $this->ensureAccessible($managementReview, $user);
+        $this->assertNotSigned($managementReview);
 
-        if (!$this->canManageReviewLifecycle($user, $managementReview, 'close')) {
+        if (! $this->canManageReviewLifecycle($user, $managementReview, 'close')) {
             return response()->json([
                 'message' => 'Action non autorisée. Seul le Responsable Qualité (RQ), la Direction Générale (CEO) ou un utilisateur avec permission dédiée peut clôturer la revue de direction.',
             ], 403);
@@ -316,10 +328,10 @@ class ManagementReviewController extends Controller
     public function exportDocx(ManagementReview $managementReview)
     {
         $this->ensureAccessible($managementReview, request()->user());
-        $generator = new \App\Services\ManagementReviewDocxGenerator;
+        $generator = new ManagementReviewDocxGenerator;
         $filePath = $generator->generateReport($managementReview);
 
-        $document = app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
+        $document = app(DocumentSyncService::class)->syncGeneratedProcessDocument([
             'site_id' => (int) $managementReview->site_id,
             'process_id' => null,
             'process_code' => 'GEN',
@@ -327,7 +339,7 @@ class ManagementReviewController extends Controller
             'source_type' => 'management_review',
             'source_id' => $managementReview->id,
             'source_updated_at' => $managementReview->updated_at?->toISOString(),
-            'title' => 'Rapport de revue de direction - ' . ($managementReview->reference ?? ('RD-' . $managementReview->id)),
+            'title' => 'Rapport de revue de direction - '.($managementReview->reference ?? ('RD-'.$managementReview->id)),
             'description' => 'Rapport de revue de direction généré automatiquement.',
             'file_source_path' => $filePath,
             'created_by' => request()->user()?->id,
@@ -347,6 +359,7 @@ class ManagementReviewController extends Controller
     public function generateData(ManagementReview $managementReview)
     {
         $this->ensureAccessible($managementReview, request()->user());
+        $this->assertNotSigned($managementReview);
 
         $generated = $this->collectReviewDataBySite((int) $managementReview->site_id);
 
@@ -472,10 +485,10 @@ class ManagementReviewController extends Controller
             ], 422);
         }
 
-        $users = \App\Models\User::whereIn('id', $userIds)->get();
+        $users = User::whereIn('id', $userIds)->get();
 
         foreach ($users as $user) {
-            $user->notify(new \App\Notifications\ManagementReviewInvitation($managementReview));
+            $user->notify(new ManagementReviewInvitation($managementReview));
         }
 
         return response()->json([
@@ -486,19 +499,19 @@ class ManagementReviewController extends Controller
 
     public function downloadProcedureTemplate()
     {
-        $generator = new \App\Services\ProcedureRevueDirectionDocxGenerator;
+        $generator = new ProcedureRevueDirectionDocxGenerator;
         $filePath = $generator->generate();
         $user = request()->user();
 
         $siteId = (int) ($user?->site_id ?? 0);
         if ($siteId <= 0 && $user?->enterprise_id) {
-            $siteId = (int) \App\Models\Site::query()
+            $siteId = (int) Site::query()
                 ->where('enterprise_id', (int) $user->enterprise_id)
                 ->orderBy('id')
                 ->value('id');
         }
         if ($siteId > 0) {
-            app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
+            app(DocumentSyncService::class)->syncGeneratedProcessDocument([
                 'site_id' => $siteId,
                 'process_id' => null,
                 'process_code' => 'GEN',
@@ -536,16 +549,16 @@ class ManagementReviewController extends Controller
             ], 422);
         }
 
-        $generator = new \App\Services\InvitationRevueDocxGenerator;
+        $generator = new InvitationRevueDocxGenerator;
         $filePath = $generator->generate($review);
 
         if ((int) $review->site_id > 0) {
-            app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
+            app(DocumentSyncService::class)->syncGeneratedProcessDocument([
                 'site_id' => (int) $review->site_id,
                 'process_id' => null,
                 'process_code' => 'GEN',
                 'document_kind' => 'management_review_invitation',
-                'title' => 'Invitation revue de direction - ' . ($review->reference ?? ('RD-' . $review->id)),
+                'title' => 'Invitation revue de direction - '.($review->reference ?? ('RD-'.$review->id)),
                 'description' => 'Invitation de revue de direction générée automatiquement.',
                 'file_source_path' => $filePath,
                 'created_by' => $request->user()?->id,
@@ -569,16 +582,18 @@ class ManagementReviewController extends Controller
 
         $managementReview->load(['site.enterprise', 'chairman']);
 
-        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.management-review', [
+        $pdf = Pdf::loadView('pdf.management-review', [
             'review' => $managementReview,
             'isDraft' => true,
         ]);
 
-        $tempPath = storage_path('app/temp/mr_draft_' . $managementReview->id . '_' . time() . '.pdf');
-        if (!is_dir(dirname($tempPath))) mkdir(dirname($tempPath), 0775, true);
+        $tempPath = storage_path('app/temp/mr_draft_'.$managementReview->id.'_'.time().'.pdf');
+        if (! is_dir(dirname($tempPath))) {
+            mkdir(dirname($tempPath), 0775, true);
+        }
         $pdf->save($tempPath);
 
-        $document = app(\App\Services\DocumentSyncService::class)->syncGeneratedProcessDocument([
+        $document = app(DocumentSyncService::class)->syncGeneratedProcessDocument([
             'site_id' => (int) $managementReview->site_id,
             'process_id' => $request->integer('process_id') ?: null,
             'process_code' => 'GEN',
@@ -586,7 +601,7 @@ class ManagementReviewController extends Controller
             'source_type' => 'management_review',
             'source_id' => $managementReview->id,
             'source_updated_at' => $managementReview->updated_at?->toISOString(),
-            'title' => 'Rapport de revue de direction — ' . ($managementReview->title ?? 'RD-' . $managementReview->id),
+            'title' => 'Rapport de revue de direction — '.($managementReview->title ?? 'RD-'.$managementReview->id),
             'description' => 'Rapport de revue de direction généré automatiquement.',
             'file_source_path' => $tempPath,
             'created_by' => $request->user()?->id,
@@ -597,6 +612,7 @@ class ManagementReviewController extends Controller
         ]);
 
         @unlink($tempPath);
+
         return response()->json(['data' => $document]);
     }
 
@@ -605,6 +621,12 @@ class ManagementReviewController extends Controller
         if (! $user) {
             return $query->whereRaw('1 = 0');
         }
+
+        if (method_exists($user, 'isSuperAdmin') && $user->isSuperAdmin()) {
+            return $query;
+        }
+
+        $query->whereHas('site', fn ($site) => $site->where('enterprise_id', $user->enterprise_id));
 
         if (method_exists($user, 'isEnterpriseAdmin') && $user->isEnterpriseAdmin()) {
             return $query;
@@ -617,10 +639,31 @@ class ManagementReviewController extends Controller
         return $query->whereRaw('1 = 0');
     }
 
+    /**
+     * Une revue signée est un enregistrement figé : elle ne se modifie, ne se rouvre et ne se supprime plus.
+     */
+    private function assertNotSigned(ManagementReview $managementReview): void
+    {
+        abort_if(
+            ManagementReviewRecord::query()->withoutGlobalScopes()->where('review_id', $managementReview->id)->exists(),
+            422,
+            'Cette revue est signée et archivée : elle ne peut plus être modifiée.',
+        );
+    }
+
     private function ensureAccessible(ManagementReview $managementReview, $user): void
     {
         if (! $user) {
             abort(403, 'Accès non autorisé');
+        }
+
+        if (method_exists($user, 'isSuperAdmin') && $user->isSuperAdmin()) {
+            return;
+        }
+
+        $reviewEnterpriseId = DB::table('sites')->where('id', $managementReview->site_id)->value('enterprise_id');
+        if ((int) $reviewEnterpriseId !== (int) $user->enterprise_id) {
+            abort(404, 'Revue introuvable');
         }
 
         if (method_exists($user, 'isEnterpriseAdmin') && $user->isEnterpriseAdmin()) {
@@ -641,14 +684,14 @@ class ManagementReviewController extends Controller
     {
         $since = now()->subYear();
 
-        $kpis = \App\Models\Indicateur::query()
+        $kpis = Indicateur::query()
             ->where('site_id', $siteId)
             ->latest('updated_at')
             ->take(50)
             ->get()
             ->toArray();
 
-        $objectives = \App\Models\ProcessObjective::query()
+        $objectives = ProcessObjective::query()
             ->whereHas('process', function ($q) use ($siteId) {
                 $q->where('site_id', $siteId);
             })
@@ -657,7 +700,7 @@ class ManagementReviewController extends Controller
             ->get()
             ->toArray();
 
-        $actions = \App\Models\Action::query()
+        $actions = Action::query()
             ->where('site_id', $siteId)
             ->where('created_at', '>=', $since)
             ->latest('updated_at')
@@ -665,7 +708,7 @@ class ManagementReviewController extends Controller
             ->get()
             ->toArray();
 
-        $risks = \App\Models\ProcessRiskOpportunity::query()
+        $risks = ProcessRiskOpportunity::query()
             ->whereHas('process', function ($q) use ($siteId) {
                 $q->where('site_id', $siteId);
             })
@@ -675,7 +718,7 @@ class ManagementReviewController extends Controller
             ->get()
             ->toArray();
 
-        $nonconformities = \App\Models\NonConformity::query()
+        $nonconformities = NonConformity::query()
             ->where('site_id', $siteId)
             ->where('created_at', '>=', $since)
             ->latest('updated_at')
@@ -683,7 +726,7 @@ class ManagementReviewController extends Controller
             ->get()
             ->toArray();
 
-        $audits = \App\Models\Audit::query()
+        $audits = Audit::query()
             ->where('site_id', $siteId)
             ->where('planned_date', '>=', $since)
             ->latest('planned_date')
@@ -708,23 +751,23 @@ class ManagementReviewController extends Controller
     {
         $generated = $this->collectReviewDataBySite($siteId);
         $since = now()->subYear();
-        $enterpriseId = (int) \App\Models\Site::query()->where('id', $siteId)->value('enterprise_id');
+        $enterpriseId = (int) Site::query()->where('id', $siteId)->value('enterprise_id');
 
-        $customerCompleted = \App\Models\EvaluationRequest::query()
+        $customerCompleted = EvaluationRequest::query()
             ->where('site_id', $siteId)
             ->where('type', 'satisfaction_client')
             ->where('status', 'completed')
             ->where('created_at', '>=', $since)
             ->count();
 
-        $personnelCompleted = \App\Models\EvaluationRequest::query()
+        $personnelCompleted = EvaluationRequest::query()
             ->where('site_id', $siteId)
             ->where('type', 'satisfaction_personnel')
             ->where('status', 'completed')
             ->where('created_at', '>=', $since)
             ->count();
 
-        $customerAvg = (float) \App\Models\EvaluationResponse::query()
+        $customerAvg = (float) EvaluationResponse::query()
             ->whereHas('request', function ($q) use ($siteId, $since) {
                 $q->where('site_id', $siteId)
                     ->whereIn('type', ['satisfaction_client', 'satisfaction_personnel'])
@@ -739,6 +782,7 @@ class ManagementReviewController extends Controller
             ->filter(function ($row) {
                 $status = strtolower((string) ($row['status'] ?? ''));
                 $achievement = (float) ($row['achievement_percentage'] ?? 0);
+
                 return in_array($status, ['achieved', 'completed', 'done'], true) || $achievement >= 100;
             })
             ->count();
@@ -752,11 +796,12 @@ class ManagementReviewController extends Controller
                 if ($current === null || $target === null) {
                     return false;
                 }
+
                 return $current >= $target;
             })
             ->count();
 
-        $majorNcCount = \App\Models\AuditFinding::query()
+        $majorNcCount = AuditFinding::query()
             ->whereHas('audit', function ($q) use ($siteId, $since) {
                 $q->where('site_id', $siteId)
                     ->where('planned_date', '>=', $since);
@@ -764,14 +809,14 @@ class ManagementReviewController extends Controller
             ->where('type', 'nc_major')
             ->count();
 
-        $providerCompleted = \App\Models\EvaluationRequest::query()
+        $providerCompleted = EvaluationRequest::query()
             ->where('site_id', $siteId)
             ->whereIn('type', ['satisfaction_fournisseur', 'performance_fournisseur'])
             ->where('status', 'completed')
             ->where('created_at', '>=', $since)
             ->count();
 
-        $providerAvg = (float) \App\Models\EvaluationResponse::query()
+        $providerAvg = (float) EvaluationResponse::query()
             ->whereHas('request', function ($q) use ($siteId, $since) {
                 $q->where('site_id', $siteId)
                     ->whereIn('type', ['satisfaction_fournisseur', 'performance_fournisseur'])
@@ -781,10 +826,10 @@ class ManagementReviewController extends Controller
             ->avg('percentage');
 
         $providerCount = $enterpriseId > 0
-            ? \App\Models\ProviderPartner::query()->where('enterprise_id', $enterpriseId)->count()
+            ? ProviderPartner::query()->where('enterprise_id', $enterpriseId)->count()
             : 0;
 
-        $riskOpportunityActions = \App\Models\Action::query()
+        $riskOpportunityActions = Action::query()
             ->where('site_id', $siteId)
             ->where(function ($q) {
                 $q->whereNotNull('risk_id')
@@ -799,6 +844,7 @@ class ManagementReviewController extends Controller
             ->filter(function ($row) {
                 $status = strtolower((string) ($row->status ?? ''));
                 $isClosed = in_array($status, ['completed', 'closed', 'done', 'resolved'], true);
+
                 return $isClosed || (bool) $row->effectiveness_verified;
             })
             ->count();
@@ -808,6 +854,7 @@ class ManagementReviewController extends Controller
         $actionTotal = count($generated['actions']);
         $actionsRealisees = collect($generated['actions'])->filter(function ($act) {
             $st = strtolower((string) ($act['status'] ?? ''));
+
             return in_array($st, ['completed', 'verified', 'closed'], true)
                 || (float) ($act['progress_percentage'] ?? $act['progress'] ?? 0) >= 100;
         })->count();
@@ -985,8 +1032,7 @@ class ManagementReviewController extends Controller
             ->all();
 
         $legacyRole = mb_strtolower((string) ($user->role ?? ''));
-        $isRoleBasedQuality = collect($roleNames)->contains(fn (string $role) =>
-            str_contains($role, 'quality')
+        $isRoleBasedQuality = collect($roleNames)->contains(fn (string $role) => str_contains($role, 'quality')
             || str_contains($role, 'qualit')
             || str_contains($role, 'rq')
         );
@@ -1011,8 +1057,8 @@ class ManagementReviewController extends Controller
             return true;
         }
 
-        if ($user->can('evaluation.revue_direction.' . $action)
-            || $user->can('management_reviews.' . $action)
+        if ($user->can('evaluation.revue_direction.'.$action)
+            || $user->can('management_reviews.'.$action)
             || $user->can('evaluation.revue_direction.update')) {
             return true;
         }

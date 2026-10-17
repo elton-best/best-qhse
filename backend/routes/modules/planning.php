@@ -1,20 +1,21 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use App\Modules\Processes\Controllers\ProcessController;
-use App\Modules\Planning\Controllers\ObjectiveController;
-use App\Modules\Planning\Controllers\RiskController;
-use App\Modules\Planning\Controllers\OpportunityController;
-use App\Modules\Planning\Controllers\SmPlanHierarchicalController;
-use App\Modules\Planning\Controllers\OperationalPlanningController;
-use App\Modules\Planning\Controllers\PlanSMController;
-use App\Modules\Planning\Controllers\ModificationController;
-use App\Modules\Planning\Controllers\OperationalControlController;
-use App\Modules\Planning\Controllers\ProductReleaseController;
-use App\Modules\Planning\Controllers\ProductionOperationController;
+use App\Modules\Improvement\Controllers\PlanController;
 use App\Modules\Planning\Controllers\DesignDevelopmentController;
 use App\Modules\Planning\Controllers\MethodologyGuideController;
-use App\Modules\Improvement\Controllers\PlanController;
+use App\Modules\Planning\Controllers\ModificationController;
+use App\Modules\Planning\Controllers\ObjectiveCommunicationController;
+use App\Modules\Planning\Controllers\ObjectiveController;
+use App\Modules\Planning\Controllers\OperationalControlController;
+use App\Modules\Planning\Controllers\OperationalPlanningController;
+use App\Modules\Planning\Controllers\OpportunityController;
+use App\Modules\Planning\Controllers\PlanSMController;
+use App\Modules\Planning\Controllers\ProductionOperationController;
+use App\Modules\Planning\Controllers\ProductReleaseController;
+use App\Modules\Planning\Controllers\RiskController;
+use App\Modules\Planning\Controllers\SmPlanHierarchicalController;
+use App\Modules\Processes\Controllers\ProcessController;
+use Illuminate\Support\Facades\Route;
 
 // ============================================================
 // CHAPITRE 6 : PLANIFICATION & GESTION DES RISQUES
@@ -28,6 +29,10 @@ Route::get('methodology/matrices/{section}', [MethodologyGuideController::class,
 
 // --- 6.1 Risques & Opportunités ---
 Route::post('processes/{process}/risks-opportunities', [ProcessController::class, 'addRiskOpportunity']);
+
+Route::get('risks-opportunities/examples', function () {
+    return response()->json(['data' => config('environmental_risk_examples')]);
+});
 
 // Endpoints canoniques R&O
 Route::get('risks-opportunities', [ProcessController::class, 'listRisksOpportunities']);
@@ -57,6 +62,11 @@ Route::post('risks/{id}/treat', [RiskController::class, 'treat']);
 Route::post('risks/{id}/mitigate', [RiskController::class, 'mitigate']);
 Route::apiResource('risks', RiskController::class);
 Route::apiResource('opportunities', OpportunityController::class);
+
+Route::get('objective-communications/inbox', [ObjectiveCommunicationController::class, 'inbox']);
+Route::post('objective-communications/{id}/acknowledge', [ObjectiveCommunicationController::class, 'acknowledge'])->whereNumber('id');
+Route::get('objectives/{id}/communications', [ObjectiveCommunicationController::class, 'index'])->whereNumber('id');
+Route::post('objectives/{id}/communications', [ObjectiveCommunicationController::class, 'store'])->whereNumber('id');
 
 // --- 6.2 Objectifs QHSE & Moteur de calcul ---
 Route::get('processes/{process}/objectives', [ProcessController::class, 'getObjectives']);
@@ -146,4 +156,3 @@ Route::get('product-releases/template', [ProductReleaseController::class, 'downl
 Route::post('product-releases/import-xlsx', [ProductReleaseController::class, 'importXlsx']);
 Route::post('product-releases/{productRelease}/validate', [ProductReleaseController::class, 'validateRelease']);
 Route::apiResource('product-releases', ProductReleaseController::class)->parameters(['product-releases' => 'productRelease']);
-

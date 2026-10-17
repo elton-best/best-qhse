@@ -110,7 +110,7 @@ class ReclamationE7WorkflowTest extends TestCase
 
         $this->assertDatabaseHas('notifications', [
             'notifiable_id' => $this->assignee->id,
-            'notifiable_type' => User::class,
+            'notifiable_type' => (new User)->getMorphClass(),
         ]);
 
         $myTasks = $this->actingAs($this->assignee, 'sanctum')

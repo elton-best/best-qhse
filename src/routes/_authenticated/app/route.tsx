@@ -1,3 +1,6 @@
+import { FoundationNotificationItems } from "@/components/app/iso/FoundationNotificationItems";
+import { useFoundationNotifications } from "@/integrations/backend/isoFoundation";
+import { LanguageSelect, useI18n } from "@/lib/i18n";
 import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Bell, Clock, MapPin, Menu, Search, Stamp } from "lucide-react";
@@ -53,6 +56,8 @@ export const Route = createFileRoute("/_authenticated/app")({
 
 function AppLayout() {
   const profile = Route.useLoaderData();
+  const { t } = useI18n();
+  const { data: foundationNotifications = [] } = useFoundationNotifications();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useState(false);
@@ -171,10 +176,15 @@ function AppLayout() {
       )}
 
       <CommandDialog open={searchOpen} onOpenChange={setSearchOpen}>
-        <CommandInput placeholder="Référence (DOC-001, NC-002…) ou intitulé" />
+        <CommandInput
+          placeholder={t(
+            "Référence (DOC-001, NC-002…) ou intitulé",
+            "Reference (DOC-001, NC-002…) or title",
+          )}
+        />
         <CommandList>
-          <CommandEmpty>Aucun résultat.</CommandEmpty>
-          <CommandGroup heading="Enregistrements">
+          <CommandEmpty>{t("Aucun résultat.", "No results.")}</CommandEmpty>
+          <CommandGroup heading={t("Enregistrements", "Records")}>
             {records
               .filter((r) => r.kind !== "norm" && r.kind !== "subscription_request")
               .slice(0, 400)
@@ -200,17 +210,20 @@ function AppLayout() {
           <button
             onClick={() => setMobileOpen(true)}
             className="flex h-10 w-10 items-center justify-center rounded-xl border border-border lg:hidden"
-            aria-label="Ouvrir le menu"
+            aria-label={t("Ouvrir le menu", "Open menu")}
           >
             <Menu className="h-5 w-5" />
           </button>
           <BackButton fallback="/app" />
+          <LanguageSelect />
           <button
             onClick={() => setSearchOpen(true)}
             className="flex h-10 min-w-0 flex-1 items-center gap-3 rounded-full border border-input bg-background px-4 text-left text-sm text-muted-foreground hover:border-primary md:max-w-md"
           >
             <Search className="h-4 w-4 shrink-0 text-primary" />
-            <span className="flex-1 truncate">Rechercher (réf. ou intitulé)…</span>
+            <span className="flex-1 truncate">
+              {t("Rechercher (réf. ou intitulé)…", "Search (reference or title)…")}
+            </span>
             <kbd className="hidden rounded border border-border px-1.5 text-[10px] font-bold sm:inline">
               Ctrl K
             </kbd>
@@ -219,12 +232,12 @@ function AppLayout() {
             <label className="relative flex items-center">
               <MapPin className="pointer-events-none absolute left-3 h-4 w-4 text-primary" />
               <select
-                aria-label="Site actif"
+                aria-label={t("Site actif", "Active site")}
                 value={site}
                 onChange={(e) => setSite(e.target.value)}
                 className="h-10 w-auto min-w-0 max-w-full rounded-xl border border-input bg-background pl-9 pr-3 text-sm font-semibold outline-none focus:border-primary sm:max-w-[200px]"
               >
-                <option value="">Tous les sites</option>
+                <option value="">{t("Tous les sites", "All sites")}</option>
                 {sites.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.title}
@@ -239,23 +252,30 @@ function AppLayout() {
                   aria-label="Notifications"
                 >
                   <Bell className="h-[18px] w-[18px]" />
-                  {alerts.length > 0 && (
+                  {alerts.length + foundationNotifications.length > 0 && (
                     <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">
-                      {alerts.length}
+                      {alerts.length + foundationNotifications.length}
                     </span>
                   )}
                 </button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-[340px] p-0">
                 <p className="border-b border-border px-4 py-3 text-sm font-bold text-foreground">
-                  Alertes urgentes ({alerts.length})
+                  {t("Notifications")} ({alerts.length + foundationNotifications.length})
                 </p>
                 <ul className="max-h-[360px] divide-y divide-border overflow-y-auto">
-                  {alerts.length === 0 && (
+                  {alerts.length + foundationNotifications.length === 0 && (
                     <li className="px-4 py-6 text-center text-sm text-muted-foreground">
-                      Aucune alerte. Tout est à jour.
+                      {t("Aucune alerte. Tout est à jour.", "No alerts. Everything is up to date.")}
                     </li>
                   )}
+                  <FoundationNotificationItems
+                    notifications={foundationNotifications}
+                    onOpen={(section, siteId) => {
+                      if (siteId) setSite(String(siteId));
+                      navigate({ to: "/app/$section", params: { section } });
+                    }}
+                  />
                   {alerts.slice(0, 30).map(({ r, label, tone }) => {
                     const Icon =
                       tone === "danger" ? AlertTriangle : tone === "warn" ? Clock : Stamp;

@@ -51,7 +51,7 @@ class NotificationUnificationTest extends TestCase
         // Vérifier qu'elle est dans la table
         $this->assertDatabaseHas('notifications', [
             'notifiable_id' => $this->user->id,
-            'notifiable_type' => 'App\\Models\\User',
+            'notifiable_type' => $this->user->getMorphClass(),
             'type' => 'App\\Notifications\\SiteEventNotification',
         ]);
     }
@@ -69,7 +69,7 @@ class NotificationUnificationTest extends TestCase
         // Vérifier que la notification est créée dans la table Laravel uniquement
         $this->assertDatabaseHas('notifications', [
             'notifiable_id' => $this->user->id,
-            'notifiable_type' => 'App\\Models\\User',
+            'notifiable_type' => $this->user->getMorphClass(),
         ]);
         $this->assertDatabaseCount('user_notifications', 0);
     }

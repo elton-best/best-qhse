@@ -2,9 +2,6 @@
 
 namespace App\Modules\Enterprise\Controllers;
 
-use App\Models\Enterprise;
-use App\Models\User;
-
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,14 +9,14 @@ use Illuminate\Notifications\DatabaseNotification;
 
 /**
  * UserNotificationController
- * 
+ *
  * Source unique: notifications Laravel.
  */
 class UserNotificationController extends Controller
 {
     /**
      * GET /api/v1/notifications
-     * 
+     *
      * Retourne les notifications Laravel uniquement (tri date décroissante)
      */
     public function index(Request $request): JsonResponse
@@ -30,7 +27,7 @@ class UserNotificationController extends Controller
 
         // 1. Récupérer notifications Laravel
         $laravelNotificationsQuery = DatabaseNotification::where('notifiable_id', $user->id)
-            ->where('notifiable_type', 'App\\Models\\User');
+            ->whereIn('notifiable_type', [$user->getMorphClass(), $user::class, 'App\\Models\\User']);
 
         if ($unreadOnly) {
             $laravelNotificationsQuery->whereNull('read_at');
@@ -56,7 +53,7 @@ class UserNotificationController extends Controller
 
         // Compter les non-lues Laravel
         $unreadCount = DatabaseNotification::where('notifiable_id', $user->id)
-            ->where('notifiable_type', 'App\\Models\\User')
+            ->whereIn('notifiable_type', [$user->getMorphClass(), $user::class, 'App\\Models\\User'])
             ->whereNull('read_at')
             ->count();
 
@@ -75,7 +72,7 @@ class UserNotificationController extends Controller
 
     /**
      * GET /api/v1/notifications/{notificationId}
-     * 
+     *
      * Récupère une notification spécifique (Laravel uniquement)
      */
     public function show(Request $request, string $notificationId): JsonResponse
@@ -84,10 +81,10 @@ class UserNotificationController extends Controller
 
         $notification = DatabaseNotification::where('id', $notificationId)
             ->where('notifiable_id', $user->id)
-            ->where('notifiable_type', 'App\\Models\\User')
+            ->whereIn('notifiable_type', [$user->getMorphClass(), $user::class, 'App\\Models\\User'])
             ->first();
 
-        if (!$notification) {
+        if (! $notification) {
             return response()->json(['message' => 'Notification not found'], 404);
         }
 
@@ -106,7 +103,7 @@ class UserNotificationController extends Controller
 
     /**
      * POST /api/v1/notifications/{notificationId}/read
-     * 
+     *
      * Marquer une notification comme lue
      */
     public function markAsRead(Request $request, string $notificationId): JsonResponse
@@ -115,10 +112,10 @@ class UserNotificationController extends Controller
 
         $notification = DatabaseNotification::where('id', $notificationId)
             ->where('notifiable_id', $user->id)
-            ->where('notifiable_type', 'App\\Models\\User')
+            ->whereIn('notifiable_type', [$user->getMorphClass(), $user::class, 'App\\Models\\User'])
             ->first();
 
-        if (!$notification) {
+        if (! $notification) {
             return response()->json(['message' => 'Notification not found'], 404);
         }
 
@@ -132,7 +129,7 @@ class UserNotificationController extends Controller
 
     /**
      * POST /api/v1/notifications/mark-all-as-read
-     * 
+     *
      * Marquer toutes les notifications Laravel comme lues
      */
     public function markAllAsRead(Request $request): JsonResponse
@@ -141,20 +138,20 @@ class UserNotificationController extends Controller
 
         // 1. Marquer toutes les notifications Laravel comme lues
         $laravelCount = DatabaseNotification::where('notifiable_id', $user->id)
-            ->where('notifiable_type', 'App\\Models\\User')
+            ->whereIn('notifiable_type', [$user->getMorphClass(), $user::class, 'App\\Models\\User'])
             ->whereNull('read_at')
             ->update(['read_at' => now()]);
 
         return response()->json([
             'success' => true,
-            'message' => "Toutes les notifications ont été marquées comme lues",
+            'message' => 'Toutes les notifications ont été marquées comme lues',
             'marked_count' => $laravelCount,
         ]);
     }
 
     /**
      * DELETE /api/v1/notifications/{notificationId}
-     * 
+     *
      * Supprimer une notification Laravel
      */
     public function destroy(Request $request, string $notificationId): JsonResponse
@@ -163,10 +160,10 @@ class UserNotificationController extends Controller
 
         $notification = DatabaseNotification::where('id', $notificationId)
             ->where('notifiable_id', $user->id)
-            ->where('notifiable_type', 'App\\Models\\User')
+            ->whereIn('notifiable_type', [$user->getMorphClass(), $user::class, 'App\\Models\\User'])
             ->first();
 
-        if (!$notification) {
+        if (! $notification) {
             return response()->json(['message' => 'Notification not found'], 404);
         }
 
@@ -180,7 +177,7 @@ class UserNotificationController extends Controller
 
     /**
      * POST /api/v1/notifications/{type}/mark-type-as-read
-     * 
+     *
      * Marquer toutes les notifications d'un type comme lues
      */
     public function markTypeAsRead(Request $request, string $type): JsonResponse
@@ -189,7 +186,7 @@ class UserNotificationController extends Controller
 
         // Marquer les notifications Laravel du type
         DatabaseNotification::where('notifiable_id', $user->id)
-            ->where('notifiable_type', 'App\\Models\\User')
+            ->whereIn('notifiable_type', [$user->getMorphClass(), $user::class, 'App\\Models\\User'])
             ->where('type', $type)
             ->whereNull('read_at')
             ->update(['read_at' => now()]);

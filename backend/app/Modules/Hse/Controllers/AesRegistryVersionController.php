@@ -19,7 +19,7 @@ class AesRegistryVersionController extends Controller
     use ScopesToUserTenant;
 
     private const TRACKED = ['aspect_number', 'activity', 'aspect', 'impact', 'gravity', 'frequency', 'sensitivity', 'mastery',
-        'criticality_score', 'is_significant', 'significance_basis', 'status', 'existing_controls', 'additional_actions'];
+        'criticality_score', 'is_significant', 'significance_basis', 'status', 'existing_controls', 'additional_actions', 'group_label', 'group_members', 'group_characteristics'];
 
     public function __construct(private readonly AesSignificanceService $significance) {}
 

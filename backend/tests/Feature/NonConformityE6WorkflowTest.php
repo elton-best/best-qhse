@@ -114,7 +114,7 @@ class NonConformityE6WorkflowTest extends TestCase
 
         $this->assertDatabaseHas('notifications', [
             'notifiable_id' => $this->responsible->id,
-            'notifiable_type' => User::class,
+            'notifiable_type' => (new User)->getMorphClass(),
         ]);
 
         $this->actingAs($this->manager, 'sanctum')

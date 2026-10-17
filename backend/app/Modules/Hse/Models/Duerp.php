@@ -5,15 +5,15 @@ namespace App\Modules\Hse\Models;
 use App\Models\Enterprise;
 use App\Models\Site;
 use App\Models\User;
+use App\Modules\Processes\Models\Process;
 use App\Traits\HasAuditFields;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use App\Modules\Processes\Models\Process;
 
 class Duerp extends Model
 {
-    use HasFactory, SoftDeletes, HasAuditFields;
+    use HasAuditFields, HasFactory, SoftDeletes;
 
     protected $table = 'duerp';
 
@@ -39,6 +39,14 @@ class Duerp extends Model
         'rejected_by',
         'rejected_at',
         'rejection_reason',
+        'revision_reason',
+        'previous_version_id',
+        'participants',
+        'consultation_notes',
+        'methodology_notes',
+        'update_required',
+        'update_reason',
+        'update_flagged_at',
     ];
 
     protected $casts = [
@@ -49,6 +57,9 @@ class Duerp extends Model
         'verified_at' => 'datetime',
         'approved_at' => 'datetime',
         'rejected_at' => 'datetime',
+        'participants' => 'array',
+        'update_required' => 'boolean',
+        'update_flagged_at' => 'datetime',
     ];
 
     public function enterprise()
@@ -96,4 +107,3 @@ class Duerp extends Model
         return $this->hasMany(DuerpDanger::class, 'duerp_id');
     }
 }
-

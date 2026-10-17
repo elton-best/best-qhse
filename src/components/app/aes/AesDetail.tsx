@@ -100,6 +100,8 @@ export function AesDetail({
           </Row>
           <Row label="Risque associé">{aspect.risk}</Row>
           <Row label="Regroupement">{aspect.group_label}</Row>
+          <Row label="Activités ou produits regroupés">{aspect.group_members?.join(" · ")}</Row>
+          <Row label="Caractéristiques communes">{aspect.group_characteristics}</Row>
           <Row label="Cotation G · F · S · M">
             {aspect.criticality_score === null ? "Non cotée" : `${aspect.gravity} · ${aspect.frequency} · ${aspect.sensitivity} · ${aspect.mastery}`}
           </Row>
